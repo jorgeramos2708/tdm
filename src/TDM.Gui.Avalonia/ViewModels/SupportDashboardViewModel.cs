@@ -1,3 +1,4 @@
+using System.Text;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -36,6 +37,10 @@ public partial class SupportDashboardViewModel : ObservableObject
     [ObservableProperty] private bool _isDetailVisible;
     private string _servicesFullDetail = "Sin datos de servicios o dependencias.";
     private string _modulesFullDetail = "Sin datos de módulos TSplus.";
+    private string _sessionsFullDetail = "Sin datos de sesiones.";
+    private string _incidentsFullDetail = "Sin incidentes en la ventana.";
+    private IReadOnlyList<ObservabilityIncident> _incidents = [];
+    private IReadOnlyList<ObservabilityIncident> _sessionIncidents = [];
 
     public void Apply(IReadOnlyList<ObservabilitySample> samples)
     {
@@ -72,17 +77,17 @@ public partial class SupportDashboardViewModel : ObservableObject
 
         var stoppedNames = services
             .Where(x => DashboardRules.OperationalStateLevel(x.Value) >= 3)
-            .Select(x => $"Servicio: {DashboardRules.SanitizeVisibleText(x.Key)}")
+            .Select(x => $"Servicio {DashboardRules.SanitizeVisibleText(x.Key)} ({DescribeState(x.Value)})")
             .Concat(dependencies
                 .Where(x => DashboardRules.OperationalStateLevel(x.Value) >= 3)
-                .Select(x => $"Dependencia: {DashboardRules.SanitizeVisibleText(x.Key)}"))
+                .Select(x => $"Dependencia {DashboardRules.SanitizeVisibleText(x.Key)} ({DescribeState(x.Value)})"))
             .ToList();
         var reviewNames = services
             .Where(x => DashboardRules.OperationalStateLevel(x.Value) is 0 or 2)
-            .Select(x => $"Servicio: {DashboardRules.SanitizeVisibleText(x.Key)}")
+            .Select(x => $"Servicio {DashboardRules.SanitizeVisibleText(x.Key)} ({DescribeState(x.Value)})")
             .Concat(dependencies
                 .Where(x => DashboardRules.OperationalStateLevel(x.Value) is 0 or 2)
-                .Select(x => $"Dependencia: {DashboardRules.SanitizeVisibleText(x.Key)}"))
+                .Select(x => $"Dependencia {DashboardRules.SanitizeVisibleText(x.Key)} ({DescribeState(x.Value)})"))
             .ToList();
 
         ServiceValue = total == 0 ? "N/D" : $"{healthy}/{total}";
@@ -134,7 +139,12 @@ public partial class SupportDashboardViewModel : ObservableObject
             ? "Sin datos de módulos TSplus."
             : $"Módulos con error o estado crítico: {affectedModules.Count}/{modules.Count}. " +
               $"Críticos: {criticalModules.Count}. Con error: {errorModules.Count}. " +
-              (affectedModules.Count == 0 ? "No hay módulos afectados." : $"Módulos afectados: {string.Join(", ", affectedModules)}.");
+              (affectedModules.Count == 0 ? "No hay módulos afectados." : $"Módulos afectados: {string.Join(", ", affectedModules)}.") +
+              (affectedModules.Count == 0
+                  ? string.Empty
+                  : $" Estados: {string.Join(" · ", modules
+                      .Where(x => affectedModules.Contains(DashboardRules.CompactModuleName(x.Key)))
+                      .Select(x => $"{DashboardRules.CompactModuleName(x.Key)}: {DashboardRules.NormalizeHealthDetail(x.Value)}"))}.");
 
         var sessionIncidents = incidents.Where(DashboardRules.IsSessionIncident).ToList();
         SessionValue = (latest.ActiveSessions + latest.DisconnectedSessions).ToString();
@@ -155,13 +165,18 @@ public partial class SupportDashboardViewModel : ObservableObject
         IncidentSummary = incidents.Count == 0
             ? "Sin incidentes en la ventana"
             : string.Join(" · ", incidents.GroupBy(x => x.Kind, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).Take(2).Select(g => $"{g.Key}: {g.Count()}"));
+
+        _incidents = incidents;
+        _sessionIncidents = sessionIncidents;
+        _sessionsFullDetail = BuildSessionsDetail();
+        _incidentsFullDetail = BuildIncidentsDetail();
         RefreshVisibleDetail();
     }
 
     [RelayCommand] private void ShowServicesDetail() => ShowDetail(ServicesDetailTitle, _servicesFullDetail);
     [RelayCommand] private void ShowModulesDetail() => ShowDetail(ModulesDetailTitle, _modulesFullDetail);
-    [RelayCommand] private void ShowSessionsDetail() => ShowDetail("Sesiones", $"Total observadas: {SessionValue}. {SessionCounts}. {SessionSummary}. {SessionCoverage}.");
-    [RelayCommand] private void ShowIncidentsDetail() => ShowDetail("Incidentes", $"Total: {IncidentValue}. Críticos: {CriticalIncidents}. Error: {ErrorIncidents}. {IncidentSummary}");
+    [RelayCommand] private void ShowSessionsDetail() => ShowDetail("Sesiones", _sessionsFullDetail);
+    [RelayCommand] private void ShowIncidentsDetail() => ShowDetail("Incidentes", _incidentsFullDetail);
     [RelayCommand] private void CloseDetail() => IsDetailVisible = false;
 
     private void ShowDetail(string title, string text)
@@ -176,9 +191,78 @@ public partial class SupportDashboardViewModel : ObservableObject
         if (!IsDetailVisible) return;
         if (DetailTitle.Equals(ServicesDetailTitle, StringComparison.Ordinal)) DetailText = _servicesFullDetail;
         else if (DetailTitle.Equals(ModulesDetailTitle, StringComparison.Ordinal)) DetailText = _modulesFullDetail;
-        else if (DetailTitle.Equals("Sesiones", StringComparison.Ordinal)) DetailText = $"Total observadas: {SessionValue}. {SessionCounts}. {SessionSummary}. {SessionCoverage}.";
-        else if (DetailTitle.Equals("Incidentes", StringComparison.Ordinal)) DetailText = $"Total: {IncidentValue}. Críticos: {CriticalIncidents}. Error: {ErrorIncidents}. {IncidentSummary}";
+        else if (DetailTitle.Equals("Sesiones", StringComparison.Ordinal)) DetailText = _sessionsFullDetail;
+        else if (DetailTitle.Equals("Incidentes", StringComparison.Ordinal)) DetailText = _incidentsFullDetail;
     }
+
+    private string BuildSessionsDetail()
+    {
+        var builder = new StringBuilder();
+        builder.Append($"Total observadas: {SessionValue}. {SessionCounts}. {SessionSummary}. {SessionCoverage}.");
+        if (_sessionIncidents.Count == 0)
+        {
+            builder.AppendLine();
+            builder.Append("Sin incidencias de sesión en la ventana observable.");
+            return builder.ToString();
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("Sesiones con incidencia (revisar en este orden):");
+        foreach (var incident in _sessionIncidents.Take(10))
+        {
+            builder.Append($"• {incident.Timestamp.ToLocalTime():dd/MM HH:mm} · {SeverityLabel(incident.Severity)}");
+            builder.Append($" · {DescribeSubject(incident)} · {incident.Kind}");
+            builder.Append($" — {incident.Summary}");
+            builder.AppendLine();
+        }
+        if (_sessionIncidents.Count > 10)
+            builder.Append($"… y {_sessionIncidents.Count - 10} incidencia(s) más en la ventana.");
+        return builder.ToString().TrimEnd();
+    }
+
+    private string BuildIncidentsDetail()
+    {
+        var builder = new StringBuilder();
+        builder.Append($"Total: {IncidentValue}. Críticos: {CriticalIncidents}. Error: {ErrorIncidents}. {IncidentSummary}");
+        if (_incidents.Count == 0) return builder.ToString();
+
+        var byKind = _incidents
+            .GroupBy(x => x.Kind, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(g => g.Count())
+            .Take(6)
+            .Select(g => $"{g.Key}: {g.Count()}");
+        builder.AppendLine();
+        builder.AppendLine($"Por tipo: {string.Join(" · ", byKind)}.");
+
+        var review = _incidents
+            .Where(x => x.Severity.Equals("Critico", StringComparison.OrdinalIgnoreCase)
+                     || x.Severity.Equals("Crítico", StringComparison.OrdinalIgnoreCase)
+                     || x.Severity.Equals("Error", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (review.Count == 0) review = _incidents.ToList();
+        builder.AppendLine("Elementos a revisar (servicios, procesos y sesiones afectados):");
+        foreach (var incident in review.Take(15))
+        {
+            builder.Append($"• {incident.Timestamp.ToLocalTime():dd/MM HH:mm} · {SeverityLabel(incident.Severity)}");
+            builder.Append($" · {incident.Kind} · {DescribeSubject(incident)}");
+            builder.Append($" — {incident.Summary}");
+            builder.AppendLine();
+        }
+        if (review.Count > 15)
+            builder.Append($"… y {review.Count - 15} elemento(s) más en la ventana.");
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string DescribeSubject(ObservabilityIncident incident)
+        => string.IsNullOrWhiteSpace(incident.Subject)
+            ? DashboardRules.SanitizeVisibleText(incident.Component)
+            : DashboardRules.SanitizeVisibleText(incident.Subject);
+
+    private static string DescribeState(string state)
+        => DashboardRules.LocalizeOperationalText(state);
+
+    private static string SeverityLabel(string severity)
+        => severity.Equals("Critico", StringComparison.OrdinalIgnoreCase) ? "Crítico" : severity;
 
     private void Reset()
     {
@@ -189,6 +273,10 @@ public partial class SupportDashboardViewModel : ObservableObject
         ServiceAccent = ServiceHealthyAccent = ModuleAccent = ModuleHealthyAccent = SessionAccent = SessionIncidentAccent = DashboardPalette.Muted;
         _servicesFullDetail = "Sin datos de servicios o dependencias.";
         _modulesFullDetail = "Sin datos de módulos TSplus.";
+        _incidents = [];
+        _sessionIncidents = [];
+        _sessionsFullDetail = "Sin datos de sesiones.";
+        _incidentsFullDetail = "Sin incidentes en la ventana.";
         SessionValue = IncidentValue = "0";
         SessionSummary = "Sin incidentes de sesión";
         SessionCounts = "Activas: 0 · Desconectadas: 0";

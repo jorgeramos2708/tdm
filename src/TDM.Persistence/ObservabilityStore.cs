@@ -7,7 +7,9 @@ namespace TDM.Persistence;
 
 /// <summary>
 /// Snapshot agregado para los dashboards nativos de TDM.
-/// No contiene nombres de usuario, direcciones IP, mensajes crudos ni credenciales.
+/// No contiene contraseñas, direcciones IP, rutas de perfiles ni mensajes crudos.
+/// Sí conserva el asunto operativo (cuenta, servicio o proceso) en <see cref="Subject"/>
+/// para que el operador identifique qué revisar en los detalles del dashboard.
 /// Se construye exclusivamente a partir de evidencia que TDM ya recopiló.
 /// </summary>
 public sealed record ObservabilityIncident(
@@ -21,7 +23,8 @@ public sealed record ObservabilityIncident(
     string? EvidenceFile = null,
     string CapturedBy = "TDM",
     string? Product = null,
-    string? Classification = null);
+    string? Classification = null,
+    string? Subject = null);
 
 public sealed record ObservabilitySample
 {
@@ -372,7 +375,8 @@ public sealed class ObservabilityStore
                     e.Producto.ToString(),
                     EvidenceValue(e, "Correlación funcional")?.Equals("Confirmada", StringComparison.OrdinalIgnoreCase) == true
                         ? "IdentityCorrelated"
-                        : "Funcional");
+                        : "Funcional",
+                    IncidentSubject(e));
             })
             .ToList();
         return CollapseBursts(ObservabilityIncidentPolicy.Normalize(incidents)
@@ -405,7 +409,8 @@ public sealed class ObservabilityStore
                     Timestamp = item.Timestamp,
                     Severity = MaxBurstSeverity(last.Severity, item.Severity),
                     Summary = $"{StripBurstSuffix(item.Summary)} (ráfaga ×{count}/60s)",
-                    EvidenceId = item.EvidenceId
+                    EvidenceId = item.EvidenceId,
+                    Subject = item.Subject ?? last.Subject
                 };
             }
             else output.Add(item);
@@ -516,16 +521,50 @@ public sealed class ObservabilityStore
         => int.TryParse(EvidenceValue(resources, key), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : 0;
 
 
-    private static string? SanitizeAggregateLabel(string? value)
+    private static string? SanitizeAggregateLabel(string? value) => SanitizeLabel(value, maskIdentity: true);
+
+    /// <summary>
+    /// El asunto del incidente (cuenta, servicio o proceso) se conserva para que el operador
+    /// sepa qué revisar; siguen enmascarados IP, correo y rutas de perfil.
+    /// </summary>
+    private static string? SanitizeSubjectLabel(string? value) => SanitizeLabel(value, maskIdentity: false);
+
+    private static string? SanitizeLabel(string? value, bool maskIdentity)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
         var sanitized = TdmVisibleText.Sanitize(value);
         sanitized = Regex.Replace(sanitized, @"\b(?:\d{1,3}\.){3}\d{1,3}\b", "[IP]", RegexOptions.CultureInvariant);
-        sanitized = Regex.Replace(sanitized, @"\b[A-Za-z0-9._-]{1,}\\[A-Za-z0-9._ -]{2,}\b", "[IDENTIDAD]", RegexOptions.CultureInvariant);
-        sanitized = Regex.Replace(sanitized, @"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", "[IDENTIDAD]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        sanitized = Regex.Replace(sanitized, @"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z]{2,}\b", "[IDENTIDAD]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         sanitized = Regex.Replace(sanitized, @"(?i)([A-Z]:\\Users\\)[^\\/\s]+", "$1[IDENTIDAD]", RegexOptions.CultureInvariant);
+        if (maskIdentity)
+            sanitized = Regex.Replace(sanitized, @"\b[A-Za-z0-9._-]{1,}\\[A-Za-z0-9._ -]{2,}\b", "[IDENTIDAD]", RegexOptions.CultureInvariant);
         return sanitized.Length <= 160 ? sanitized : sanitized[..160];
     }
+
+    private static string? IncidentSubject(DiagnosticEvent e)
+    {
+        var user = FirstEvidence(e, "Usuario", "Account", "Cuenta", "UserName");
+        if (!string.IsNullOrWhiteSpace(user))
+        {
+            var domain = FirstEvidence(e, "Dominio", "Domain");
+            var identity = string.IsNullOrWhiteSpace(domain) || user.Contains('\\')
+                ? user
+                : $"{domain}\\{user}";
+            return SanitizeSubjectLabel(identity);
+        }
+
+        var service = FirstEvidence(e, "Servicio", "Service", "ServiceName");
+        if (!string.IsNullOrWhiteSpace(service)) return SanitizeSubjectLabel(service);
+
+        var process = FirstEvidence(e, "Proceso", "Process", "ProcessName", "Aplicación", "Application");
+        if (!string.IsNullOrWhiteSpace(process)) return SanitizeSubjectLabel(process);
+
+        return null;
+    }
+
+    private static string? FirstEvidence(DiagnosticEvent e, params string[] keys)
+        => keys.Select(k => EvidenceValue(e, k))
+            .FirstOrDefault(v => !string.IsNullOrWhiteSpace(v) && !v.Equals("N/D", StringComparison.OrdinalIgnoreCase));
 
     private static string? EvidenceValue(DiagnosticEvent? e, string key)
         => e?.Evidencia?.FirstOrDefault(x => x.Clave.Equals(key, StringComparison.OrdinalIgnoreCase))?.Valor;

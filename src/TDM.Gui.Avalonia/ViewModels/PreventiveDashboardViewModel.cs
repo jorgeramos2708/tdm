@@ -76,8 +76,8 @@ public partial class PreventiveDashboardViewModel : ObservableObject
         ModuleAccent = module.Brush;
 
         var chartSamples = DashboardRules.ChartSamples(samples);
-        CpuSeries = chartSamples.Select(x => x.CpuPercent ?? double.NaN).ToArray();
-        MemoryUsedSeries = chartSamples.Select(x => x.MemoryFreePercent.HasValue ? 100d - x.MemoryFreePercent.Value : double.NaN).ToArray();
+        CpuSeries = DashboardRules.ContinuousSeries(chartSamples, x => x.CpuPercent);
+        MemoryUsedSeries = DashboardRules.ContinuousSeries(chartSamples, x => x.MemoryFreePercent.HasValue ? 100d - x.MemoryFreePercent.Value : null);
         CpuValue = cpuLatest.CpuPercent.HasValue ? $"{cpuLatest.CpuPercent.Value:0.0}%" : "N/D";
         MemoryValue = memoryLatest.MemoryFreePercent.HasValue ? $"{100d - memoryLatest.MemoryFreePercent.Value:0.0}% usada" : "N/D";
 

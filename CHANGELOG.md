@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Barra de estado**: se eliminó por completo la tarjeta del pie de la pestaña Logs (texto "Arrastre para seleccionar · Ctrl+C para copiar").
 - **Segunda instancia**: al abrir TDM con otra instancia en ejecución, la nueva ventana salía con el error "Dispatcher shut down" (código 0xE0434352). Ahora la segunda instancia termina limpia (código 0).
 
+### Added — Centro de Soporte, diagnóstico y gráficas (solicitud de mejora)
+
+- **Detalle de Incidentes**: además de los conteos, lista los elementos a revisar (hora, severidad, tipo, asunto y resumen) ordenados por severidad, con desglose por tipo de incidente.
+- **Detalle de Sesiones**: lista las sesiones/incidencias con la cuenta o sesión afectada (`ObservabilityIncident.Subject`), hora, tipo y resumen, para saber qué usuario revisar. IP, correo y rutas de perfil siguen enmascarados.
+- **Servicios y dependencias**: el detalle incluye ahora el estado localizado de cada elemento detenido o pendiente de revisión (por ejemplo `Servicio TSplusGateway (Detenido)`).
+- **Módulos TSplus**: el detalle añade el estado normalizado de cada módulo afectado.
+- **Resumen técnico de Diagnóstico**: nueva sección "Elementos a revisar" con servicios no operativos, dependencias caídas, procesos con crash y sesiones/usuarios con incidencia en la ventana.
+- **Asunto en incidentes persistidos**: `ObservabilityIncident` incorpora `Subject` (cuenta, servicio o proceso) extraído de la evidencia, para que los detalles del dashboard indiquen qué revisar.
+- **Gráficas sin líneas "mordidas"**: `DashboardRules.ContinuousSeries` completa los huecos de CPU/memoria/red con el último valor conocido en lugar de dejar `NaN` intercalados (serie discontinua en General, Rendimiento, Preventivo y Salud TDM).
+- **Precisión diagnóstica más justa**: una fuente crítica *parcial* ya no penaliza el puntaje como si estuviera bloqueada (sólo el bloqueo duro resta); los incidentes funcionales detectados (servicios, procesos, sesiones) suman hasta 12 puntos y la evidencia nueva expone "Bloqueos duros" e "Incidentes funcionales detectados".
+- **Calibración de candidatos**: el descenso de confianza por cobertura incompleta aplica sólo cuando hay bloqueo duro de una fuente crítica; la cobertura parcial se reporta como limitación.
+
 ### Sprint 2 — Inteligencia Causal y Simulación What-If
 
 #### S2.1 — Grafo Causal Temporal (`TemporalCausalGraph.cs`)

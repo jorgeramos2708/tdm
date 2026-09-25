@@ -67,8 +67,8 @@ public partial class TdmHealthDashboardViewModel : ObservableObject
 
         var chartSamples = DashboardRules.ChartSamples(samples);
         DurationSeries = chartSamples.Select(x => x.DiagnosticDurationMs).ToArray();
-        CpuSeries = chartSamples.Select(x => x.TdmCpuPercent ?? double.NaN).ToArray();
-        RamSeries = chartSamples.Select(x => TdmMemoryPercent(x.TdmWorkingSetMb, x.MemoryTotalBytes ?? physicalMemoryBytes) ?? double.NaN).ToArray();
+        CpuSeries = DashboardRules.ContinuousSeries(chartSamples, x => x.TdmCpuPercent);
+        RamSeries = DashboardRules.ContinuousSeries(chartSamples, x => TdmMemoryPercent(x.TdmWorkingSetMb, x.MemoryTotalBytes ?? physicalMemoryBytes));
         HandlesSeries = chartSamples.Select(x => (double)x.TdmHandleCount).ToArray();
         ThreadsSeries = chartSamples.Select(x => (double)x.TdmThreadCount).ToArray();
         TimeLabels = chartSamples.Select(x => x.Timestamp.ToLocalTime().ToString("dd/MM HH:mm:ss")).ToArray();

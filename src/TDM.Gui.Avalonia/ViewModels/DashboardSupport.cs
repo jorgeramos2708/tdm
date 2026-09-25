@@ -184,6 +184,28 @@ internal static class DashboardRules
         return result;
     }
 
+    /// <summary>
+    /// Serie continua para las gráficas: los huecos de una métrica (muestras sin CPU,
+    /// primer ciclo con baseline de GetSystemTimes, etc.) se completan con el último
+    /// valor conocido para que la línea no se vea "mordida" por NaN intercalados.
+    /// Si no existe ningún valor, se devuelve todo NaN y la gráfica queda vacía.
+    /// </summary>
+    public static IReadOnlyList<double> ContinuousSeries(
+        IReadOnlyList<ObservabilitySample> samples,
+        Func<ObservabilitySample, double?> selector)
+    {
+        var values = new double[samples.Count];
+        var last = double.NaN;
+        for (var i = 0; i < samples.Count; i++)
+        {
+            var value = selector(samples[i]);
+            if (value.HasValue && !double.IsNaN(value.Value)) last = value.Value;
+            values[i] = last;
+        }
+
+        return values;
+    }
+
     public static IBrush StateBrush(string state)
         => OperationalStateLevel(state) switch
         {

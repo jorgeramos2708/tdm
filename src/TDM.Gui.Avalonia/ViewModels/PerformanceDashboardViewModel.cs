@@ -44,10 +44,10 @@ public partial class PerformanceDashboardViewModel : ObservableObject
             : "↑ N/D Mbps";
 
         var chartSamples = DashboardRules.ChartSamples(samples);
-        CpuSeries = chartSamples.Select(s => s.CpuPercent ?? double.NaN).ToArray();
-        MemorySeries = chartSamples.Select(s => s.MemoryFreePercent.HasValue ? 100d - s.MemoryFreePercent.Value : double.NaN).ToArray();
-        NetworkRxSeries = chartSamples.Select(s => s.NetworkReceiveMbps.GetValueOrDefault()).ToArray();
-        NetworkTxSeries = chartSamples.Select(s => s.NetworkSendMbps.GetValueOrDefault()).ToArray();
+        CpuSeries = DashboardRules.ContinuousSeries(chartSamples, s => s.CpuPercent);
+        MemorySeries = DashboardRules.ContinuousSeries(chartSamples, s => s.MemoryFreePercent.HasValue ? 100d - s.MemoryFreePercent.Value : null);
+        NetworkRxSeries = DashboardRules.ContinuousSeries(chartSamples, s => s.NetworkReceiveMbps);
+        NetworkTxSeries = DashboardRules.ContinuousSeries(chartSamples, s => s.NetworkSendMbps);
         TimeLabels = chartSamples.Select(s => s.Timestamp.ToLocalTime().ToString("dd/MM HH:mm:ss")).ToArray();
 
         NetworkMaximum = Math.Max(1d, samples

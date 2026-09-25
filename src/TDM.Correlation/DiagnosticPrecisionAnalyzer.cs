@@ -17,6 +17,7 @@ public static class DiagnosticPrecisionAnalyzer
         if (candidates.Count == 0) return candidates;
 
         var coverageComplete = CoverageBlockedSources(report) == 0;
+        var hardBlocked = CoverageHardBlockedSources(report) > 0;
         var conflict = HasOriginConflict(candidates);
         var calibrated = new List<RootCauseCandidate>(candidates.Count);
 
@@ -27,7 +28,9 @@ public static class DiagnosticPrecisionAnalyzer
             var reasons = new List<string>();
             var independent = HasIndependentPrimaryEvidence(candidate);
 
-            if (!coverageComplete)
+            // Sólo un bloqueo duro (fuente ilegible) degrada la confianza. Una fuente
+            // parcial conserva la evidencia que sí se leyó y se reporta como limitación.
+            if (hardBlocked)
             {
                 if (confidence == ConfidenceLevel.Confirmada)
                 {
@@ -68,7 +71,8 @@ public static class DiagnosticPrecisionAnalyzer
             var evidence = candidate.Evidencia.ToList();
             evidence.Add(new EvidenceItem("Calibración de precisión RC18.14.3",
                 reasons.Count == 0 ? "Sin penalizaciones; evidencia coherente con el estado actual" : string.Join("; ", reasons)));
-            evidence.Add(new EvidenceItem("Cobertura crítica legible", coverageComplete ? "Sí" : "No"));
+            evidence.Add(new EvidenceItem("Cobertura crítica legible", hardBlocked ? "No" : "Sí"));
+            evidence.Add(new EvidenceItem("Cobertura crítica completa", coverageComplete ? "Sí" : "No"));
             evidence.Add(new EvidenceItem("Conflicto entre orígenes fuertes", conflict ? "Sí" : "No"));
             if (!evidence.Any(e => e.Clave.Equals("Evidencia primaria independiente", StringComparison.OrdinalIgnoreCase)))
                 evidence.Add(new EvidenceItem("Evidencia primaria independiente", independent ? "Sí" : "No"));
@@ -119,6 +123,7 @@ public static class DiagnosticPrecisionAnalyzer
     public static DiagnosticPrecisionAssessment Analyze(DiagnosticReport report)
     {
         var blockedSources = CoverageBlockedSources(report);
+        var hardBlockedSources = CoverageHardBlockedSources(report);
         var coverageComplete = blockedSources == 0;
         var signals = report.Eventos.Count(IsCausalSignal);
         var context = report.Eventos.Count(e => !IsCurrentState(e) && !IsCausalSignal(e));
@@ -130,13 +135,18 @@ public static class DiagnosticPrecisionAnalyzer
         var independent = best is not null && HasIndependentPrimaryEvidence(best);
         var conflict = HasOriginConflict(report.CausasRaiz);
         var forensicArtifacts = report.Eventos.Count(e => e.Tipo is "FORENSIC_WER_FOUND" or "FORENSIC_DUMP_FOUND" or "FORENSIC_LOG_FOUND");
+        // Incidentes funcionales = evidencia operativa verificable (servicios caídos,
+        // procesos con crash, sesiones/identidad correlacionada) ya detectada por TDM.
+        var operationalIncidents = report.Eventos.Count(DiagnosticEventCatalog.IsFunctionalIncident);
 
         var score = 25;
-        score += coverageComplete ? 15 : -10;
+        // Fuente parcial sigue siendo cobertura útil; sólo un bloqueo duro castiga.
+        score += coverageComplete ? 15 : hardBlockedSources == 0 ? 2 : -10;
         if (best is not null) score += 18;
         if (best?.HoraIncidente is not null) score += 5;
         if (independent) score += 15;
         score += Math.Min(15, signals * 3);
+        score += Math.Min(12, operationalIncidents * 2);
         if (forensicArtifacts > 0) score += 5;
         if (conflict) score -= 15;
         if (undated > 0) score -= Math.Min(8, undated * 2);
@@ -152,14 +162,16 @@ public static class DiagnosticPrecisionAnalyzer
         };
 
         var summary = best is null
-            ? "No existe candidato causal en la ventana visible; la calidad mide cobertura y evidencia disponible, no una causa inexistente."
+            ? "No existe candidato causal en la ventana visible; la calidad mide cobertura, evidencia operativa detectada y señales disponibles, no una causa inexistente."
             : conflict
                 ? "La evidencia contiene candidatos fuertes de orígenes distintos; TDM conserva el conflicto y evita una conclusión prematura."
-                : !coverageComplete
+                : hardBlockedSources > 0
                     ? "Existe un candidato, pero una o más fuentes críticas no pudieron leerse; el diagnóstico se mantiene conservador."
-                    : independent
-                        ? "Cobertura legible y evidencia primaria independiente respaldan el candidato principal."
-                        : "La evidencia converge, pero todavía falta una fuente causal independiente para confirmar la causa primaria.";
+                    : !coverageComplete
+                        ? "Existe un candidato con cobertura parcial en fuentes críticas; las conclusiones conservan esa limitación."
+                        : independent
+                            ? "Cobertura legible y evidencia primaria independiente respaldan el candidato principal."
+                            : "La evidencia converge, pero todavía falta una fuente causal independiente para confirmar la causa primaria.";
 
         var evidence = new List<EvidenceItem>
         {
@@ -167,7 +179,9 @@ public static class DiagnosticPrecisionAnalyzer
             new("Nivel de calidad", level),
             new("Cobertura crítica completa", coverageComplete ? "Sí" : "No"),
             new("Fuentes bloqueadas/no legibles", blockedSources.ToString()),
+            new("Bloqueos duros de fuentes críticas", hardBlockedSources.ToString()),
             new("Señales causales/operativas", signals.ToString()),
+            new("Incidentes funcionales detectados", operationalIncidents.ToString()),
             new("Eventos de contexto/telemetría", context.ToString()),
             new("Evidencia sin timestamp utilizable", undated.ToString()),
             new("Conflicto entre orígenes fuertes", conflict ? "Sí" : "No"),
@@ -223,6 +237,9 @@ public static class DiagnosticPrecisionAnalyzer
 
     private static int CoverageBlockedSources(DiagnosticReport report)
         => DiagnosticCoverageAnalyzer.CriticalUnavailableCount(report);
+
+    private static int CoverageHardBlockedSources(DiagnosticReport report)
+        => DiagnosticCoverageAnalyzer.CriticalHardBlockedCount(report);
 
     private static bool HasOriginConflict(IReadOnlyList<RootCauseCandidate> candidates)
     {

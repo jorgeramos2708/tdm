@@ -556,8 +556,89 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
             foreach (var finding in serious)
                 sb.AppendLine($"Severidad: {SeverityLabel(finding.Severidad)} | Componente: {finding.Componente} | Resumen: {finding.Resumen}");
         }
+
+        var reviewTargets = BuildReviewTargets(report);
+        if (reviewTargets.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Elementos a revisar:");
+            foreach (var target in reviewTargets) sb.AppendLine("• " + target);
+        }
         return sb.ToString().TrimEnd();
     }
+
+    private static IReadOnlyList<string> BuildReviewTargets(DiagnosticReport report)
+    {
+        var targets = new List<string>();
+
+        var services = report.Eventos
+            .Where(e => e.Tipo.Equals("SERVICE_STATE", StringComparison.OrdinalIgnoreCase))
+            .Select(e => new
+            {
+                Name = EventEvidence(e, "Servicio") ?? e.Componente,
+                State = EventEvidence(e, "Estado presentación") ?? EventEvidence(e, "Estado") ?? e.Mensaje
+            })
+            .Where(x => !string.IsNullOrWhiteSpace(x.Name) && DashboardRules.OperationalStateLevel(x.State) >= 2)
+            .GroupBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Name: g.Key, Level: g.Max(x => DashboardRules.OperationalStateLevel(x.State)), State: g.Last().State))
+            .OrderByDescending(x => x.Level)
+            .Take(6)
+            .ToList();
+        foreach (var service in services)
+            targets.Add($"Servicio: {DashboardRules.SanitizeVisibleText(service.Name)} — {DashboardRules.LocalizeOperationalText(service.State)}");
+
+        var dependencies = report.Eventos
+            .Where(e => e.Tipo is "SERVICE_DEPENDENCY_STATE" or "TSPLUS_WINDOWS_FUNCTIONAL_DEPENDENCY_STATE")
+            .Select(e => new
+            {
+                Name = e.Tipo.Equals("SERVICE_DEPENDENCY_STATE", StringComparison.OrdinalIgnoreCase)
+                    ? $"{EventEvidence(e, "Servicio") ?? EventEvidence(e, "Servicio origen") ?? e.Componente} → {EventEvidence(e, "Dependencia") ?? "N/D"}"
+                    : $"{EventEvidence(e, "Componente TSplus") ?? e.Componente} → {EventEvidence(e, "Dependencia") ?? "N/D"}",
+                State = EventEvidence(e, "Estado dependencia") ?? EventEvidence(e, "Estado") ?? e.Mensaje
+            })
+            .Where(x => DashboardRules.OperationalStateLevel(x.State) >= 2)
+            .GroupBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Name: g.Key, Level: g.Max(x => DashboardRules.OperationalStateLevel(x.State)), State: g.Last().State))
+            .OrderByDescending(x => x.Level)
+            .Take(5)
+            .ToList();
+        foreach (var dependency in dependencies)
+            targets.Add($"Dependencia: {DashboardRules.SanitizeVisibleText(dependency.Name)} — {DashboardRules.LocalizeOperationalText(dependency.State)}");
+
+        var processes = report.Eventos
+            .Where(e => e.Tipo is "APPLICATION_CRASH" or "DOTNET_UNHANDLED_EXCEPTION" or "WER_REPORT"
+                or "TSPLUS_HTML5_JVM_CRASH" or "TSPLUS_CRASH_LOOP_PATTERN")
+            .Select(e => DashboardRules.SanitizeVisibleText(e.Componente))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6);
+        foreach (var process in processes)
+            targets.Add($"Proceso: {process} — crash/reinicio en la ventana");
+
+        var sessions = report.Eventos
+            .Where(e => e.Tipo is "USER_LOGON_FAILURE" or "USER_NLA_PASSWORD_FAILURE" or "ACCOUNT_LOCKOUT"
+                or "KERBEROS_PREAUTH_FAILURE" or "WINDOWS_CREDENTIAL_VALIDATION_FAILURE")
+            .Select(e =>
+            {
+                var user = EventEvidence(e, "Usuario");
+                if (string.IsNullOrWhiteSpace(user) || user.Equals("N/D", StringComparison.OrdinalIgnoreCase))
+                    return (Identity: string.Empty, Tipo: e.Tipo);
+                var domain = EventEvidence(e, "Dominio");
+                var identity = string.IsNullOrWhiteSpace(domain) || user.Contains('\\') ? user : $"{domain}\\{user}";
+                return (Identity: identity, Tipo: e.Tipo);
+            })
+            .Where(x => x.Identity.Length > 0)
+            .GroupBy(x => x.Identity, StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Identity: g.Key, Tipo: g.First().Tipo, Count: g.Count()))
+            .Take(5);
+        foreach (var session in sessions)
+            targets.Add($"Sesión/usuario: {session.Identity} — {session.Tipo} ({session.Count} vez/veces)");
+
+        return targets;
+    }
+
+    private static string? EventEvidence(DiagnosticEvent e, string key)
+        => e.Evidencia?.FirstOrDefault(x => x.Clave.Equals(key, StringComparison.OrdinalIgnoreCase))?.Valor;
 
     private static string BuildRootCause(DiagnosticReport report)
     {

@@ -97,6 +97,17 @@ public static class DiagnosticCoverageAnalyzer
         return assessment.Fuentes.Count(s => s.Critica && s.Estado is not "Disponible" and not "No aplica");
     }
 
+    /// <summary>
+    /// Fuentes críticas realmente bloqueadas: sin ellas no hay evidencia utilizable.
+    /// Una fuente "Parcial" o "No consultado" sigue aportando lectura parcial y no debe
+    /// castigar el puntaje de precisión como si la fuente no existiera.
+    /// </summary>
+    public static int CriticalHardBlockedCount(DiagnosticReport report)
+    {
+        var assessment = report.CoberturaDiagnostica ?? Analyze(report);
+        return assessment.Fuentes.Count(s => s.Critica && s.Estado is "No disponible" or "Bloqueada" or "Timeout");
+    }
+
     private static void AddWindowsForensic(DiagnosticReport report, List<CoverageSourceAssessment> sources, List<string> limitations)
     {
         var coverage = report.Eventos.LastOrDefault(e => e.Tipo == "WINDOWS_FORENSIC_COVERAGE");

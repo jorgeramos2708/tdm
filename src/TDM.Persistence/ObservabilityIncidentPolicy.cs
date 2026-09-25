@@ -134,6 +134,7 @@ public static class ObservabilityIncidentPolicy
         {
             Component = TdmVisibleText.Sanitize(incident.Component),
             Summary = TdmVisibleText.Sanitize(incident.Summary),
+            Subject = string.IsNullOrWhiteSpace(incident.Subject) ? incident.Subject : TdmVisibleText.Sanitize(incident.Subject),
             EvidenceSource = string.IsNullOrWhiteSpace(incident.EvidenceSource) ? incident.EvidenceSource : TdmVisibleText.Sanitize(incident.EvidenceSource),
             EvidenceId = string.IsNullOrWhiteSpace(incident.EvidenceId) ? incident.EvidenceId : TdmVisibleText.Sanitize(incident.EvidenceId),
             EvidenceFile = string.IsNullOrWhiteSpace(incident.EvidenceFile) ? incident.EvidenceFile : TdmVisibleText.Sanitize(incident.EvidenceFile)

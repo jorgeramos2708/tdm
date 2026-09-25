@@ -35,8 +35,8 @@ public partial class GeneralDashboardViewModel : ObservableObject
         CrashLoops = latest.CrashLoops.ToString();
         Coverage = latest.CoverageScore.HasValue ? $"{latest.CoverageScore}%" : "N/D";
         var chartSamples = DashboardRules.ChartSamples(samples);
-        CpuSeries = chartSamples.Select(x => x.CpuPercent ?? double.NaN).ToArray();
-        MemoryUsedSeries = chartSamples.Select(x => x.MemoryFreePercent.HasValue ? 100d - x.MemoryFreePercent.Value : double.NaN).ToArray();
+        CpuSeries = DashboardRules.ContinuousSeries(chartSamples, x => x.CpuPercent);
+        MemoryUsedSeries = DashboardRules.ContinuousSeries(chartSamples, x => x.MemoryFreePercent.HasValue ? 100d - x.MemoryFreePercent.Value : null);
         Modules = latest.ModuleHealth
             .OrderByDescending(x => DashboardRules.HealthRank(x.Value))
             .ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
