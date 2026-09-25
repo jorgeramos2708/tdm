@@ -16,6 +16,7 @@ public sealed record DiagnosticEventItem(
     string Severity,
     string Origin,
     string Component,
+    string Subject,
     string Type,
     string Message,
     IBrush Accent);
@@ -32,6 +33,7 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
     private bool _automaticStopRequested;
     private bool _manualStopRequested;
     private static readonly TimeSpan DiagnosticCycleInterval = TimeSpan.FromSeconds(5);
+    private const int EventDisplayLimit = 500;
 
     public IReadOnlyList<string> LookbackOptions => _service.LookbackOptions;
     public IReadOnlyList<string> SeverityOptions { get; } = ["Todos", "Crítico", "Error", "Advertencia", "Informativo"];
@@ -50,6 +52,9 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
     [ObservableProperty] private string _selectedLookback = "Tiempo real";
     [ObservableProperty] private string _selectedSeverity = "Todos";
     [ObservableProperty] private string _selectedOrigin = "Todos";
+    [ObservableProperty] private string _eventSearchText = "";
+    [ObservableProperty] private string _eventFilterStatus = "Total: 0 · Filtrados: 0 · Mostrados: 0";
+    [ObservableProperty] private bool _hasNoEvents = true;
     [ObservableProperty] private bool _isRunning;
     [ObservableProperty] private string _executionTimerText = "00:00:00";
     [ObservableProperty] private string _executionTimerLimitText = string.Empty;
@@ -78,6 +83,7 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
     [ObservableProperty] private double _eventOriginWidth = 110;
     [ObservableProperty] private double _eventComponentWidth = 220;
     [ObservableProperty] private double _eventTypeWidth = 210;
+    [ObservableProperty] private double _eventSubjectWidth = 150;
     [ObservableProperty] private double _eventMessageWidth = 640;
 
 
@@ -102,6 +108,7 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
 
     partial void OnSelectedSeverityChanged(string value) => ApplyFilters();
     partial void OnSelectedOriginChanged(string value) => ApplyFilters();
+    partial void OnEventSearchTextChanged(string value) => ApplyFilters();
 
     [RelayCommand]
     private async Task RunDiagnosticAsync()
@@ -486,18 +493,31 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
 
     private void ApplyFilters()
     {
+        var filtered = _allEvents
+            .Where(MatchesSeverity)
+            .Where(MatchesOrigin)
+            .Where(MatchesSearch)
+            .ToList();
+        var shown = filtered.Take(EventDisplayLimit).ToList();
+
         Events.Clear();
-        foreach (var item in _allEvents.Where(MatchesSeverity).Where(MatchesOrigin).Take(500))
+        foreach (var item in shown)
         {
             Events.Add(new DiagnosticEventItem(
-                item.Timestamp?.ToLocalTime().ToString("dd/MM HH:mm:ss") ?? "—",
+                FormatEventTime(item),
                 SeverityLabel(item.Severidad),
                 item.Capa.ToString(),
                 item.Componente,
+                EventSubject(item),
                 item.Tipo,
                 item.Mensaje,
                 SeverityBrush(item.Severidad)));
         }
+
+        EventFilterStatus = filtered.Count > shown.Count
+            ? $"Total: {_allEvents.Count} · Filtrados: {filtered.Count} · Mostrados: {shown.Count} (máx. {EventDisplayLimit})"
+            : $"Total: {_allEvents.Count} · Filtrados: {filtered.Count} · Mostrados: {shown.Count}";
+        HasNoEvents = shown.Count == 0;
     }
 
     private bool MatchesSeverity(DiagnosticEvent item)
@@ -515,6 +535,38 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
 
     private bool MatchesOrigin(DiagnosticEvent item)
         => SelectedOrigin == "Todos" || item.Capa.ToString().Equals(SelectedOrigin, StringComparison.OrdinalIgnoreCase);
+
+    private bool MatchesSearch(DiagnosticEvent item)
+    {
+        var term = EventSearchText.Trim();
+        if (term.Length == 0) return true;
+        return item.Mensaje.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || item.Componente.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || item.Tipo.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || (item.Codigo?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+            || EventSubject(item).Contains(term, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FormatEventTime(DiagnosticEvent item)
+        => item.Timestamp?.ToLocalTime().ToString("dd/MM HH:mm:ss")
+           ?? item.IngestedAt?.ToLocalTime().ToString("dd/MM HH:mm:ss")
+           ?? "—";
+
+    private static string EventSubject(DiagnosticEvent item)
+    {
+        var user = EventEvidence(item, "Usuario");
+        if (!string.IsNullOrWhiteSpace(user) && !user.Equals("N/D", StringComparison.OrdinalIgnoreCase))
+        {
+            var domain = EventEvidence(item, "Dominio");
+            var identity = string.IsNullOrWhiteSpace(domain) || user.Contains('\\') ? user : $"{domain}\\{user}";
+            return DashboardRules.SanitizeVisibleText(identity);
+        }
+
+        var service = EventEvidence(item, "Servicio")
+                      ?? EventEvidence(item, "Servicio origen")
+                      ?? EventEvidence(item, "Componente TSplus");
+        return service is null ? string.Empty : DashboardRules.SanitizeVisibleText(service);
+    }
 
     private static string SeverityLabel(DiagnosticSeverity value)
         => value == DiagnosticSeverity.Critico ? "Crítico" : value.ToString();
@@ -555,6 +607,9 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
             sb.AppendLine("Hallazgos destacados:");
             foreach (var finding in serious)
                 sb.AppendLine($"Severidad: {SeverityLabel(finding.Severidad)} | Componente: {finding.Componente} | Resumen: {finding.Resumen}");
+            var seriousTotal = report.Hallazgos.Count(x => x.Severidad is DiagnosticSeverity.Critico or DiagnosticSeverity.Error or DiagnosticSeverity.Advertencia);
+            if (seriousTotal > serious.Count)
+                sb.AppendLine($"… y {seriousTotal - serious.Count} hallazgo(s) destacado(s) más.");
         }
 
         var reviewTargets = BuildReviewTargets(report);
@@ -646,14 +701,48 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
             return "No existe evidencia suficiente para proponer una causa raíz con el criterio actual.";
 
         var sb = new StringBuilder();
-        foreach (var cause in report.CausasRaiz.Take(8))
+        var primary = report.CausaRaizPrincipal;
+        if (primary is not null)
         {
-            sb.AppendLine($"Posición: {cause.Posicion} | Componente: {cause.Componente} | Puntaje: {cause.Puntaje} | Confianza: {cause.Confianza} | Origen: {cause.OrigenClasificado}");
+            sb.AppendLine($"[PRINCIPAL] Causa principal: {primary.Componente} — {primary.Resumen}");
+            sb.AppendLine($"Los botones \"Confirmar causa\" y \"Descartar causa\" aplican a esta candidata (Id: {primary.Id}).");
+            sb.AppendLine();
+        }
+        else
+        {
+            sb.AppendLine("Sin causa principal declarada: ningún candidato alcanza el margen de evidencia y separación requerido.");
+            sb.AppendLine();
+        }
+
+        var shown = report.CausasRaiz.Take(8).ToList();
+        foreach (var cause in shown)
+        {
+            var marker = primary is not null && cause.Id == primary.Id ? "[PRINCIPAL] " : string.Empty;
+            sb.AppendLine($"{marker}Posición: {cause.Posicion} | Componente: {cause.Componente} | Puntaje: {cause.Puntaje} | Confianza: {cause.Confianza} | Origen: {cause.OrigenClasificado} | Capa: {cause.Capa} | Rol: {cause.RolCausal}");
+            if (cause.HoraIncidente.HasValue)
+                sb.AppendLine($"Hora del incidente: {cause.HoraIncidente.Value.ToLocalTime():dd/MM HH:mm:ss}");
             sb.AppendLine($"Resumen: {cause.Resumen}");
             sb.AppendLine($"Explicación: {cause.Explicacion}");
             if (!string.IsNullOrWhiteSpace(cause.SolucionSugerida)) sb.AppendLine("Sugerencia: " + cause.SolucionSugerida);
+            if (cause.Evidencia.Count > 0)
+            {
+                sb.AppendLine("Evidencia:");
+                foreach (var evidence in cause.Evidencia.Take(4))
+                    sb.AppendLine($"• {evidence.Clave}: {DashboardRules.SanitizeVisibleText(evidence.Valor)}");
+                if (cause.Evidencia.Count > 4)
+                    sb.AppendLine($"• … y {cause.Evidencia.Count - 4} evidencia(s) más (ver reporte exportado)");
+            }
+            if (!string.IsNullOrWhiteSpace(cause.FuenteOficial))
+            {
+                sb.AppendLine(string.IsNullOrWhiteSpace(cause.UrlOficial)
+                    ? $"Fuente oficial: {cause.FuenteOficial}"
+                    : $"Fuente oficial: {cause.FuenteOficial} — {cause.UrlOficial}");
+            }
             sb.AppendLine();
         }
+
+        if (report.CausasRaiz.Count > shown.Count)
+            sb.AppendLine($"… y {report.CausasRaiz.Count - shown.Count} candidato(s) más sin mostrar.");
         return sb.ToString().TrimEnd();
     }
 
@@ -686,26 +775,64 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
     {
         if (report.PatronesFalla.Count == 0) return "No se detectaron patrones de falla recurrentes en la ventana.";
         var sb = new StringBuilder();
-        foreach (var pattern in report.PatronesFalla.Take(20))
+        var shown = report.PatronesFalla.Take(20).ToList();
+        foreach (var pattern in shown)
         {
             sb.AppendLine($"Componente: {pattern.Componente} | Incidentes: {pattern.Incidentes} | Estado: {pattern.EstadoInvestigacion}");
             sb.AppendLine($"Origen: {pattern.OrigenClasificado} | Primera detección: {pattern.PrimeraDeteccion.ToLocalTime():dd/MM HH:mm:ss} | Última detección: {pattern.UltimaDeteccion.ToLocalTime():dd/MM HH:mm:ss}");
+            if (!string.IsNullOrWhiteSpace(pattern.ComponenteSemantico)) sb.AppendLine($"Componente semántico: {pattern.ComponenteSemantico}");
+            if (!string.IsNullOrWhiteSpace(pattern.TipoExcepcion)) sb.AppendLine($"Tipo de excepción: {pattern.TipoExcepcion}");
             if (pattern.IntervaloPromedio.HasValue) sb.AppendLine($"Intervalo promedio: {pattern.IntervaloPromedio.Value}");
+            if (pattern.IdsIncidente.Count > 0) sb.AppendLine($"Incidentes relacionados: {pattern.IdsIncidente.Count}");
             sb.AppendLine();
         }
+        if (report.PatronesFalla.Count > shown.Count)
+            sb.AppendLine($"… y {report.PatronesFalla.Count - shown.Count} patrón(es) más sin mostrar.");
         return sb.ToString().TrimEnd();
     }
 
     private static string BuildGuidedResolution(DiagnosticReport report)
     {
         if (report.ResolucionesGuiadas.Count == 0) return "No hay resolución guiada aplicable para la evidencia actual.";
+
+        // Primero lo que exige acción (error/advertencia), y dentro por severidad;
+        // así las entradas sanas no desplazan a las que requieren intervención.
+        var ordered = report.ResolucionesGuiadas
+            .OrderByDescending(x => RequiresAction(x) ? 1 : 0)
+            .ThenByDescending(x => x.Severidad)
+            .ThenBy(x => x.Componente, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var shown = ordered.Take(12).ToList();
+        var actionableTotal = ordered.Count(RequiresAction);
+
         var sb = new StringBuilder();
-        foreach (var item in report.ResolucionesGuiadas.Take(12))
+        sb.AppendLine($"Resoluciones: {ordered.Count} | Requieren acción: {actionableTotal} | Mostrando: {shown.Count}");
+        var currentGroup = (bool?)null;
+        foreach (var item in shown)
         {
-            sb.AppendLine($"Producto: {item.Producto} | Componente: {item.Componente} | Estado: {item.Estado} | Confianza: {item.Confianza}");
+            var actionable = RequiresAction(item);
+            if (currentGroup != actionable)
+            {
+                currentGroup = actionable;
+                sb.AppendLine();
+                sb.AppendLine(actionable ? $"Requiere acción ({actionableTotal}):" : "Sin acción requerida:");
+            }
+
+            var marker = actionable
+                ? item.Severidad == DiagnosticSeverity.Critico ? "[CRÍTICO] "
+                    : item.Severidad == DiagnosticSeverity.Error ? "[ERROR] "
+                    : "[ADVERTENCIA] "
+                : string.Empty;
+            sb.AppendLine($"{marker}Producto: {item.Producto} | Componente: {item.Componente} | Estado: {item.Estado} | Severidad: {item.Severidad} | Confianza: {item.Confianza}");
             sb.AppendLine("Síntoma: " + item.Sintoma);
             sb.AppendLine("Causa probable: " + item.CausaProbable);
             sb.AppendLine("Impacto: " + item.Impacto);
+            if (item.Comprobaciones.Count > 0)
+            {
+                sb.AppendLine("Comprobaciones:");
+                foreach (var check in item.Comprobaciones)
+                    sb.AppendLine($"• {check.Nombre} — {check.Estado}: {check.Detalle}");
+            }
             if (item.ComoCorregir.Count > 0)
             {
                 sb.AppendLine("Cómo corregir:");
@@ -721,10 +848,24 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
                 sb.AppendLine("No hacer primero:");
                 foreach (var step in item.NoHacerPrimero) sb.AppendLine("• " + step);
             }
+            if (!string.IsNullOrWhiteSpace(item.Cobertura)) sb.AppendLine("Cobertura: " + item.Cobertura);
+            if (!string.IsNullOrWhiteSpace(item.FuenteOficial))
+            {
+                sb.AppendLine(string.IsNullOrWhiteSpace(item.UrlOficial)
+                    ? $"Fuente oficial: {item.FuenteOficial}"
+                    : $"Fuente oficial: {item.FuenteOficial} — {item.UrlOficial}");
+            }
             sb.AppendLine();
         }
+
+        if (ordered.Count > shown.Count)
+            sb.AppendLine($"… y {ordered.Count - shown.Count} resolución(es) más sin mostrar.");
         return sb.ToString().TrimEnd();
     }
+
+    private static bool RequiresAction(GuidedResolutionResult item)
+        => item.Severidad is DiagnosticSeverity.Critico or DiagnosticSeverity.Error or DiagnosticSeverity.Advertencia
+           || item.Estado is GuidedResolutionState.Error or GuidedResolutionState.Advertencia;
 
     private static string BuildCoverage(DiagnosticReport report)
     {
@@ -734,9 +875,26 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
         var sb = new StringBuilder();
         sb.AppendLine($"Cobertura: {coverage.Score}/100 | Nivel: {coverage.Nivel}");
         sb.AppendLine($"Resumen: {coverage.Resumen}");
+
+        var critical = coverage.Fuentes.Count(x => x.Critica);
+        var criticalBlocked = coverage.Fuentes.Count(x => x.Critica && x.Estado is "No disponible" or "Bloqueada" or "Timeout");
+        var partialOnly = coverage.Fuentes.Count(x => !x.Critica && x.Estado is "Parcial" or "No consultado");
+        sb.AppendLine($"Fuentes: {coverage.Fuentes.Count} | Críticas: {critical} | Críticas bloqueadas: {criticalBlocked} | Parciales: {partialOnly}");
+
+        if (report.PrecisionDiagnostica is { } precision)
+        {
+            sb.AppendLine($"Precisión diagnóstica: {precision.Score}/100 | Nivel: {precision.Nivel} | Cobertura completa: {(precision.CoberturaCompleta ? "sí" : "no")} | Bloqueos duros: {precision.FuentesBloqueadas} | Señales causales: {precision.SenalesCausales}");
+        }
+
         sb.AppendLine();
-        foreach (var source in coverage.Fuentes)
-            sb.AppendLine($"Fuente: {source.Fuente} | Estado: {source.Estado} | Detalle: {source.Detalle}");
+        sb.AppendLine("Fuentes (las críticas primero):");
+        foreach (var source in coverage.Fuentes.OrderByDescending(x => x.Critica))
+        {
+            sb.AppendLine(source.Critica
+                ? $"[CRÍTICA] Fuente: {source.Fuente} | Estado: {source.Estado} | Detalle: {source.Detalle}"
+                : $"Fuente: {source.Fuente} | Estado: {source.Estado} | Detalle: {source.Detalle}");
+        }
+
         if (coverage.Limitaciones.Count > 0)
         {
             sb.AppendLine();

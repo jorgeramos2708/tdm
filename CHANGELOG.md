@@ -39,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Servicios y dependencias**: las secciones muestran el resumen ("N en ejecución · M detenidos · …") que el ViewModel ya generaba pero no se enlazaba.
 - **Salud TDM**: nueva tira de telemetría con modo de monitoreo, frecuencia, muestras, muestras diferidas, timeouts, tamaño de bitácora JSONL y el colector más lento (con su duración), propiedades que ya se calculaban pero no se mostraban.
 
+### Added — Pestañas de Diagnóstico con evidencia y límites visibles
+
+- **Causa raíz**: encabezado `[PRINCIPAL]` con la causa principal (el que indica a qué candidata aplican "Confirmar/Descartar causa"), nota cuando existe evidencia pero ningún candidato alcanza el margen, hora del incidente, capa, rol causal, hasta 4 evidencias por candidato ("… y N más") y fuente oficial con URL; pie "… y N candidato(s) más" cuando la lista supera 8.
+- **Cobertura**: fuentes críticas marcadas con `[CRÍTICA]` (primero en la lista) y coloreadas; línea de conteos `Fuentes | Críticas | Críticas bloqueadas | Parciales` usando el mismo criterio de bloqueo duro del analizador; se añade precisión diagnóstica (score, nivel, cobertura completa, bloqueos duros, señales causales).
+- **Resolución guiada**: ahora se ordena "Requiere acción" primero (crítico/error/advertencia) y se separa en secciones `Requiere acción` / `Sin acción requerida` con cabeceras; cada entrada muestra severidad, comprobaciones (nombre/estado/detalle), cobertura y fuente oficial con URL; pie "… y N resolución(es) más".
+- **Evidencia/Eventos**: nuevo buscador (mensaje, componente, tipo, código o asunto), contadores `Total · Filtrados · Mostrados` con aviso del límite de 500, columna **Asunto** (cuenta o servicio afectado, sanitizado), fecha de respaldo desde `IngestedAt` cuando el evento no tiene timestamp y estado vacío "Sin eventos para los filtros actuales".
+- **Resumen y Patrones**: pies "… y N más" en hallazgos destacados (10) y patrones (20); Patrones añade componente semántico, tipo de excepción e incidentes relacionados.
+- **Marcadores coloreados**: `FormattedReportView` pinta las líneas que empiezan por `[CRÍTICO]`, `[ERROR]`, `[ADVERTENCIA]`, `[CRÍTICA]` o `[PRINCIPAL]` sin partir la línea en clave/valor.
+
 ### Sprint 2 — Inteligencia Causal y Simulación What-If
 
 #### S2.1 — Grafo Causal Temporal (`TemporalCausalGraph.cs`)

@@ -90,27 +90,29 @@
       <TabItem Header="Evidencia/Eventos">
         <Grid RowDefinitions="Auto,*" Margin="0,10,0,0" HorizontalAlignment="Stretch">
           <Border Grid.Row="0" Classes="toolbar">
-            <StackPanel Spacing="10">
-              <StackPanel Orientation="Horizontal" Spacing="10">
-                <TextBlock Text="Severidad" Classes="muted" VerticalAlignment="Center" />
-                <ComboBox Width="150" ItemsSource="{Binding SeverityOptions}" SelectedItem="{Binding SelectedSeverity}" />
-                <TextBlock Text="Origen" Classes="muted" VerticalAlignment="Center" />
-                <ComboBox Width="150" ItemsSource="{Binding OriginOptions}" SelectedItem="{Binding SelectedOrigin}" />
-
-              </StackPanel>
-
+            <StackPanel Orientation="Horizontal" Spacing="12">
+              <TextBlock Text="Severidad" Classes="muted" VerticalAlignment="Center" />
+              <ComboBox Width="150" ItemsSource="{Binding SeverityOptions}" SelectedItem="{Binding SelectedSeverity}" />
+              <TextBlock Text="Origen" Classes="muted" VerticalAlignment="Center" />
+              <ComboBox Width="150" ItemsSource="{Binding OriginOptions}" SelectedItem="{Binding SelectedOrigin}" />
+              <TextBox Width="260" Watermark="Buscar en mensaje, componente, tipo o asunto..."
+                       Text="{Binding EventSearchText, Mode=TwoWay}" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding EventFilterStatus}" Classes="muted" VerticalAlignment="Center" />
             </StackPanel>
           </Border>
 
           <Border Grid.Row="1" Classes="workspace-section" Margin="0,10,0,0" HorizontalAlignment="Stretch">
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" MinHeight="390" MaxHeight="520">
               <StackPanel Spacing="0">
+                <TextBlock IsVisible="{Binding HasNoEvents}" Text="Sin eventos para los filtros actuales."
+                           Classes="muted" Margin="4,16,4,16" />
                 <Border BorderBrush="#203347" BorderThickness="0,0,0,1" Padding="4,4,4,8">
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <TextBlock Width="{Binding EventTimeWidth}" Text="Hora" FontWeight="SemiBold" Foreground="#F5FAFF" />
                     <TextBlock Width="{Binding EventSeverityWidth}" Text="Severidad" FontWeight="SemiBold" Foreground="#F5FAFF" />
                     <TextBlock Width="{Binding EventOriginWidth}" Text="Origen" FontWeight="SemiBold" Foreground="#F5FAFF" />
                     <TextBlock Width="{Binding EventComponentWidth}" Text="Componente" FontWeight="SemiBold" Foreground="#F5FAFF" />
+                    <TextBlock Width="{Binding EventSubjectWidth}" Text="Asunto" FontWeight="SemiBold" Foreground="#F5FAFF" />
                     <TextBlock Width="{Binding EventTypeWidth}" Text="Tipo" FontWeight="SemiBold" Foreground="#F5FAFF" />
                     <TextBlock Width="{Binding EventMessageWidth}" Text="Mensaje" FontWeight="SemiBold" Foreground="#F5FAFF" />
                   </StackPanel>
@@ -125,6 +127,7 @@
                           <TextBlock Width="{Binding DataContext.EventSeverityWidth, RelativeSource={RelativeSource AncestorType=UserControl}}" Text="{Binding Severity}" Foreground="{Binding Accent}" FontWeight="SemiBold" TextWrapping="Wrap" />
                           <TextBlock Width="{Binding DataContext.EventOriginWidth, RelativeSource={RelativeSource AncestorType=UserControl}}" Text="{Binding Origin}" Foreground="#F5FAFF" TextWrapping="Wrap" />
                           <TextBlock Width="{Binding DataContext.EventComponentWidth, RelativeSource={RelativeSource AncestorType=UserControl}}" Text="{Binding Component}" TextWrapping="Wrap" />
+                          <TextBlock Width="{Binding DataContext.EventSubjectWidth, RelativeSource={RelativeSource AncestorType=UserControl}}" Text="{Binding Subject}" TextWrapping="Wrap" />
                           <TextBlock Width="{Binding DataContext.EventTypeWidth, RelativeSource={RelativeSource AncestorType=UserControl}}" Text="{Binding Type}" Classes="muted" TextWrapping="Wrap" />
                           <TextBlock Width="{Binding DataContext.EventMessageWidth, RelativeSource={RelativeSource AncestorType=UserControl}}" Text="{Binding Message}" TextWrapping="Wrap" />
                         </StackPanel>

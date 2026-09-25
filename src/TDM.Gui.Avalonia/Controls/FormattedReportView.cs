@@ -65,6 +65,20 @@ public sealed class FormattedReportView : UserControl
                 continue;
             }
 
+            // Las líneas con marcador [SEVERIDAD]/[PRINCIPAL] se pintan completas y no
+            // se parten en clave: valor, para que el marcador mantenga su color.
+            if (line.TrimStart().StartsWith('['))
+            {
+                _panel.Children.Add(new TextBlock
+                {
+                    Text = line,
+                    FontWeight = FontWeight.SemiBold,
+                    Foreground = ExplicitSeverityBrush(line) ?? new SolidColorBrush(Color.FromRgb(245, 250, 255)),
+                    TextWrapping = TextWrapping.Wrap
+                });
+                continue;
+            }
+
             if (TrySplitKeyValue(line, out var key, out var value))
             {
                 var grid = new Grid
@@ -147,6 +161,8 @@ public sealed class FormattedReportView : UserControl
         var value = line.TrimStart();
         if (value.StartsWith("[CRÍTICO]", StringComparison.OrdinalIgnoreCase) ||
             value.StartsWith("[CRITICO]", StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith("[CRÍTICA]", StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith("[CRITICA]", StringComparison.OrdinalIgnoreCase) ||
             value.StartsWith("CRÍTICO:", StringComparison.OrdinalIgnoreCase) ||
             value.StartsWith("CRITICO:", StringComparison.OrdinalIgnoreCase))
             return CriticalBrush();
@@ -158,6 +174,9 @@ public sealed class FormattedReportView : UserControl
         if (value.StartsWith("[ADVERTENCIA]", StringComparison.OrdinalIgnoreCase) ||
             value.StartsWith("ADVERTENCIA:", StringComparison.OrdinalIgnoreCase))
             return WarningBrush();
+
+        if (value.StartsWith("[PRINCIPAL]", StringComparison.OrdinalIgnoreCase))
+            return new SolidColorBrush(Color.FromRgb(57, 208, 255));
 
         return null;
     }
