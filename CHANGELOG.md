@@ -27,6 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Precisión diagnóstica más justa**: una fuente crítica *parcial* ya no penaliza el puntaje como si estuviera bloqueada (sólo el bloqueo duro resta); los incidentes funcionales detectados (servicios, procesos, sesiones) suman hasta 12 puntos y la evidencia nueva expone "Bloqueos duros" e "Incidentes funcionales detectados".
 - **Calibración de candidatos**: el descenso de confianza por cobertura incompleta aplica sólo cuando hay bloqueo duro de una fuente crítica; la cobertura parcial se reporta como limitación.
 
+### Fixed — Pestaña Logs (columnas desalineadas y mensaje cortado)
+
+- **Alineación de columnas**: la plantilla de fila usaba `Auto,Auto,Auto,Auto,*,Auto`, con la columna flexible en "Componente" y el mensaje en `Auto`. Como cada fila tenía su propio `Grid`, la columna de sistema origen caía en una posición distinta en cada renglón y el mensaje se desbordaba del panel (scroll horizontal y texto cortado a la derecha). Ahora las columnas son de ancho fijo (`20,96,72,80,140,*`), el mensaje ocupa la columna flexible con ajuste de línea y la lista ya no genera scroll horizontal.
+- **Cabecera de columnas**: nueva fila fija `HORA · NIVEL · SISTEMA · COMPONENTE · MENSAJE` alineada con el contenido de cada fila.
+- **Componente**: recorte con "…" y tooltip con el valor completo (antes sólo `MaxWidth`, que competía con la columna flexible).
+
+### Added — Paneles con detalle ya calculado (texto sin enlazar)
+
+- **Preventivo**: las tarjetas "Riesgo preventivo", "Servicios y dependencias", "Predicción de saturación" e "Inestabilidad operativa" muestran ahora su detalle (`PreventiveDetail`, `DependencyDetail`, `SaturationDetail`, `InstabilityDetail`), que se calculaba y se descartaba.
+- **Servicios y dependencias**: las secciones muestran el resumen ("N en ejecución · M detenidos · …") que el ViewModel ya generaba pero no se enlazaba.
+- **Salud TDM**: nueva tira de telemetría con modo de monitoreo, frecuencia, muestras, muestras diferidas, timeouts, tamaño de bitácora JSONL y el colector más lento (con su duración), propiedades que ya se calculaban pero no se mostraban.
+
 ### Sprint 2 — Inteligencia Causal y Simulación What-If
 
 #### S2.1 — Grafo Causal Temporal (`TemporalCausalGraph.cs`)

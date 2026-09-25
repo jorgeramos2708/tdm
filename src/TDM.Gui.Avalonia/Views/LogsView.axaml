@@ -74,61 +74,76 @@
 
     <!-- Lista de logs -->
     <Border Grid.Row="2" Classes="workspace-section" Margin="0,10,0,0" HorizontalAlignment="Stretch">
-      <ScrollViewer x:Name="LogScrollViewer" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-        <ItemsControl ItemsSource="{Binding FilteredLogs}">
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <Border BorderThickness="3,0,0,0" 
-                      BorderBrush="{Binding RowAccent}"
-                      Background="{Binding RowBackground}"
-                      Padding="8,4" Margin="0,1,0,0"
-                      ToolTip.Tip="{Binding FullDetail}">
-                <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto" Margin="8,0">
-                  <!-- Indicador de sistema origen -->
-                  <Ellipse Grid.Column="0" Width="10" Height="10" 
-                           Fill="{Binding RowAccent}" 
-                           VerticalAlignment="Center" Margin="0,0,10,0" 
-                           ToolTip.Tip="{Binding SourceSystemText}"/>
-                  
-                  <!-- Timestamp -->
-                  <TextBlock Grid.Column="1" Text="{Binding Timestamp, StringFormat='HH:mm:ss.fff'}" 
-                             Classes="muted" FontFamily="Consolas" FontSize="11"
-                             VerticalAlignment="Center" Margin="0,0,12,0"/>
-                  
-                  <!-- Badge de nivel (severidad) -->
-                  <Border Grid.Column="2" Padding="6,2" CornerRadius="3" 
-                          Background="{Binding LevelBrush}" 
-                          Margin="0,0,10,0">
-                    <TextBlock Text="{Binding LevelText}" 
-                               FontSize="9" FontWeight="Bold" 
-                               Foreground="Black" VerticalAlignment="Center"/>
-                  </Border>
-                  
-                  <!-- Badge de sistema origen -->
-                  <Border Grid.Column="3" Padding="6,2" CornerRadius="3" 
-                          Background="{Binding SourceSystemBrush}" 
-                          Margin="0,0,12,0">
-                    <TextBlock Text="{Binding SourceSystemText}" 
-                               FontSize="9" FontWeight="Bold" 
-                               Foreground="Black" VerticalAlignment="Center"/>
-                  </Border>
-                  
-                  <!-- Componente (opcional) -->
-                  <TextBlock Grid.Column="4" Text="{Binding Component}" 
-                             Classes="muted" FontSize="11" FontWeight="Medium"
-                             VerticalAlignment="Center" Margin="0,0,12,0"
-                             TextTrimming="CharacterEllipsis" MaxWidth="150"/>
-                  
-                  <!-- Mensaje -->
-                  <TextBlock Grid.Column="5" Text="{Binding Message}" 
-                             TextWrapping="Wrap" FontSize="12"
-                             Foreground="#EDF6FC" VerticalAlignment="Center"/>
-                </Grid>
-              </Border>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-      </ScrollViewer>
+      <DockPanel>
+        <!-- Cabecera fija de columnas; el margen izquierdo replica el borde de acento (3px) + padding (8px) de cada fila -->
+        <StackPanel DockPanel.Dock="Top">
+          <Grid ColumnDefinitions="20,96,72,80,140,*" Margin="11,2,8,3">
+            <TextBlock Grid.Column="1" Text="HORA" Classes="muted" FontSize="10" FontWeight="SemiBold"/>
+            <TextBlock Grid.Column="2" Text="NIVEL" Classes="muted" FontSize="10" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+            <TextBlock Grid.Column="3" Text="SISTEMA" Classes="muted" FontSize="10" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+            <TextBlock Grid.Column="4" Text="COMPONENTE" Classes="muted" FontSize="10" FontWeight="SemiBold"/>
+            <TextBlock Grid.Column="5" Text="MENSAJE" Classes="muted" FontSize="10" FontWeight="SemiBold"/>
+          </Grid>
+          <Border Height="1" Background="#294057" Margin="11,0,8,0"/>
+        </StackPanel>
+        <ScrollViewer x:Name="LogScrollViewer" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+          <ItemsControl ItemsSource="{Binding FilteredLogs}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border BorderThickness="3,0,0,0"
+                        BorderBrush="{Binding RowAccent}"
+                        Background="{Binding RowBackground}"
+                        Padding="8,4" Margin="0,1,0,0"
+                        ToolTip.Tip="{Binding FullDetail}">
+                  <!-- Anchos fijos por columna para que todas las filas se alineen; el mensaje (columna *) se ajusta al panel -->
+                  <Grid ColumnDefinitions="20,96,72,80,140,*">
+                    <!-- Indicador de sistema origen -->
+                    <Ellipse Grid.Column="0" Width="10" Height="10"
+                             Fill="{Binding RowAccent}"
+                             VerticalAlignment="Center" Margin="0,0,10,0"
+                             ToolTip.Tip="{Binding SourceSystemText}"/>
+
+                    <!-- Timestamp -->
+                    <TextBlock Grid.Column="1" Text="{Binding Timestamp, StringFormat='HH:mm:ss.fff'}"
+                               Classes="muted" FontFamily="Consolas" FontSize="11"
+                               VerticalAlignment="Center"/>
+
+                    <!-- Badge de nivel (severidad) -->
+                    <Border Grid.Column="2" Padding="6,2" CornerRadius="3"
+                            Background="{Binding LevelBrush}"
+                            HorizontalAlignment="Center">
+                      <TextBlock Text="{Binding LevelText}"
+                                 FontSize="9" FontWeight="Bold"
+                                 Foreground="Black" VerticalAlignment="Center"/>
+                    </Border>
+
+                    <!-- Badge de sistema origen -->
+                    <Border Grid.Column="3" Padding="6,2" CornerRadius="3"
+                            Background="{Binding SourceSystemBrush}"
+                            HorizontalAlignment="Center">
+                      <TextBlock Text="{Binding SourceSystemText}"
+                                 FontSize="9" FontWeight="Bold"
+                                 Foreground="Black" VerticalAlignment="Center"/>
+                    </Border>
+
+                    <!-- Componente (opcional) -->
+                    <TextBlock Grid.Column="4" Text="{Binding Component}"
+                               Classes="muted" FontSize="11" FontWeight="Medium"
+                               VerticalAlignment="Center" Margin="0,0,12,0"
+                               TextTrimming="CharacterEllipsis"
+                               ToolTip.Tip="{Binding Component}"/>
+
+                    <!-- Mensaje -->
+                    <TextBlock Grid.Column="5" Text="{Binding Message}"
+                               TextWrapping="Wrap" FontSize="12"
+                               Foreground="#EDF6FC" VerticalAlignment="Center"/>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </DockPanel>
     </Border>
   </Grid>
 </UserControl>

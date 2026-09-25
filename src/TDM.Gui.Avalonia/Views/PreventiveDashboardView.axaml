@@ -46,24 +46,28 @@
             <TextBlock Text="{Binding PreventiveRisk}" Foreground="{Binding PreventiveRiskAccent}" FontSize="20" FontWeight="SemiBold"/>
             <TextBlock Text="{Binding PreventiveScore}" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
           </StackPanel>
+          <TextBlock Text="{Binding PreventiveDetail}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
         </StackPanel>
       </Border>
       <Border Grid.Column="1" Classes="metric-cell">
         <StackPanel Spacing="5">
           <TextBlock Classes="section-title" Text="SERVICIOS Y DEPENDENCIAS"/>
           <TextBlock Text="{Binding DependencyRisk}" Foreground="{Binding DependencyAccent}" FontSize="20" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding DependencyDetail}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
         </StackPanel>
       </Border>
       <Border Grid.Column="2" Classes="metric-cell">
         <StackPanel Spacing="5">
           <TextBlock Classes="section-title" Text="PREDICCIÓN DE SATURACIÓN"/>
           <TextBlock Text="{Binding SaturationForecast}" Foreground="{Binding SaturationAccent}" FontSize="20" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding SaturationDetail}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
         </StackPanel>
       </Border>
       <Border Grid.Column="3" Classes="metric-cell" BorderThickness="0">
         <StackPanel Spacing="5">
           <TextBlock Classes="section-title" Text="INESTABILIDAD OPERATIVA"/>
           <TextBlock Text="{Binding InstabilityCount}" Foreground="{Binding InstabilityAccent}" FontSize="28" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding InstabilityDetail}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
         </StackPanel>
       </Border>
     </Grid>

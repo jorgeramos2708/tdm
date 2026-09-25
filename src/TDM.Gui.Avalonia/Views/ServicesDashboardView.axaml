@@ -6,7 +6,8 @@
     <Grid ColumnDefinitions="*,*">
       <Border Grid.Column="0" Classes="workspace-slice" Margin="0,0,12,0">
         <StackPanel Spacing="0">
-          <TextBlock Classes="section-title" Text="SERVICIOS" Margin="0,0,0,10" />
+          <TextBlock Classes="section-title" Text="SERVICIOS" Margin="0,0,0,2" />
+          <TextBlock Text="{Binding ServiceSummary}" Classes="muted" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8" />
           <Grid ColumnDefinitions="18,*,118,122" Margin="0,0,0,5">
             <TextBlock Grid.Column="1" Text="SERVICIO" Classes="muted" FontSize="11" FontWeight="SemiBold" Margin="8,0" />
             <TextBlock Grid.Column="2" Text="ORIGEN" Classes="muted" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" />
@@ -39,7 +40,8 @@
 
       <Border Grid.Column="1" Classes="workspace-section">
         <StackPanel Spacing="0">
-          <TextBlock Classes="section-title" Text="DEPENDENCIAS" Margin="0,0,0,10" />
+          <TextBlock Classes="section-title" Text="DEPENDENCIAS" Margin="0,0,0,2" />
+          <TextBlock Text="{Binding DependencySummary}" Classes="muted" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8" />
           <Grid ColumnDefinitions="18,*,118,122" Margin="0,0,0,5">
             <TextBlock Grid.Column="1" Text="DEPENDENCIA" Classes="muted" FontSize="11" FontWeight="SemiBold" Margin="8,0" />
             <TextBlock Grid.Column="2" Text="ORIGEN" Classes="muted" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" />

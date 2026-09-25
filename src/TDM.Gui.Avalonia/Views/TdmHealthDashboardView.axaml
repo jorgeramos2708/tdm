@@ -5,6 +5,55 @@
   <StackPanel Spacing="12">
     <TextBlock Text="SALUD DE TDM" Classes="panel-title" />
 
+    <!-- Telemetría del monitor (propiedades ya calculadas en el ViewModel) -->
+    <Border Classes="metric-strip">
+      <Grid ColumnDefinitions="*,*,*,*,*,*,*">
+        <Border Grid.Column="0" Classes="metric-cell">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="section-title" Text="MODO DE MONITOREO"/>
+            <TextBlock Text="{Binding MonitorMode}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="1" Classes="metric-cell">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="section-title" Text="FRECUENCIA"/>
+            <TextBlock Text="{Binding Frequency}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="2" Classes="metric-cell">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="section-title" Text="MUESTRAS"/>
+            <TextBlock Text="{Binding Samples}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="3" Classes="metric-cell">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="section-title" Text="DIFERIDAS"/>
+            <TextBlock Text="{Binding Deferred}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="4" Classes="metric-cell">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="section-title" Text="TIMEOUTS"/>
+            <TextBlock Text="{Binding Timeouts}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="5" Classes="metric-cell">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="section-title" Text="BITÁCORA (JSONL)"/>
+            <TextBlock Text="{Binding Jsonl}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="6" Classes="metric-cell" BorderThickness="0">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="section-title" Text="COLECTOR MÁS LENTO"/>
+            <TextBlock Text="{Binding SlowestCollectorMs}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding SlowestCollector}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Border>
+      </Grid>
+    </Border>
+
     <Grid ColumnDefinitions="*,*">
       <Border Grid.Column="0" Classes="workspace-slice" Margin="0,0,12,0">
         <StackPanel Spacing="8">
