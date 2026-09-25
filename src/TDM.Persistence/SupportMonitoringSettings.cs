@@ -8,6 +8,9 @@ public sealed record SupportThresholds
     public double CpuCritical { get; init; } = 85;
     public double MemoryUsedWarning { get; init; } = 80;
     public double MemoryUsedCritical { get; init; } = 90;
+    // Espacio libre en disco: el aviso ocurre antes (más % libre) que el estado crítico.
+    public double DiskFreeWarningPercent { get; init; } = 10;
+    public double DiskFreeCriticalPercent { get; init; } = 5;
     public int SessionWarning { get; init; } = 80;
     public int SessionCritical { get; init; } = 120;
     public int ServiceChangesWarning { get; init; } = 3;
@@ -79,6 +82,11 @@ public static class SupportThresholdsValidator
         PairDouble(errors, "Memoria de TDM (%)", value.TdmMemoryWarningPercent, value.TdmMemoryCriticalPercent, 0.1, 100);
         PairInt(errors, "Handles de TDM", value.TdmHandlesWarning, value.TdmHandlesCritical, 100, 1000000);
         PairInt(errors, "Hilos de TDM", value.TdmThreadsWarning, value.TdmThreadsCritical, 1, 100000);
+
+        if (!BetweenDouble(value.DiskFreeWarningPercent, 1, 100) || !BetweenDouble(value.DiskFreeCriticalPercent, 1, 100))
+            errors.Add("Disco libre: use valores entre 1 y 100.");
+        else if (value.DiskFreeWarningPercent <= value.DiskFreeCriticalPercent)
+            errors.Add("Disco libre: el nivel de aviso debe ser mayor que el nivel crítico (menor espacio libre).");
 
         if (!BetweenInt(value.IncidentCooldownSeconds, 10, 86400))
             errors.Add("Espera para repetir incidente: use un valor entre 10 y 86400 segundos.");

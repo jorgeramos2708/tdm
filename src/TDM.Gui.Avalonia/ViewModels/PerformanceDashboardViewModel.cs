@@ -1,3 +1,4 @@
+using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using TDM.Collectors.Windows;
 using TDM.Persistence;
@@ -25,19 +26,19 @@ public partial class PerformanceDashboardViewModel : ObservableObject
     [ObservableProperty] private IReadOnlyList<MetricRow> _topProcesses = Array.Empty<MetricRow>();
     [ObservableProperty] private IReadOnlyList<MetricRow> _disks = Array.Empty<MetricRow>();
 
-    public void Apply(IReadOnlyList<ObservabilitySample> samples, LightweightProcessDiskSnapshot? liveResources = null)
+    public void Apply(IReadOnlyList<ObservabilitySample> samples, LightweightProcessDiskSnapshot? liveResources = null, SupportThresholds? thresholds = null)
     {
+        thresholds ??= SupportMonitoringSettings.Default.Thresholds;
         if (samples.Count == 0)
         {
-            Reset();
-            ApplyLiveResources(liveResources);
+            Reset(thresholds);
+            ApplyLiveResources(liveResources, thresholds);
             return;
         }
 
         var latest = samples[^1];
         var latestProcessSample = samples.LastOrDefault(s => s.ProcessRamMb.Count > 0) ?? latest;
         var latestDiskSample = samples.LastOrDefault(s => s.DiskFreePercent.Count > 0) ?? latest;
-        var thresholds = SupportMonitoringSettings.Default.Thresholds;
         CpuWarningThreshold = thresholds.CpuWarning;
         CpuCriticalThreshold = thresholds.CpuCritical;
         MemoryWarningThreshold = thresholds.MemoryUsedWarning;
@@ -72,11 +73,11 @@ public partial class PerformanceDashboardViewModel : ObservableObject
         NetworkWarning = Math.Max(0.1d, NetworkMaximum * 0.70d);
         NetworkCritical = Math.Max(NetworkWarning + 0.1d, NetworkMaximum * 0.85d);
 
-        ApplyPersistedResources(latestProcessSample, latestDiskSample);
-        ApplyLiveResources(liveResources);
+        ApplyPersistedResources(latestProcessSample, latestDiskSample, thresholds);
+        ApplyLiveResources(liveResources, thresholds);
     }
 
-    private void ApplyPersistedResources(ObservabilitySample processSample, ObservabilitySample diskSample)
+    private void ApplyPersistedResources(ObservabilitySample processSample, ObservabilitySample diskSample, SupportThresholds thresholds)
     {
         var topProcesses = processSample.ProcessRamMb
             .OrderByDescending(x => x.Value)
@@ -97,13 +98,16 @@ public partial class PerformanceDashboardViewModel : ObservableObject
                 x.Key,
                 $"{x.Value:0.0}% libre",
                 diskSample.DiskFreeBytes.TryGetValue(x.Key, out var bytes) ? $"{bytes / 1024d / 1024d / 1024d:0.0} GB disponibles" : "Espacio disponible no informado",
-                x.Value <= 5 ? DashboardPalette.Danger : x.Value <= 10 ? DashboardPalette.Warn : DashboardPalette.Good))
+                DiskAccent(x.Value, thresholds)))
             .ToList();
         if (disks.Count > 0)
             Disks = disks;
     }
 
     public void ApplyLiveResources(LightweightProcessDiskSnapshot? liveResources)
+        => ApplyLiveResources(liveResources, SupportMonitoringSettings.Default.Thresholds);
+
+    private void ApplyLiveResources(LightweightProcessDiskSnapshot? liveResources, SupportThresholds thresholds)
     {
         if (liveResources is { Processes.Count: > 0 })
         {
@@ -137,7 +141,7 @@ public partial class PerformanceDashboardViewModel : ObservableObject
                     NormalizeDriveName(x.Drive),
                     $"{x.FreePercent:0.0}% libre",
                     $"{x.FreeBytes / 1024d / 1024d / 1024d:0.0} GB disponibles",
-                    x.FreePercent <= 5 ? DashboardPalette.Danger : x.FreePercent <= 10 ? DashboardPalette.Warn : DashboardPalette.Good))
+                    DiskAccent(x.FreePercent, thresholds)))
                 .ToList();
         }
         else if (Disks.Count == 0)
@@ -153,6 +157,11 @@ public partial class PerformanceDashboardViewModel : ObservableObject
         }
     }
 
+    private static IBrush DiskAccent(double freePercent, SupportThresholds thresholds)
+        => freePercent <= thresholds.DiskFreeCriticalPercent ? DashboardPalette.Danger
+            : freePercent <= thresholds.DiskFreeWarningPercent ? DashboardPalette.Warn
+            : DashboardPalette.Good;
+
     private static string NormalizeDriveName(string value)
     {
         if (string.IsNullOrWhiteSpace(value)) return "N/D";
@@ -160,7 +169,7 @@ public partial class PerformanceDashboardViewModel : ObservableObject
         return trimmed.EndsWith("\\", StringComparison.Ordinal) ? trimmed[..^1] : trimmed;
     }
 
-    private void Reset()
+    private void Reset(SupportThresholds thresholds)
     {
         CpuValue = MemoryValue = "N/D";
         NetworkReceiveValue = "↓ N/D Mbps";
@@ -170,7 +179,6 @@ public partial class PerformanceDashboardViewModel : ObservableObject
         NetworkMaximum = 1d;
         NetworkWarning = 0.7d;
         NetworkCritical = 0.85d;
-        var thresholds = SupportMonitoringSettings.Default.Thresholds;
         CpuWarningThreshold = thresholds.CpuWarning;
         CpuCriticalThreshold = thresholds.CpuCritical;
         MemoryWarningThreshold = thresholds.MemoryUsedWarning;

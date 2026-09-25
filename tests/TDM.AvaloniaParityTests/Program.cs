@@ -506,6 +506,114 @@ internal static class Program
             Equal(10d, migrated.Thresholds.TdmMemoryCriticalPercent);
         });
 
+        Run("Federation_PartitionCountsAddUp", () =>
+        {
+            FederationNodeStatus Status(string name, string connectivity, string health) => new(
+                new FederationNode($"node-{name.ToLowerInvariant()}", name, "Granja", "Nodo", @"C:\estados\node.json"),
+                connectivity, health, now, 12, 41.5, 63.0, 2, 1, null, null, 0.5,
+                new Dictionary<string, string>(), new Dictionary<string, string>(), "Detalle de nodo");
+
+            var statuses = new[]
+            {
+                Status("Saludable-01", "EN LÍNEA", "SALUDABLE"),
+                Status("Falla-02", "EN LÍNEA", "FALLA"),
+                Status("Atrasado-03", "ATRASADO", "SALUDABLE"),
+                Status("SinDatos-04", "SIN DATOS", "SALUDABLE"),
+                Status("SinAcceso-05", "NO ACCESIBLE", "SALUDABLE")
+            };
+
+            var vm = new MultiServerDashboardViewModel();
+            vm.Apply("COORD-PRUEBA", statuses);
+            Equal("5", vm.Total);
+            Equal("1", vm.Online);
+            Equal("2", vm.Degraded);
+            Equal("2", vm.Offline);
+            Equal(5, int.Parse(vm.Online) + int.Parse(vm.Degraded) + int.Parse(vm.Offline));
+            Equal(5, vm.Nodes.Count);
+            Equal("COORD-PRUEBA", vm.Coordinator);
+        });
+
+        Run("EmptyWindowShowsNotEvaluated", () =>
+        {
+            var incidents = new IncidentsDashboardViewModel();
+            incidents.Apply(Array.Empty<ObservabilitySample>());
+            Equal("No evaluado", incidents.Total);
+            Equal("No evaluado", incidents.Critical);
+            Equal("No evaluado", incidents.Errors);
+
+            var sessions = new SessionsDashboardViewModel();
+            sessions.Apply(Array.Empty<ObservabilitySample>());
+            Equal("No evaluado", sessions.Coverage);
+            Equal("No evaluado", sessions.LogonFailures);
+            Equal("No evaluado", sessions.NlaFailures);
+            Equal("0", sessions.ActiveValue);
+
+            var support = new SupportDashboardViewModel();
+            support.Apply(Array.Empty<ObservabilitySample>());
+            Equal("N/D", support.SessionValue);
+            Equal("Sin datos de sesiones", support.SessionCounts);
+            True(support.SessionCoverage.Contains("No evaluado", StringComparison.Ordinal), "La cobertura de soporte no marca 'No evaluado' sin ventana de sesiones.");
+        });
+
+        Run("LastPresentSampleWins", () =>
+        {
+            var light = new ObservabilitySample
+            {
+                Timestamp = now.AddSeconds(5),
+                SampleKind = "monitor"
+            };
+            var trailing = new[] { earlier, latest, light };
+
+            var perf = new PerformanceDashboardViewModel();
+            perf.Apply(trailing);
+            Equal("82.5%", perf.CpuValue);
+            Equal("65.0% usada", perf.MemoryValue);
+            Equal("↓ 2.50 Mbps", perf.NetworkReceiveValue);
+            Equal("↑ 0.75 Mbps", perf.NetworkSendValue);
+            Equal("C:", perf.Disks[0].Name);
+
+            var general = new GeneralDashboardViewModel();
+            general.Apply(trailing);
+            Equal("82.5%", general.Cpu);
+            True(general.Modules.Count >= 2, "La muestra ligera vacía sustituyó la salud de módulos en General.");
+
+            var tsplus = new TsplusDashboardViewModel();
+            tsplus.Apply(trailing);
+            Equal("Remote Access/RDP", tsplus.Modules[0].Name);
+
+            var sessions = new SessionsDashboardViewModel();
+            sessions.Apply(trailing);
+            Equal("Parcial", sessions.Coverage);
+
+            var tdm = new TdmHealthDashboardViewModel();
+            tdm.Apply(trailing);
+            Equal("NORMAL", tdm.MonitorMode);
+            Equal("240", tdm.Handles);
+        });
+
+        Run("DiskFreeThresholds_Configurable", () =>
+        {
+            var defaults = new SupportThresholds();
+            Equal(10d, defaults.DiskFreeWarningPercent);
+            Equal(5d, defaults.DiskFreeCriticalPercent);
+            Equal(0, SupportThresholdsValidator.Validate(defaults).Count);
+
+            var reversed = defaults with { DiskFreeWarningPercent = 5, DiskFreeCriticalPercent = 10 };
+            True(SupportThresholdsValidator.Validate(reversed).Any(x => x.Contains("Disco libre", StringComparison.Ordinal)),
+                "El umbral de disco libre no valida que el aviso ocurra con más espacio libre que el crítico.");
+
+            var defaultsVm = new PerformanceDashboardViewModel();
+            defaultsVm.Apply(samples);
+            True(!Equals(defaultsVm.Disks[0].Accent, defaultsVm.Disks[1].Accent),
+                "Con los valores por defecto, C: (9% libre) y D: (55% libre) deben tener acentos distintos.");
+
+            var strict = defaults with { DiskFreeWarningPercent = 60, DiskFreeCriticalPercent = 55 };
+            var strictVm = new PerformanceDashboardViewModel();
+            strictVm.Apply(samples, null, strict);
+            True(Equals(strictVm.Disks[0].Accent, strictVm.Disks[1].Accent),
+                "Los acentos de disco no siguen los umbrales configurados.");
+        });
+
         Run("EmptySample_Reset", () =>
         {
             var support = new SupportDashboardViewModel(); support.Apply(Array.Empty<ObservabilitySample>()); Equal("N/D", support.ServiceValue);

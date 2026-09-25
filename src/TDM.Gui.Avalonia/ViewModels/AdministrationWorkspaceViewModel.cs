@@ -44,6 +44,8 @@ public partial class AdministrationWorkspaceViewModel : ObservableObject
     [ObservableProperty] private double _cpuCritical = 85;
     [ObservableProperty] private double _memoryWarning = 80;
     [ObservableProperty] private double _memoryCritical = 90;
+    [ObservableProperty] private double _diskFreeWarning = 10;
+    [ObservableProperty] private double _diskFreeCritical = 5;
     [ObservableProperty] private int _sessionWarning = 80;
     [ObservableProperty] private int _sessionCritical = 120;
     [ObservableProperty] private int _serviceChangesWarning = 3;
@@ -470,6 +472,8 @@ public partial class AdministrationWorkspaceViewModel : ObservableObject
         CpuCritical = CpuCritical,
         MemoryUsedWarning = MemoryWarning,
         MemoryUsedCritical = MemoryCritical,
+        DiskFreeWarningPercent = DiskFreeWarning,
+        DiskFreeCriticalPercent = DiskFreeCritical,
         SessionWarning = SessionWarning,
         SessionCritical = SessionCritical,
         ServiceChangesWarning = ServiceChangesWarning,
@@ -537,6 +541,8 @@ public partial class AdministrationWorkspaceViewModel : ObservableObject
         CpuCritical = t.CpuCritical;
         MemoryWarning = t.MemoryUsedWarning;
         MemoryCritical = t.MemoryUsedCritical;
+        DiskFreeWarning = t.DiskFreeWarningPercent;
+        DiskFreeCritical = t.DiskFreeCriticalPercent;
         SessionWarning = t.SessionWarning;
         SessionCritical = t.SessionCritical;
         ServiceChangesWarning = t.ServiceChangesWarning;

@@ -68,6 +68,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Helper compartido**: `DashboardRules.LastSessionSample` concentra el criterio de "muestra con datos de sesión" y lo usan Soporte y Sesiones.
 - **Gate de verificación**: la comprobación estática "Sesiones calcula el total observado" se actualiza a la nueva expresión (`sessionSample`), conservando la misma intención (activas + desconectadas).
 
+### Added — Umbrales de disco libre configurables y pruebas de regresión de fases 4–5
+
+- **`SupportThresholds.DiskFreeWarningPercent/DiskFreeCriticalPercent`**: nuevos umbrales de espacio libre en disco (por defecto 10 % y 5 %, antes fijos en el código). Como a menor libre peor, el validador exige que el nivel de aviso sea mayor que el crítico y ambos entre 1 y 100; la configuración guardada sin estos campos sigue cargando con los valores por defecto.
+- **Rendimiento — acentos de disco configurables**: las filas de discos (muestra persistida y captura ligera en vivo) pintan Danger/Warn/Good según `DiskFreeCriticalPercent`/`DiskFreeWarningPercent` (antes `<= 5` y `<= 10` fijos); `Apply` acepta umbrales opcionales como en Salud TDM y Preventivo.
+- **Preventivo — señal "Disco X" configurable**: el filtro de discos con poco espacio y sus acentos (Danger/Error/Warn) usan los umbrales configurados (el filtro conserva el suelo de 15 % cuando el aviso no lo supera).
+- **Configuración — fila "Disco libre (%)"**: nueva fila de umbrales (Advertencia/Crítico) en el panel de Administración con carga y guardado en `BuildThresholds`/`ApplyThresholds`, respetando la geometría aprobada de la fila de memoria.
+- **Pruebas de regresión (fases 4–5)**: cuatro nuevas pruebas de paridad — `Federation_PartitionCountsAddUp` (en línea + degradados + sin datos = total, con `EN LÍNEA`+`FALLA` degradado), `EmptyWindowShowsNotEvaluated` (Incidentes/Sesiones/Soporte sin ventana), `LastPresentSampleWins` (muestra ligera final no desplaza CPU/memoria/red/módulos/sesiones/Salud TDM) y `DiskFreeThresholds_Configurable` (validación y acentos según umbrales). Paridad: 30/30.
+
 ### Sprint 2 — Inteligencia Causal y Simulación What-If
 
 #### S2.1 — Grafo Causal Temporal (`TemporalCausalGraph.cs`)

@@ -8,7 +8,7 @@
       <StackPanel Spacing="8">
         <TextBlock Text="UMBRALES Y OPCIONES DE MONITOREO" Classes="section-title" />
         <Grid ColumnDefinitions="600,460,*">
-          <Grid Grid.Column="0" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" Margin="0,0,20,0">
+          <Grid Grid.Column="0" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" Margin="0,0,20,0">
             <Grid ColumnDefinitions="260,126,126">
               <TextBlock Text="Métrica" FontWeight="SemiBold" Classes="muted" />
               <TextBlock Grid.Column="1" Text="Advertencia" FontWeight="SemiBold" Foreground="#FFD166" HorizontalAlignment="Center" />
@@ -23,6 +23,7 @@
             <Grid Grid.Row="6" ColumnDefinitions="260,126,126" Margin="0,3,0,0"><TextBlock Text="Memoria de TDM (%)" VerticalAlignment="Center" /><NumericUpDown Classes="compact-number" Grid.Column="1" Width="118" Value="{Binding TdmRamWarning}" Minimum="0.1" Maximum="100" Increment="0.5" FormatString="N1" /><NumericUpDown Classes="compact-number" Grid.Column="2" Width="118" Value="{Binding TdmRamCritical}" Minimum="0.1" Maximum="100" Increment="0.5" FormatString="N1" /></Grid>
             <Grid Grid.Row="7" ColumnDefinitions="260,126,126" Margin="0,3,0,0"><TextBlock Text="Recursos abiertos de TDM" VerticalAlignment="Center" /><NumericUpDown Classes="compact-number" Grid.Column="1" Width="118" Value="{Binding TdmHandlesWarning}" Minimum="100" Maximum="1000000" Increment="100" FormatString="N0" /><NumericUpDown Classes="compact-number" Grid.Column="2" Width="118" Value="{Binding TdmHandlesCritical}" Minimum="100" Maximum="1000000" Increment="100" FormatString="N0" /></Grid>
             <Grid Grid.Row="8" ColumnDefinitions="260,126,126" Margin="0,3,0,0"><TextBlock Text="Hilos de TDM" VerticalAlignment="Center" /><NumericUpDown Classes="compact-number" Grid.Column="1" Width="118" Value="{Binding TdmThreadsWarning}" Minimum="1" Maximum="100000" Increment="5" FormatString="N0" /><NumericUpDown Classes="compact-number" Grid.Column="2" Width="118" Value="{Binding TdmThreadsCritical}" Minimum="1" Maximum="100000" Increment="5" FormatString="N0" /></Grid>
+            <Grid Grid.Row="9" ColumnDefinitions="260,126,126" Margin="0,3,0,0"><TextBlock Text="Disco libre (%)" VerticalAlignment="Center" /><NumericUpDown Classes="compact-number" Grid.Column="1" Width="118" Value="{Binding DiskFreeWarning}" Minimum="1" Maximum="100" Increment="1" FormatString="N0" /><NumericUpDown Classes="compact-number" Grid.Column="2" Width="118" Value="{Binding DiskFreeCritical}" Minimum="1" Maximum="100" Increment="1" FormatString="N0" /></Grid>
           </Grid>
 
           <StackPanel Grid.Column="1" Spacing="3">

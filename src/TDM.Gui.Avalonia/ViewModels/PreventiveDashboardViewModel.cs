@@ -288,8 +288,12 @@ public partial class PreventiveDashboardViewModel : ObservableObject
         if (latest.TcpEphemeralUsagePercent >= 70)
             signals.Add(new SignalRow("Presión de puertos efímeros", $"Uso {latest.TcpEphemeralUsagePercent:0.0}% · TIME_WAIT {latest.TcpTimeWait}", latest.TcpEphemeralUsagePercent >= 85 ? DashboardPalette.Error : DashboardPalette.Warn));
 
-        foreach (var disk in latest.DiskFreePercent.Where(x => x.Value <= 15).OrderBy(x => x.Value).Take(3))
-            signals.Add(new SignalRow($"Disco {disk.Key}", $"{disk.Value:0.0}% libre", disk.Value <= 5 ? DashboardPalette.Danger : disk.Value <= 10 ? DashboardPalette.Error : DashboardPalette.Warn));
+        var diskSignalFloor = Math.Max(15d, thresholds.DiskFreeWarningPercent);
+        foreach (var disk in latest.DiskFreePercent.Where(x => x.Value <= diskSignalFloor).OrderBy(x => x.Value).Take(3))
+            signals.Add(new SignalRow($"Disco {disk.Key}", $"{disk.Value:0.0}% libre",
+                disk.Value <= thresholds.DiskFreeCriticalPercent ? DashboardPalette.Danger
+                : disk.Value <= thresholds.DiskFreeWarningPercent ? DashboardPalette.Error
+                : DashboardPalette.Warn));
 
         if (signals.Count == 0)
             signals.Add(new SignalRow("Sin señales preventivas relevantes", "Recursos, servicios, dependencias y salud modular no muestran una tendencia que requiera atención en la ventana disponible.", DashboardPalette.Good));
