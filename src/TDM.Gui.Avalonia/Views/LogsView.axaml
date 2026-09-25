@@ -5,7 +5,7 @@
              xmlns:controls="using:TDM.Gui.Avalonia.Controls"
              x:Class="TDM.Gui.Avalonia.Views.LogsView"
              x:DataType="vm:LogsViewModel">
-  <Grid RowDefinitions="Auto,Auto,*,Auto">
+  <Grid RowDefinitions="Auto,Auto,*">
     <!-- Toolbar con filtros -->
     <Border Grid.Row="0" Classes="toolbar">
       <StackPanel Orientation="Horizontal" Spacing="12">
@@ -129,14 +129,6 @@
           </ItemsControl.ItemTemplate>
         </ItemsControl>
       </ScrollViewer>
-    </Border>
-
-    <!-- Status bar -->
-    <Border Grid.Row="3" Padding="10,6" Background="#0B1521" BorderBrush="#23354A" BorderThickness="1" CornerRadius="6">
-      <StackPanel Orientation="Horizontal" Spacing="20">
-        <TextBlock Text="{Binding FilteredCount, StringFormat='Mostrando {0} de {1} entradas'}" 
-                   Foreground="#AFC4D8" FontSize="11"/>
-      </StackPanel>
     </Border>
   </Grid>
 </UserControl>

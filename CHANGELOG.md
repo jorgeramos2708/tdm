@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Filtros "Nivel" y "Sistema"**: ambos ComboBox enlazaban `SelectedItem` directamente con `ComboBoxItem` en XML, por lo que al seleccionar cualquier opción se producía un error de binding al escribir el valor en `LogLevel?`/`LogSourceSystem?`. Ahora se enlazan a opciones tipadas (`LogFilterOption`) mediante `ItemsSource` + `ItemTemplate`, eliminando el mensaje de error.
 - **Logs en tiempo real**: `DiagnosticExecutionService` instanciaba su propio `LogService`, así que los ciclos del diagnóstico (cada 5 s en "Tiempo real") nunca llegaban al observable al que se suscribe la pestaña Logs. Ahora usa la instancia compartida `App.LogService` y la lista avanza durante la ejecución.
 - **Selección inicial de filtros**: ambos filtros arrancan en "Todos" y "Limpiar filtros" restaura "Todos" en lugar de dejar el ComboBox vacío.
-- **Barra de estado**: se eliminó la tarjeta "Arrastre para seleccionar · Ctrl+C para copiar" del pie de la pestaña Logs.
+- **Barra de estado**: se eliminó por completo la tarjeta del pie de la pestaña Logs (texto "Arrastre para seleccionar · Ctrl+C para copiar").
+- **Segunda instancia**: al abrir TDM con otra instancia en ejecución, la nueva ventana salía con el error "Dispatcher shut down" (código 0xE0434352). Ahora la segunda instancia termina limpia (código 0).
 
 ### Sprint 2 — Inteligencia Causal y Simulación What-If
 

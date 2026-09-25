@@ -83,8 +83,10 @@ public override void OnFrameworkInitializationCompleted()
         _singleInstanceMutex = new Mutex(true, @"Local\TDM.Gui.Avalonia", out var createdNew);
         if (!createdNew)
         {
-            desktop.Shutdown();
-            base.OnFrameworkInitializationCompleted();
+            // Segunda instancia detectada: salir limpio ANTES de arrancar el bucle de eventos.
+            // Llamar Shutdown() aquí dejaba el Dispatcher apagado y el arranque lanzaba
+            // "Dispatcher shut down" (código de proceso 0xE0434352).
+            Environment.Exit(0);
             return;
         }
 
