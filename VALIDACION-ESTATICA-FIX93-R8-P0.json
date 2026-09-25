@@ -1,0 +1,38 @@
+{
+  "package": "TDM-v1.0-rc18.21.0-FIX93-CLEAN-R7",
+  "csharp_files": 172,
+  "axaml_files": 18,
+  "production_test_sources": 1,
+  "forbidden_tolerate_query_errors": [],
+  "legacy_recovery_text": [],
+  "tsplus_direct_exists": [],
+  "r7_markers": {
+    "trivalent": true,
+    "cursor_replay": true,
+    "time_interval": true,
+    "service_semantics": true
+  },
+  "modified_files": [
+    "src/TDM.Collectors.Windows/SystemSnapshotReader.cs",
+    "src/TDM.Collectors.Windows/TsplusInstallDiscovery.cs",
+    "src/TDM.Collectors.Windows/ServiceDependencyGraphCollector.cs",
+    "src/TDM.Collectors.Windows/IncrementalWindowsEventCollector.cs",
+    "src/TDM.Collectors.TSplus/RemoteAppEncodingCompatibilityCollector.cs",
+    "src/TDM.Collectors.TSplus/TsplusProductStateCollector.cs",
+    "src/TDM.Collectors.TSplus/TsplusDeepInstallationCollector.cs",
+    "src/TDM.Collectors.TSplus/IncrementalTsplusLogCollector.cs",
+    "src/TDM.Collectors.TSplus/TsplusFarmTopologyDiscovery.cs",
+    "src/TDM.Collectors.TSplus/TsplusLongitudinalStateCollector.cs",
+    "src/TDM.Collectors.TSplus/RemoteAccessModuleCoverageCollector.cs",
+    "src/TDM.Collectors.TSplus/TsplusInternalConfigurationCollector.cs",
+    "src/TDM.Collectors.TSplus/TsplusLogDiscovery.cs",
+    "src/TDM.Collectors.TSplus/LightweightTsplusStateCollector.cs",
+    "src/TDM.Collectors.Security/TsplusFileIntegrityCollector.cs",
+    "src/TDM.Core/DiagnosticTimeWindow.cs",
+    "src/TDM.Core/CollectorCursorStore.cs",
+    "src/TDM.Correlation/RootCauseCorrelator.cs",
+    "src/TDM.Models/DiagnosticModels.cs",
+    "src/TDM.Gui.Avalonia/Services/IntegratedMonitoringService.cs"
+  ],
+  "pass": true
+}

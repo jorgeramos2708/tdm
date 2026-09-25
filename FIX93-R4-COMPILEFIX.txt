@@ -1,0 +1,9 @@
+FIX93 CLEAN R4
+================
+Corrección puntual de compilación detectada por el gate Windows:
+- TsplusInternalConfigurationCollector.cs línea 551: la cadena con Clients\www se convirtió en literal verbatim C# para evitar CS1009 (secuencia de escape no reconocida).
+- Revisión adicional de cadenas con backslashes en src/tests: no se detectó otro patrón equivalente fuera de literales verbatim/escapados válidos.
+- No cambia la lógica diagnóstica ni la interfaz respecto de FIX93 R3.
+
+Validación obligatoria:
+  .\VALIDAR-FIX93.cmd

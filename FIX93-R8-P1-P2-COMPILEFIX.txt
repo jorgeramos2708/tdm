@@ -1,0 +1,7 @@
+FIX93 R8 P1/P2 compile fix
+
+1. Corrected invalid C# pattern syntax in IncidentClusterAnalyzer.cs (comma-separated is-pattern -> or pattern).
+2. Added local TDM.Collectors.TSplus.TsplusServiceClassifier so the TSplus collector does not depend on TDM.Collectors.Windows and preserves project direction.
+3. No functional P1/P2 rollback.
+
+Build must be executed on Windows with .NET 8 SDK installed.

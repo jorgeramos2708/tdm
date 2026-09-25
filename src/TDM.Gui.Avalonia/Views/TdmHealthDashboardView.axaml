@@ -1,0 +1,52 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:TDM.Gui.Avalonia.Controls"
+             x:Class="TDM.Gui.Avalonia.Views.TdmHealthDashboardView">
+  <StackPanel Spacing="12">
+    <TextBlock Text="SALUD DE TDM" Classes="panel-title" />
+
+    <Grid ColumnDefinitions="*,*">
+      <Border Grid.Column="0" Classes="workspace-slice" Margin="0,0,12,0">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="section-title" Text="DURACIÓN DE MUESTRA"/>
+          <TextBlock Text="{Binding DiagnosticDuration}"/>
+          <controls:LineChart Height="220" SeriesA="{Binding DurationSeries}" PointLabels="{Binding TimeLabels}" Maximum="{Binding DurationMaximum}" SeriesABrush="#39D0FF" SeriesALabel="Duración" ValueSuffix="ms"/>
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Column="1" Classes="workspace-section">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="section-title" Text="RECURSOS ABIERTOS E HILOS"/>
+          <Grid ColumnDefinitions="Auto,Auto,*">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+              <TextBlock Text="Recursos abiertos" Foreground="#67E8A5"/>
+              <TextBlock Text="{Binding Handles}" FontWeight="SemiBold"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="18,0,0,0">
+              <TextBlock Text="Hilos" Foreground="#FFD166"/>
+              <TextBlock Text="{Binding Threads}" FontWeight="SemiBold"/>
+            </StackPanel>
+          </Grid>
+          <controls:LineChart Height="220" SeriesA="{Binding HandlesSeries}" SeriesB="{Binding ThreadsSeries}" PointLabels="{Binding TimeLabels}" Maximum="{Binding ProcessCountMaximum}" SeriesABrush="#67E8A5" SeriesBBrush="#FFD166" SeriesALabel="Recursos abiertos" SeriesBLabel="Hilos"/>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Border Classes="workspace-section">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="section-title" Text="CPU Y MEMORIA"/>
+        <Grid ColumnDefinitions="Auto,Auto,*">
+          <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+            <TextBlock Text="CPU" Foreground="#39D0FF"/>
+            <TextBlock Text="{Binding Cpu}" FontWeight="SemiBold"/>
+          </StackPanel>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="18,0,0,0">
+            <TextBlock Text="Memoria" Foreground="#A78BFA"/>
+            <TextBlock Text="{Binding Ram}" FontWeight="SemiBold"/>
+          </StackPanel>
+        </Grid>
+        <controls:LineChart Height="220" SeriesA="{Binding CpuSeries}" SeriesB="{Binding RamSeries}" PointLabels="{Binding TimeLabels}" Maximum="{Binding CpuMemoryMaximum}" SeriesAWarningThreshold="{Binding CpuWarningThreshold}" SeriesACriticalThreshold="{Binding CpuCriticalThreshold}" SeriesBWarningThreshold="{Binding MemoryWarningThreshold}" SeriesBCriticalThreshold="{Binding MemoryCriticalThreshold}" SeriesABrush="#39D0FF" SeriesBBrush="#A78BFA" SeriesALabel="CPU" SeriesBLabel="Memoria" SeriesAValueSuffix="%" SeriesBValueSuffix="%"/>
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

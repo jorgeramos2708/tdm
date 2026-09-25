@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>TDM.ProductionTests</RootNamespace>
+    <AssemblyName>TDM.ProductionTests</AssemblyName>
+    <PackageId>TDM.Tests.Production</PackageId>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TDM.Core\TDM.Core.csproj" />
+    <ProjectReference Include="..\..\src\TDM.Models\TDM.Models.csproj" />
+    <ProjectReference Include="..\..\src\TDM.Correlation\TDM.Correlation.csproj" />
+    <ProjectReference Include="..\..\src\TDM.Application\TDM.Application.csproj" />
+    <ProjectReference Include="..\..\src\TDM.Collectors.TSplus\TDM.Collectors.TSplus.csproj" />
+    <ProjectReference Include="..\..\src\TDM.Collectors.Windows\TDM.Collectors.Windows.csproj" />
+    <ProjectReference Include="..\..\src\TDM.Notifications\TDM.Notifications.csproj" />
+    <ProjectReference Include="..\..\src\TDM.Persistence\TDM.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\TDM.Reporting\TDM.Reporting.csproj" />
+  </ItemGroup>
+</Project>

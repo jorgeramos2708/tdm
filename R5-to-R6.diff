@@ -1,0 +1,217 @@
+diff -ruN /mnt/data/tdm_r5_orig/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/VERIFY-TDM-READINESS.ps1 /mnt/data/tdm_r5_fix/tree/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/VERIFY-TDM-READINESS.ps1
+--- /mnt/data/tdm_r5_orig/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/VERIFY-TDM-READINESS.ps1	2026-09-07 03:35:08.000000000 +0000
++++ /mnt/data/tdm_r5_fix/tree/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/VERIFY-TDM-READINESS.ps1	2026-09-07 03:55:31.895517227 +0000
+@@ -252,7 +252,7 @@
+         Require ($mainWindowCode.Contains('OpenFolderPickerAsync(new FolderPickerOpenOptions')) 'La descarga no abre el selector de carpeta.'
+         Require ($mainWindowCode.Contains('vm.Diagnostics.RevealExportedFile = RevealExportedFile;')) 'La descarga no revela el reporte generado.'
+         Require (([regex]::Matches($servicesView, 'ColumnDefinitions="18,\*,118,122"')).Count -eq 4) 'Servicios y Dependencias no comparten las columnas fijas acordadas.'
+-        Require ($servicesVm.Contains('running ? "En ejecución" : "Detenido"')) 'La UI no limita el estado a En ejecución/Detenido.'
++        Require ($servicesVm.Contains('"En ejecución"') -and $servicesVm.Contains('"Detenido"') -and $servicesVm.Contains('"Bajo demanda"') -and $servicesVm.Contains('"No requerido"') -and $servicesVm.Contains('"Complementario"') -and $servicesVm.Contains('"Revisar"') -and $servicesVm.Contains('"No evaluado"')) 'La UI no conserva el contrato explícito de estados operativos.'
+         Require ($window.Contains('Points="6,3 20,12 6,21"')) 'Inicio no usa el icono Play vectorial aprobado.'
+         Require ($window.Contains('Rectangle Canvas.Left="6" Canvas.Top="4" Width="4" Height="16"')) 'Pausa no usa el icono vectorial aprobado.'
+         Require ($window.Contains('Data="M21,12 A9,9 0 1 1 12,3')) 'Actualizar no usa el icono Rotate CW vectorial aprobado.'
+@@ -264,7 +264,7 @@
+         Require ($supportView.Contains('Text="SERVICIOS / DEPENDENCIAS"')) 'La gráfica operativa no identifica ambos conjuntos.'
+         Require ($supportVm.Contains('var total = services.Count + dependencies.Count;')) 'La gráfica operativa no combina servicios y dependencias.'
+         Require ($supportVm.Contains('RefreshVisibleDetail();')) 'Ver detalle no se actualiza junto con el snapshot visible.'
+-        Require ($supportVm.Contains('stopped / (double)total')) 'La dona operativa no representa el tramo afectado.'
++        Require ($supportVm.Contains('affected / (double)total')) 'La dona operativa no representa únicamente fallas e incertidumbre como tramo afectado.'
+         Require ($supportView.Contains('TrackBrush="{Binding ServiceHealthyAccent}"')) 'La dona operativa no conserva el tramo saludable en verde.'
+         Require ($supportView.Contains('TrackBrush="{Binding ModuleHealthyAccent}"')) 'La dona modular no conserva el tramo saludable en verde.'
+         Require ($supportVm.Contains('latest.ActiveSessions + latest.DisconnectedSessions')) 'Sesiones no calcula el total observado.'
+diff -ruN /mnt/data/tdm_r5_orig/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/src/TDM.Gui.Avalonia/ViewModels/DashboardSupport.cs /mnt/data/tdm_r5_fix/tree/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/src/TDM.Gui.Avalonia/ViewModels/DashboardSupport.cs
+--- /mnt/data/tdm_r5_orig/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/src/TDM.Gui.Avalonia/ViewModels/DashboardSupport.cs	2026-09-07 03:23:56.000000000 +0000
++++ /mnt/data/tdm_r5_fix/tree/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/src/TDM.Gui.Avalonia/ViewModels/DashboardSupport.cs	2026-09-07 03:56:10.329120408 +0000
+@@ -108,12 +108,31 @@
+     public static int OperationalStateLevel(string? state)
+     {
+         var value = state ?? string.Empty;
+-        if (ContainsAny(value, "Complementario") && ContainsAny(value, "Stopped", "Failed", "Error", "No operativo", "Unknown", "Paused", "Pending")) return 2;
+-        if (ContainsAny(value, "Automático") && ContainsAny(value, "Stopped", "Paused", "Pending")) return 2;
+-        if (ContainsAny(value, "Stopped", "Failed", "Error", "Crítico", "Critico", "No operativo", "Listening=No", "Activos=0")) return 3;
+-        if (ContainsAny(value, "Paused", "Pending", "Degradado", "Parcial", "No localizado", "Unknown", "No evaluado", "N/D", "Advertencia", "Complementario")) return 2;
+-        if (ContainsAny(value, "Running", "Operativo", "Saludable", "Listening=Sí", "Gateway=Sí", "OK")) return 1;
+-        return 0;
++        if (string.IsNullOrWhiteSpace(value)) return 0;
++
++        // Estados deliberadamente neutrales: no deben inflar la dona de fallas ni
++        // generar acciones preventivas sólo por no estar Running.
++        if (ContainsAny(value, "Complementario", "No requerido", "Bajo demanda")) return 1;
++
++        // Una dependencia condicional detenida merece contexto/revisión, pero no
++        // equivale a una dependencia requerida caída.
++        if (ContainsAny(value, "Condicional"))
++        {
++            if (ContainsAny(value, "No evaluado", "Unknown", "N/D", "Parcial", "Advertencia")) return 2;
++            if (ContainsAny(value, "Running", "Operativo", "Saludable", "OK", "Deshabilitado")) return 1;
++            return 2;
++        }
++
++        // Cobertura incompleta o transición: requiere revisión, no se etiqueta como caída.
++        if (ContainsAny(value, "Paused", "Pending", "Degradado", "Parcial", "No localizado", "Unknown", "No evaluado", "N/D", "Advertencia")) return 2;
++
++        // Sólo una falla explícita de un elemento requerido/operativo cuenta como caída.
++        if (ContainsAny(value, "Stopped", "Failed", "Error", "Crítico", "Critico", "No operativo", "Listening=No", "Gateway=No", "Activos=0")) return 3;
++
++        if (ContainsAny(value, "Running", "En ejecución", "Operativo", "Saludable", "Listening=Sí", "Gateway=Sí", "OK")) return 1;
++
++        // Un estado no reconocido conserva incertidumbre en vez de asumir salud o falla.
++        return 2;
+     }
+ 
+     public static bool IsRunningState(string? state)
+diff -ruN /mnt/data/tdm_r5_orig/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/src/TDM.Gui.Avalonia/ViewModels/ServicesDashboardViewModel.cs /mnt/data/tdm_r5_fix/tree/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/src/TDM.Gui.Avalonia/ViewModels/ServicesDashboardViewModel.cs
+--- /mnt/data/tdm_r5_orig/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/src/TDM.Gui.Avalonia/ViewModels/ServicesDashboardViewModel.cs	2026-09-07 03:26:44.000000000 +0000
++++ /mnt/data/tdm_r5_fix/tree/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/src/TDM.Gui.Avalonia/ViewModels/ServicesDashboardViewModel.cs	2026-09-07 03:55:31.894944651 +0000
+@@ -75,7 +75,9 @@
+         var value = state ?? string.Empty;
+         if (value.Contains("Complementario", StringComparison.OrdinalIgnoreCase))
+             return ("Complementario", DashboardPalette.Muted);
+-        if (value.Contains("No evaluado", StringComparison.OrdinalIgnoreCase) || value.Contains("N/D", StringComparison.OrdinalIgnoreCase))
++        if (value.Contains("No evaluado", StringComparison.OrdinalIgnoreCase) ||
++            value.Contains("Unknown", StringComparison.OrdinalIgnoreCase) ||
++            value.Contains("N/D", StringComparison.OrdinalIgnoreCase))
+             return ("No evaluado", DashboardPalette.Warn);
+         if (value.Contains("Bajo demanda", StringComparison.OrdinalIgnoreCase))
+             return ("Bajo demanda", DashboardPalette.Good);
+@@ -92,7 +94,7 @@
+         if (value.Contains("Parcial", StringComparison.OrdinalIgnoreCase) || value.Contains("Advertencia", StringComparison.OrdinalIgnoreCase) ||
+             value.Contains("Pending", StringComparison.OrdinalIgnoreCase) || value.Contains("Paused", StringComparison.OrdinalIgnoreCase))
+             return ("Revisar", DashboardPalette.Warn);
+-        return ("N/D", DashboardPalette.Muted);
++        return ("No evaluado", DashboardPalette.Warn);
+     }
+ 
+     private static string ClassifyDependencyOrigin(string name)
+diff -ruN /mnt/data/tdm_r5_orig/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/src/TDM.Gui.Avalonia/ViewModels/SupportDashboardViewModel.cs /mnt/data/tdm_r5_fix/tree/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/src/TDM.Gui.Avalonia/ViewModels/SupportDashboardViewModel.cs
+--- /mnt/data/tdm_r5_orig/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/src/TDM.Gui.Avalonia/ViewModels/SupportDashboardViewModel.cs	2026-09-01 20:36:54.000000000 +0000
++++ /mnt/data/tdm_r5_fix/tree/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/src/TDM.Gui.Avalonia/ViewModels/SupportDashboardViewModel.cs	2026-09-07 03:55:31.895040886 +0000
+@@ -54,34 +54,55 @@
+         var services = operational.Services;
+         var dependencies = operational.Dependencies;
+ 
+-        var runningServices = services.Count(x => DashboardRules.IsRunningState(x.Value));
+-        var runningDependencies = dependencies.Count(x => DashboardRules.IsRunningState(x.Value));
+-        var stoppedServices = services.Count - runningServices;
+-        var stoppedDependencies = dependencies.Count - runningDependencies;
++        var serviceLevels = services.ToDictionary(x => x.Key, x => DashboardRules.OperationalStateLevel(x.Value), StringComparer.OrdinalIgnoreCase);
++        var dependencyLevels = dependencies.ToDictionary(x => x.Key, x => DashboardRules.OperationalStateLevel(x.Value), StringComparer.OrdinalIgnoreCase);
++
++        var healthyServices = serviceLevels.Count(x => x.Value == 1);
++        var healthyDependencies = dependencyLevels.Count(x => x.Value == 1);
++        var reviewServices = serviceLevels.Count(x => x.Value is 0 or 2);
++        var reviewDependencies = dependencyLevels.Count(x => x.Value is 0 or 2);
++        var stoppedServices = serviceLevels.Count(x => x.Value >= 3);
++        var stoppedDependencies = dependencyLevels.Count(x => x.Value >= 3);
++
+         var total = services.Count + dependencies.Count;
+-        var running = runningServices + runningDependencies;
+-        var stopped = total - running;
++        var healthy = healthyServices + healthyDependencies;
++        var review = reviewServices + reviewDependencies;
++        var stopped = stoppedServices + stoppedDependencies;
++        var affected = review + stopped;
++
+         var stoppedNames = services
+-            .Where(x => !DashboardRules.IsRunningState(x.Value))
++            .Where(x => DashboardRules.OperationalStateLevel(x.Value) >= 3)
++            .Select(x => $"Servicio: {DashboardRules.SanitizeVisibleText(x.Key)}")
++            .Concat(dependencies
++                .Where(x => DashboardRules.OperationalStateLevel(x.Value) >= 3)
++                .Select(x => $"Dependencia: {DashboardRules.SanitizeVisibleText(x.Key)}"))
++            .ToList();
++        var reviewNames = services
++            .Where(x => DashboardRules.OperationalStateLevel(x.Value) is 0 or 2)
+             .Select(x => $"Servicio: {DashboardRules.SanitizeVisibleText(x.Key)}")
+             .Concat(dependencies
+-                .Where(x => !DashboardRules.IsRunningState(x.Value))
++                .Where(x => DashboardRules.OperationalStateLevel(x.Value) is 0 or 2)
+                 .Select(x => $"Dependencia: {DashboardRules.SanitizeVisibleText(x.Key)}"))
+             .ToList();
+ 
+-        ServiceValue = total == 0 ? "N/D" : $"{running}/{total}";
+-        ServiceFraction = total == 0 ? 0d : stopped / (double)total;
+-        ServiceDetail = total == 0 ? "sin datos" : stopped == 0 ? "todos en ejecución" : stopped == 1 ? "1 detenido" : $"{stopped} detenidos";
++        ServiceValue = total == 0 ? "N/D" : $"{healthy}/{total}";
++        ServiceFraction = total == 0 ? 0d : affected / (double)total;
++        ServiceDetail = total == 0 ? "sin datos"
++            : affected == 0 ? "sin incidencias"
++            : stopped > 0 && review > 0 ? $"{stopped} detenido(s) · {review} revisar"
++            : stopped > 0 ? (stopped == 1 ? "1 detenido" : $"{stopped} detenidos")
++            : $"{review} revisar";
+         ServiceExtra = total == 0
+             ? string.Empty
+-            : $"Servicios {runningServices}/{services.Count} · Dependencias {runningDependencies}/{dependencies.Count}";
+-        ServiceAccent = total == 0 ? DashboardPalette.Muted : stopped > 0 ? DashboardPalette.Warn : DashboardPalette.Good;
++            : $"Servicios {healthyServices}/{services.Count} · Dependencias {healthyDependencies}/{dependencies.Count}";
++        ServiceAccent = total == 0 ? DashboardPalette.Muted : stopped > 0 ? DashboardPalette.Warn : review > 0 ? DashboardPalette.Warn : DashboardPalette.Good;
+         ServiceHealthyAccent = total == 0 ? DashboardPalette.Muted : DashboardPalette.Good;
+         _servicesFullDetail = total == 0
+             ? "Sin datos de servicios o dependencias."
+-            : $"En ejecución: {running}/{total}. Servicios: {runningServices}/{services.Count}; detenidos: {stoppedServices}. " +
+-              $"Dependencias: {runningDependencies}/{dependencies.Count}; detenidas: {stoppedDependencies}. " +
+-              (stoppedNames.Count == 0 ? "No hay elementos detenidos." : $"Elementos detenidos: {string.Join(", ", stoppedNames)}.");
++            : $"Saludables/neutrales: {healthy}/{total}. Servicios: {healthyServices}/{services.Count}; detenidos: {stoppedServices}; revisar: {reviewServices}. " +
++              $"Dependencias: {healthyDependencies}/{dependencies.Count}; detenidas: {stoppedDependencies}; revisar: {reviewDependencies}. " +
++              (stoppedNames.Count == 0 ? "No hay elementos detenidos. " : $"Elementos detenidos: {string.Join(", ", stoppedNames)}. ") +
++              (reviewNames.Count == 0 ? "No hay elementos pendientes de revisión." : $"Pendientes de revisión: {string.Join(", ", reviewNames)}.");
+ 
+         var modules = moduleSample?.ModuleHealth ?? new Dictionary<string, string>();
+         var criticalModules = modules
+diff -ruN /mnt/data/tdm_r5_orig/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/tests/TDM.AvaloniaParityTests/Program.cs /mnt/data/tdm_r5_fix/tree/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/tests/TDM.AvaloniaParityTests/Program.cs
+--- /mnt/data/tdm_r5_orig/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/tests/TDM.AvaloniaParityTests/Program.cs	2026-09-05 03:54:54.000000000 +0000
++++ /mnt/data/tdm_r5_fix/tree/TDM-v1.0-rc18.21.0-FIX93-CLEAN-R5/tests/TDM.AvaloniaParityTests/Program.cs	2026-09-07 03:55:49.469550443 +0000
+@@ -66,7 +66,7 @@
+             ServiceStates = new Dictionary<string, string>
+             {
+                 ["TermService"] = "Running",
+-                ["RemoteSupportUnattended-Service"] = "Unknown",
++                ["RemoteSupportUnattended-Service"] = "Complementario · Unknown",
+                 ["TSplusGateway"] = "Stopped",
+                 ["gpsvc"] = "Stopped"
+             },
+@@ -199,13 +199,13 @@
+         Run("Support_ServiceRatio", () =>
+         {
+             var vm = new SupportDashboardViewModel(); vm.Apply(samples);
+-            Equal("2/4", vm.ServiceValue);
+-            Equal(0.5d, vm.ServiceFraction);
+-            Equal("2 detenidos", vm.ServiceDetail);
+-            Equal("Servicios 1/3 · Dependencias 1/1", vm.ServiceExtra);
++            Equal("3/4", vm.ServiceValue);
++            Equal(0.25d, vm.ServiceFraction);
++            Equal("1 detenido", vm.ServiceDetail);
++            Equal("Servicios 2/3 · Dependencias 1/1", vm.ServiceExtra);
+             vm.ShowServicesDetailCommand.Execute(null);
+-            True(vm.DetailText.Contains("Servicios: 1/3; detenidos: 2", StringComparison.Ordinal), "El detalle no desglosa servicios.");
+-            True(vm.DetailText.Contains("Dependencias: 1/1; detenidas: 0", StringComparison.Ordinal), "El detalle no desglosa dependencias.");
++            True(vm.DetailText.Contains("Servicios: 2/3; detenidos: 1; revisar: 0", StringComparison.Ordinal), "El detalle no desglosa servicios.");
++            True(vm.DetailText.Contains("Dependencias: 1/1; detenidas: 0; revisar: 0", StringComparison.Ordinal), "El detalle no desglosa dependencias.");
+             var refreshed = latest with
+             {
+                 ServiceStates = new Dictionary<string, string>
+@@ -217,16 +217,20 @@
+             };
+             vm.Apply(new[] { refreshed });
+             Equal("3/4", vm.ServiceValue);
+-            True(vm.DetailText.Contains("En ejecución: 3/4", StringComparison.Ordinal), "El detalle abierto no se actualizó con el mismo snapshot de la tarjeta.");
++            True(vm.DetailText.Contains("Saludables/neutrales: 3/4", StringComparison.Ordinal), "El detalle abierto no se actualizó con el mismo snapshot de la tarjeta.");
+ 
+             var services = new ServicesDashboardViewModel(); services.Apply(samples);
+-            True(services.Services.All(x => x.Status is "En ejecución" or "Detenido"), "Servicios expone un estado técnico no permitido.");
+-            True(services.Dependencies.All(x => x.Status is "En ejecución" or "Detenido"), "Dependencias expone un estado técnico no permitido.");
++            var allowedOperationalStates = new HashSet<string>(StringComparer.Ordinal)
++            {
++                "En ejecución", "Detenido", "Bajo demanda", "No requerido", "Complementario", "Revisar", "No evaluado"
++            };
++            True(services.Services.All(x => allowedOperationalStates.Contains(x.Status)), "Servicios expone un estado fuera del contrato visible permitido.");
++            True(services.Dependencies.All(x => allowedOperationalStates.Contains(x.Status)), "Dependencias expone un estado fuera del contrato visible permitido.");
+             True(!services.Services.Any(x => x.Name.Equals("gpsvc", StringComparison.OrdinalIgnoreCase)), "Se mostró un servicio sin relación con TSplus.");
+             True(!services.Dependencies.Any(x => x.Name.Contains("ProfSvc", StringComparison.OrdinalIgnoreCase)), "Se mostró una dependencia ajena al subgrafo TSplus.");
+             Equal("En ejecución", services.Services.Single(x => x.Name.Equals("TermService", StringComparison.OrdinalIgnoreCase)).Status);
+             Equal("Detenido", services.Services.Single(x => x.Name.Equals("TSplusGateway", StringComparison.OrdinalIgnoreCase)).Status);
+-            Equal("Detenido", services.Services.Single(x => x.Name.Equals("RemoteSupportUnattended-Service", StringComparison.OrdinalIgnoreCase)).Status);
++            Equal("Complementario", services.Services.Single(x => x.Name.Equals("RemoteSupportUnattended-Service", StringComparison.OrdinalIgnoreCase)).Status);
+             Equal("En ejecución", services.Dependencies.Single(x => x.Name.Equals("RemoteSupportUnattended-Service → RPCSS", StringComparison.OrdinalIgnoreCase)).Status);
+         });
+ 

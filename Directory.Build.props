@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <Deterministic>true</Deterministic>
+    <DebugType>portable</DebugType>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="Exists('$(MSBuildProjectDirectory)\packages.lock.json')">true</RestoreLockedMode>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <Version>1.0.0-rc.18.21.0</Version>
+    <Product>TSplus Diagnostic Monitor (TDM)</Product>
+    <AssemblyTitle>TSplus Diagnostic Monitor (TDM)</AssemblyTitle>
+    <Description>Diagnóstico continuo, soporte multi-servidor, observabilidad nativa y resolución guiada para Remote Access, 2FA y Advanced Security en entornos TSplus y Windows.</Description>
+  </PropertyGroup>
+</Project>

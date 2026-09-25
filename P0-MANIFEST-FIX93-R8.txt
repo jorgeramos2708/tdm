@@ -1,0 +1,20 @@
+TDM FIX93 -> R8 P0
+
+Core P0 files touched:
+src/TDM.Models/DiagnosticModels.cs
+src/TDM.Models/DiagnosticEventCatalog.cs
+src/TDM.Collectors.Windows/TsplusServiceClassifier.cs
+src/TDM.Collectors.TSplus/LightweightTsplusStateCollector.cs
+src/TDM.Correlation/RootCauseCorrelator.cs
+src/TDM.Correlation/DiagnosticPrecisionAnalyzer.cs
+src/TDM.Correlation/FunctionalImpactAnalyzer.cs
+src/TDM.Correlation/SafeActionPlanner.cs
+src/TDM.Application/DiagnosticWorkflow.cs
+src/TDM.Persistence/StateReportIntegrator.cs
+src/TDM.Persistence/ObservabilityStore.cs
+src/TDM.Service/TdmWorker.cs
+src/TDM.Reporting/CausalResponsibilityFormatter.cs
+src/TDM.Reporting/ReportExporter.cs
+src/TDM.Reporting/DiagnosticNarrativeBuilder.cs
+tests/TDM.ProductionTests/Program.cs
+P0-CAMBIOS-FIX93-R8.md

@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0-windows</TargetFramework></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\TDM.Models\TDM.Models.csproj" />
+    <ProjectReference Include="..\TDM.Core\TDM.Core.csproj" />
+  </ItemGroup>
+</Project>

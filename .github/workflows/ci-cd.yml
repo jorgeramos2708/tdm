@@ -1,0 +1,250 @@
+name: TDM CI/CD
+
+on:
+  push:
+    branches: [main, release/*]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          cache: true
+
+      - name: Restore dependencies (locked mode)
+        run: dotnet restore TDM.sln --locked-mode
+
+      - name: Build Release (warnings as errors)
+        run: dotnet build TDM.sln -c Release --no-restore -warnaserror
+
+      - name: Run Parity Tests
+        run: dotnet test tests/TDM.AvaloniaParityTests/TDM.AvaloniaParityTests.csproj -c Release --no-build --logger "trx;LogFileName=parity-results.trx"
+
+      - name: Run Production Tests
+        run: dotnet test tests/TDM.ProductionTests/TDM.ProductionTests.csproj -c Release --no-build --logger "trx;LogFileName=production-results.trx"
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            tests/**/bin/Release/**/*.trx
+            tests/**/TestResults/*.trx
+
+  verify-gate:
+    name: VERIFY Gate
+    runs-on: windows-latest
+    needs: build-and-test
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          cache: true
+
+      - name: Restore dependencies (locked mode)
+        run: dotnet restore TDM.sln --locked-mode
+
+      - name: Build Release (warnings as errors)
+        run: dotnet build TDM.sln -c Release --no-restore -warnaserror
+
+      - name: Run VERIFY-TDM-READINESS
+        run: .\VERIFY-TDM-READINESS.cmd
+        shell: powershell
+
+      - name: Publish portable
+        run: .\PUBLISH-PORTABLE-WIN-X64.cmd
+        shell: powershell
+
+      - name: Verify portable executable exists
+        run: |
+          $exe = "dist\TDM-portable-win-x64\TDM.exe"
+          if (-not (Test-Path $exe)) { throw "Portable executable no encontrado: $exe" }
+          $size = (Get-Item $exe).Length
+          Write-Host "Portable OK: $exe ($size bytes)"
+        shell: powershell
+
+      - name: Verify original ZIP integrity
+        run: |
+          $zip = "TDM-v1.0-rc18.21.0-FIX93.zip"
+          if (Test-Path $zip) {
+            $hash = Get-FileHash -Algorithm SHA256 $zip | Select-Object -ExpandProperty Hash
+            $expected = "63E56DE60F0511FA456AEBEE3BB4C752A3FA0FED34B8F09A94B7F65C90DB3413"
+            if ($hash -ne $expected) { throw "ZIP hash mismatch: $hash != $expected" }
+            Write-Host "Original ZIP integrity OK: $hash"
+          } else {
+            Write-Warning "Original ZIP no encontrado en raíz del repo (se omite verificación)"
+          }
+        shell: powershell
+
+  sbom:
+    name: Generate SBOM
+    runs-on: windows-latest
+    needs: build-and-test
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          cache: true
+
+      - name: Install Syft (SBOM generator)
+        run: |
+          $url = "https://github.com/anchore/syft/releases/download/v0.101.0/syft_0.101.0_windows_amd64.zip"
+          Invoke-WebRequest -Uri $url -OutFile syft.zip
+          Expand-Archive -Path syft.zip -DestinationPath syft
+          $env:PATH += ";$PWD\syft"
+        shell: powershell
+
+      - name: Build Release (for SBOM)
+        run: dotnet build TDM.sln -c Release --no-restore -warnaserror
+
+      - name: Generate SBOM (SPDX JSON)
+        run: syft packages dir:. -o spdx-json=sbom.spdx.json
+
+      - name: Generate SBOM (CycloneDX JSON)
+        run: syft packages dir:. -o cyclonedx-json=sbom.cyclonedx.json
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            sbom.spdx.json
+            sbom.cyclonedx.json
+          retention-days: 90
+
+      - name: Upload SBOM to GitHub Dependency Graph (if release)
+        if: github.event_name == 'release'
+        uses: github/dependency-submission-action@v4
+        with:
+          sbom-file: sbom.cyclonedx.json
+
+  nuget-verify:
+    name: NuGet Package Verification
+    runs-on: windows-latest
+    needs: build-and-test
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          cache: true
+
+      - name: Verify locked-mode restore integrity
+        run: |
+          # Verify all packages.lock.json match actual dependencies
+          dotnet restore TDM.sln --locked-mode --verify-no-unlocked
+        shell: powershell
+
+      - name: Check for vulnerable packages
+        run: |
+          dotnet list TDM.sln package --vulnerable --include-transitive
+        shell: powershell
+
+      - name: Check for outdated packages (warn only)
+        run: |
+          dotnet list TDM.sln package --outdated --include-transitive
+        shell: powershell
+
+  portable-release:
+    name: Create Portable Release
+    runs-on: windows-latest
+    needs: [verify-gate, sbom, nuget-verify]
+    if: github.event_name == 'release'
+    timeout-minutes: 20
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          cache: true
+
+      - name: Restore dependencies (locked mode)
+        run: dotnet restore TDM.sln --locked-mode
+
+      - name: Build Release
+        run: dotnet build TDM.sln -c Release --no-restore -warnaserror
+
+      - name: Publish Portable
+        run: .\PUBLISH-PORTABLE-WIN-X64.cmd
+        shell: powershell
+
+      - name: Verify portable
+        run: |
+          $exe = "dist\TDM-portable-win-x64\TDM.exe"
+          if (-not (Test-Path $exe)) { throw "Portable executable no encontrado" }
+          # Quick smoke test: run with --version or similar
+          & $exe --help 2>&1 | Select-Object -First 5
+        shell: powershell
+
+      - name: Create release archive
+        run: |
+          $version = "${{ github.event.release.tag_name }}"
+          $archive = "TDM-${version}-portable-win-x64.zip"
+          Compress-Archive -Path "dist\TDM-portable-win-x64\*" -DestinationPath $archive -Force
+          Write-Host "Archive created: $archive"
+        shell: powershell
+
+      - name: Generate SHA256 for release
+        run: |
+          $archive = "TDM-${{ github.event.release.tag_name }}-portable-win-x64.zip"
+          $hash = Get-FileHash -Algorithm SHA256 $archive | Select-Object -ExpandProperty Hash
+          Set-Content -Path "$archive.sha256" -Value $hash
+          Write-Host "SHA256: $hash"
+        shell: powershell
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            TDM-${{ github.event.release.tag_name }}-portable-win-x64.zip
+            TDM-${{ github.event.release.tag_name }}-portable-win-x64.zip.sha256
+            sbom.spdx.json
+            sbom.cyclonedx.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

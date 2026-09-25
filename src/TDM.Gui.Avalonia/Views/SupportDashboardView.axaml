@@ -1,0 +1,88 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:TDM.Gui.Avalonia.Controls"
+             x:Class="TDM.Gui.Avalonia.Views.SupportDashboardView">
+  <StackPanel Spacing="12">
+    <TextBlock Text="CENTRO DE SOPORTE" Classes="panel-title" />
+
+    <Grid ColumnDefinitions="1.18*,0.82*">
+      <Border Grid.Column="0" Classes="workspace-slice" Margin="0,0,18,0">
+        <StackPanel Spacing="12">
+          <TextBlock Classes="section-title" Text="ESTADO OPERATIVO" />
+          <Grid ColumnDefinitions="*,*">
+            <Grid Grid.Column="0" ColumnDefinitions="118,*" Margin="0,0,18,0">
+              <Grid Width="108" Height="108" HorizontalAlignment="Left" VerticalAlignment="Center">
+                <controls:DonutGauge Fraction="{Binding ServiceFraction}" AccentBrush="{Binding ServiceAccent}" TrackBrush="{Binding ServiceHealthyAccent}" Width="108" Height="108" StrokeThickness="8" />
+                <TextBlock Text="{Binding ServiceValue}" Foreground="{Binding ServiceAccent}" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Grid>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                <TextBlock Text="SERVICIOS / DEPENDENCIAS" Classes="section-title" FontSize="11" />
+                <TextBlock Text="{Binding ServiceDetail}" Classes="value-strong" TextAlignment="Left" HorizontalAlignment="Left" FontSize="12" />
+                <TextBlock Text="{Binding ServiceExtra}" Classes="kpi-caption" MaxWidth="260" TextWrapping="Wrap" ToolTip.Tip="{Binding ServiceExtra}" />
+                <Button Classes="detail" Content="Ver detalle" Command="{Binding ShowServicesDetailCommand}" HorizontalAlignment="Left" Margin="0,5,0,0" />
+              </StackPanel>
+            </Grid>
+
+            <Grid Grid.Column="1" ColumnDefinitions="118,*">
+              <Grid Width="108" Height="108" HorizontalAlignment="Left" VerticalAlignment="Center">
+                <controls:DonutGauge Fraction="{Binding ModuleFraction}" AccentBrush="{Binding ModuleAccent}" TrackBrush="{Binding ModuleHealthyAccent}" Width="108" Height="108" StrokeThickness="8" />
+                <TextBlock Text="{Binding ModuleValue}" Foreground="{Binding ModuleAccent}" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" MaxWidth="78" TextWrapping="Wrap" />
+              </Grid>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                <TextBlock Text="MÓDULOS TSPLUS" Classes="section-title" FontSize="11" />
+                <TextBlock Text="{Binding ModuleDetail}" Classes="value-strong" TextAlignment="Left" HorizontalAlignment="Left" FontSize="12" />
+                <TextBlock Text="{Binding ModuleExtra}" Classes="kpi-caption" MaxWidth="270" TextWrapping="Wrap" ToolTip.Tip="{Binding ModuleExtra}" />
+                <Button Classes="detail" Content="Ver detalle" Command="{Binding ShowModulesDetailCommand}" HorizontalAlignment="Left" Margin="0,5,0,0" />
+              </StackPanel>
+            </Grid>
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <StackPanel Grid.Column="1" Spacing="0">
+        <Border Classes="workspace-section" Padding="4,10,4,14">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="4">
+              <TextBlock Classes="section-title" Text="SESIONES" />
+              <TextBlock Text="{Binding SessionCounts}" Classes="kpi-caption" />
+              <TextBlock Text="{Binding SessionSummary}" Foreground="{Binding SessionIncidentAccent}" FontWeight="SemiBold" FontSize="11" />
+              <Button Classes="detail" Content="Ver detalle" Command="{Binding ShowSessionsDetailCommand}" HorizontalAlignment="Left" Margin="0,5,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center">
+              <TextBlock Text="{Binding SessionValue}" Foreground="{Binding SessionAccent}" FontSize="34" FontWeight="SemiBold" HorizontalAlignment="Right" />
+              <TextBlock Text="TOTAL OBSERVADAS" Classes="kpi-caption" HorizontalAlignment="Right" />
+            </StackPanel>
+          </Grid>
+        </Border>
+
+        <Border Classes="workspace-section" Padding="4,14,4,10">
+          <Grid ColumnDefinitions="*,Auto,24,Auto">
+            <StackPanel>
+              <TextBlock Classes="section-title" Text="INCIDENTES" />
+              <TextBlock Text="Ventana de investigación actual" Classes="kpi-caption" Margin="0,4,0,0" />
+              <Button Classes="detail" Content="Ver detalle" Command="{Binding ShowIncidentsDetailCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center">
+              <TextBlock Text="{Binding CriticalIncidents}" Foreground="#FF4D4F" FontWeight="SemiBold" FontSize="24" HorizontalAlignment="Center" />
+              <TextBlock Text="CRÍTICO" Foreground="#FF4D4F" FontSize="10" HorizontalAlignment="Center" />
+            </StackPanel>
+            <StackPanel Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Center">
+              <TextBlock Text="{Binding ErrorIncidents}" Foreground="#FF8A3D" FontWeight="SemiBold" FontSize="24" HorizontalAlignment="Center" />
+              <TextBlock Text="ERROR" Foreground="#FF8A3D" FontSize="10" HorizontalAlignment="Center" />
+            </StackPanel>
+          </Grid>
+        </Border>
+      </StackPanel>
+    </Grid>
+
+    <Border Classes="workspace-section" IsVisible="{Binding IsDetailVisible}">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Spacing="8">
+          <TextBlock Text="{Binding DetailTitle}" Classes="section-title" FontSize="16" />
+          <TextBlock Text="{Binding DetailText}" TextWrapping="Wrap" />
+        </StackPanel>
+        <Button Grid.Column="1" Classes="detail" Content="Cerrar" Command="{Binding CloseDetailCommand}" VerticalAlignment="Top" Margin="12,0,0,0" />
+      </Grid>
+    </Border>
+  </StackPanel>
+</UserControl>

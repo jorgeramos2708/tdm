@@ -1,0 +1,146 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:TDM.Gui.Avalonia.Controls"
+             x:Class="TDM.Gui.Avalonia.Views.PreventiveDashboardView">
+  <StackPanel Spacing="12">
+    <TextBlock Text="PREVENTIVO" Classes="panel-title" />
+
+    <!-- Resumen preventivo principal -->
+    <Border Classes="metric-strip">
+    <Grid ColumnDefinitions="*,*,*,*">
+      <Border Grid.Column="0" Classes="metric-cell">
+        <StackPanel Spacing="4">
+          <TextBlock Classes="section-title" Text="TRANSICIONES"/>
+          <TextBlock Text="{Binding Transitions}" FontSize="28" Foreground="#FFD166"/>
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="1" Classes="metric-cell">
+        <StackPanel Spacing="4">
+          <TextBlock Classes="section-title" Text="CAMBIOS FRENTE A LA REFERENCIA"/>
+          <TextBlock Text="{Binding BaselineDrift}" FontSize="28" Foreground="#FFD166"/>
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="2" Classes="metric-cell">
+        <StackPanel Spacing="4">
+          <TextBlock Classes="section-title" Text="RECURRENCIAS"/>
+          <TextBlock Text="{Binding CrashLoops}" FontSize="28" Foreground="#FF8A3D"/>
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="3" Classes="metric-cell" BorderThickness="0">
+        <StackPanel Spacing="4">
+          <TextBlock Classes="section-title" Text="SALUD MÓDULOS"/>
+          <TextBlock Text="{Binding ModuleHealth}" Foreground="{Binding ModuleAccent}" FontSize="20" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding ModuleDetail}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+        </StackPanel>
+      </Border>
+    </Grid>
+    </Border>
+
+    <!-- Señales preventivas principales -->
+    <Border Classes="metric-strip">
+    <Grid ColumnDefinitions="*,*,*,*">
+      <Border Grid.Column="0" Classes="metric-cell">
+        <StackPanel Spacing="5">
+          <TextBlock Classes="section-title" Text="RIESGO PREVENTIVO"/>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="{Binding PreventiveRisk}" Foreground="{Binding PreventiveRiskAccent}" FontSize="20" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding PreventiveScore}" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="1" Classes="metric-cell">
+        <StackPanel Spacing="5">
+          <TextBlock Classes="section-title" Text="SERVICIOS Y DEPENDENCIAS"/>
+          <TextBlock Text="{Binding DependencyRisk}" Foreground="{Binding DependencyAccent}" FontSize="20" FontWeight="SemiBold"/>
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="2" Classes="metric-cell">
+        <StackPanel Spacing="5">
+          <TextBlock Classes="section-title" Text="PREDICCIÓN DE SATURACIÓN"/>
+          <TextBlock Text="{Binding SaturationForecast}" Foreground="{Binding SaturationAccent}" FontSize="20" FontWeight="SemiBold"/>
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="3" Classes="metric-cell" BorderThickness="0">
+        <StackPanel Spacing="5">
+          <TextBlock Classes="section-title" Text="INESTABILIDAD OPERATIVA"/>
+          <TextBlock Text="{Binding InstabilityCount}" Foreground="{Binding InstabilityAccent}" FontSize="28" FontWeight="SemiBold"/>
+        </StackPanel>
+      </Border>
+    </Grid>
+    </Border>
+
+    <!-- Evidencia y acciones agrupadas por divisores, sin cajas repetitivas -->
+    <Grid ColumnDefinitions="*,*,*">
+      <Border Grid.Column="0" Classes="workspace-slice" MinHeight="190" Margin="0,0,10,0">
+        <StackPanel Spacing="7">
+          <TextBlock Classes="section-title" Text="SEÑALES A VIGILAR"/>
+          <ItemsControl ItemsSource="{Binding Signals}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border BorderBrush="{Binding Accent}" BorderThickness="0,0,0,1" Padding="0,6">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="{Binding Name}" Foreground="{Binding Accent}" FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="10" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Column="1" Classes="workspace-slice" MinHeight="190" Margin="0,0,10,0">
+        <StackPanel Spacing="7">
+          <TextBlock Classes="section-title" Text="ESTABILIDAD DE SERVICIOS/DEPENDENCIAS"/>
+          <ItemsControl ItemsSource="{Binding StabilityRows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border BorderBrush="{Binding Accent}" BorderThickness="0,0,0,1" Padding="0,6">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="{Binding Name}" Foreground="{Binding Accent}" FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="10" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Column="2" Classes="workspace-section" MinHeight="190">
+        <StackPanel Spacing="7">
+          <TextBlock Classes="section-title" Text="ACCIONES PREVENTIVAS SUGERIDAS"/>
+          <ItemsControl ItemsSource="{Binding Actions}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border BorderBrush="{Binding Accent}" BorderThickness="0,0,0,1" Padding="0,6">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="{Binding Name}" Foreground="{Binding Accent}" FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="10" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Border Classes="workspace-section">
+      <StackPanel Spacing="7">
+        <TextBlock Classes="section-title" Text="TENDENCIA PREVENTIVA DE RECURSOS"/>
+        <StackPanel Orientation="Horizontal" Spacing="18">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock Text="CPU" Foreground="#39D0FF"/>
+            <TextBlock Text="{Binding CpuValue}" FontWeight="SemiBold"/>
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock Text="Memoria" Foreground="#A78BFA"/>
+            <TextBlock Text="{Binding MemoryValue}" FontWeight="SemiBold"/>
+          </StackPanel>
+        </StackPanel>
+        <controls:LineChart Height="250" SeriesA="{Binding CpuSeries}" SeriesB="{Binding MemoryUsedSeries}" Maximum="100" WarningThreshold="85" CriticalThreshold="95" SeriesABrush="#39D0FF" SeriesBBrush="#A78BFA" SeriesALabel="CPU" SeriesBLabel="Memoria" ValueSuffix="%"/>
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

@@ -1,0 +1,2 @@
+﻿foreach (var f in report.Hallazgos.OrderByDescending(x => x.Severidad).Take(200))
+            sb.Append($"<tr><td>{H(f.Severidad.ToString())}</td><td>{H(EvidenceSourceForFindingReport(f))}</td><td>{H(f.Capa.ToString())}</td><td>{H(f.Componente)}</td>

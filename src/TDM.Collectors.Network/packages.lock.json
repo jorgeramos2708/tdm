@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net8.0-windows7.0": {
+      "System.CodeDom": {
+        "type": "Transitive",
+        "resolved": "8.0.0",
+        "contentHash": "WTlRjL6KWIMr/pAaq3rYqh0TJlzpouaQ/W1eelssHgtlwHAH25jXTkUphTYx9HaIIf7XA6qs/0+YhtLEQRkJ+Q=="
+      },
+      "System.Diagnostics.EventLog": {
+        "type": "Transitive",
+        "resolved": "8.0.1",
+        "contentHash": "n1ZP7NM2Gkn/MgD8+eOT5MulMj6wfeQMNS2Pizvq5GHCZfjlFMXV2irQlQmJhwA2VABC57M0auudO89Iu2uRLg=="
+      },
+      "System.Management": {
+        "type": "Transitive",
+        "resolved": "8.0.0",
+        "contentHash": "jrK22i5LRzxZCfGb+tGmke2VH7oE0DvcDlJ1HAKYU8cPmD8XnpUT0bYn2Gy98GEhGjtfbR/sxKTVb+dE770pfA==",
+        "dependencies": {
+          "System.CodeDom": "8.0.0"
+        }
+      },
+      "System.Security.Cryptography.ProtectedData": {
+        "type": "Transitive",
+        "resolved": "8.0.0",
+        "contentHash": "+TUFINV2q2ifyXauQXRwy4CiBhqvDEDZeVJU7qfxya4aRYOKzVBpN+4acx25VcPB9ywUN6C0n8drWl110PhZEg=="
+      },
+      "tdm.core": {
+        "type": "Project",
+        "dependencies": {
+          "System.Diagnostics.EventLog": "[8.0.1, )",
+          "System.Management": "[8.0.0, )",
+          "System.Security.Cryptography.ProtectedData": "[8.0.0, )",
+          "TDM.Models": "[1.0.0-rc.18.21.0, )",
+          "TDM.Persistence": "[1.0.0-rc.18.21.0, )"
+        }
+      },
+      "tdm.models": {
+        "type": "Project"
+      },
+      "tdm.persistence": {
+        "type": "Project",
+        "dependencies": {
+          "TDM.Models": "[1.0.0-rc.18.21.0, )"
+        }
+      }
+    }
+  }
+}

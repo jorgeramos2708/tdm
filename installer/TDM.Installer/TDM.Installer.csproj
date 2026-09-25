@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <UseAppHost>true</UseAppHost>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <AssemblyName>TDM-Setup-x64</AssemblyName>
+    <RootNamespace>TDM.Installer</RootNamespace>
+    <PackageId>TDM.Setup.x64</PackageId>
+    <AssemblyTitle>Instalador de TSplus Diagnostic Monitor</AssemblyTitle>
+    <Product>TSplus Diagnostic Monitor (TDM)</Product>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\src\TDM.Gui.Avalonia\Assets\tdm-logo.ico</ApplicationIcon>
+    <TdmPayloadZip>$(MSBuildThisFileDirectory)..\..\dist\installer-work\payload.zip</TdmPayloadZip>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="$(TdmPayloadZip)" LogicalName="TDM.Payload.zip" />
+    <EmbeddedResource Include="Install-TDM.cmd" LogicalName="TDM.Install.cmd" />
+  </ItemGroup>
+
+  <Target Name="ValidateTdmPayload" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(TdmPayloadZip)')" Text="No existe el payload del instalador: $(TdmPayloadZip)" />
+  </Target>
+</Project>

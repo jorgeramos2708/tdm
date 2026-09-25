@@ -1,0 +1,53 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="TDM.Gui.Avalonia.Views.MultiServerDashboardView">
+  <StackPanel Spacing="12">
+    <TextBlock Text="SERVIDORES/GRANJA" Classes="panel-title" />
+    <StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Text="Coordinador:" Classes="muted"/><TextBlock Text="{Binding Coordinator}" FontWeight="SemiBold"/></StackPanel>
+    <Border Classes="metric-strip">
+      <Grid ColumnDefinitions="*,*,*,*">
+        <Border Grid.Column="0" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="NODOS"/><TextBlock Text="{Binding Total}" FontSize="30"/></StackPanel></Border>
+        <Border Grid.Column="1" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="EN LÍNEA"/><TextBlock Text="{Binding Online}" FontSize="30" Foreground="#67E8A5"/></StackPanel></Border>
+        <Border Grid.Column="2" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="DEGRADADOS"/><TextBlock Text="{Binding Degraded}" FontSize="30" Foreground="#FFD166"/></StackPanel></Border>
+        <Border Grid.Column="3" Classes="metric-cell" BorderThickness="0"><StackPanel><TextBlock Classes="section-title" Text="SIN DATOS"/><TextBlock Text="{Binding Offline}" FontSize="30" Foreground="#8FA3B8"/></StackPanel></Border>
+      </Grid>
+    </Border>
+    <Border Classes="workspace-section">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="section-title" Text="ESTADO DE NODOS MONITOREADOS"/>
+        <Grid ColumnDefinitions="170,120,100,110,100,80,80,80,80,*" Margin="0,4,0,0">
+          <TextBlock Text="SERVIDOR" Classes="muted" FontSize="10" FontWeight="SemiBold"/>
+          <TextBlock Grid.Column="1" Text="GRUPO" Classes="muted" FontSize="10" FontWeight="SemiBold"/>
+          <TextBlock Grid.Column="2" Text="ROL" Classes="muted" FontSize="10" FontWeight="SemiBold"/>
+          <TextBlock Grid.Column="3" Text="CONECTIVIDAD" Classes="muted" FontSize="10" FontWeight="SemiBold"/>
+          <TextBlock Grid.Column="4" Text="SALUD" Classes="muted" FontSize="10" FontWeight="SemiBold"/>
+          <TextBlock Grid.Column="5" Text="CPU" Classes="muted" FontSize="10" FontWeight="SemiBold"/>
+          <TextBlock Grid.Column="6" Text="MEMORIA" Classes="muted" FontSize="10" FontWeight="SemiBold"/>
+          <TextBlock Grid.Column="7" Text="SESIONES" Classes="muted" FontSize="10" FontWeight="SemiBold"/>
+          <TextBlock Grid.Column="8" Text="INCIDENTES" Classes="muted" FontSize="10" FontWeight="SemiBold"/>
+          <TextBlock Grid.Column="9" Text="DETALLE" Classes="muted" FontSize="10" FontWeight="SemiBold"/>
+        </Grid>
+        <ItemsControl ItemsSource="{Binding Nodes}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border BorderBrush="#203347" BorderThickness="0,0,0,1" Padding="0,7">
+                <Grid ColumnDefinitions="170,120,100,110,100,80,80,80,80,*">
+                  <TextBlock Text="{Binding Server}" FontWeight="SemiBold"/>
+                  <TextBlock Grid.Column="1" Text="{Binding Group}" Classes="muted"/>
+                  <TextBlock Grid.Column="2" Text="{Binding Role}" Classes="muted"/>
+                  <TextBlock Grid.Column="3" Text="{Binding Connectivity}" Foreground="{Binding Accent}" FontWeight="SemiBold"/>
+                  <TextBlock Grid.Column="4" Text="{Binding Health}" Foreground="{Binding Accent}" FontWeight="SemiBold"/>
+                  <TextBlock Grid.Column="5" Text="{Binding Cpu}"/>
+                  <TextBlock Grid.Column="6" Text="{Binding Memory}"/>
+                  <TextBlock Grid.Column="7" Text="{Binding Sessions}"/>
+                  <TextBlock Grid.Column="8" Text="{Binding Incidents}"/>
+                  <TextBlock Grid.Column="9" Text="{Binding Detail}" TextWrapping="Wrap" Classes="muted"/>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

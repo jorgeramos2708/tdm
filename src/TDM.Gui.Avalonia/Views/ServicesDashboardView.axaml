@@ -1,0 +1,74 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="TDM.Gui.Avalonia.Views.ServicesDashboardView">
+  <StackPanel Spacing="12">
+    <TextBlock Text="SERVICIOS Y DEPENDENCIAS" FontSize="24" FontWeight="SemiBold" Foreground="#39D0FF" />
+    <Grid ColumnDefinitions="*,*">
+      <Border Grid.Column="0" Classes="workspace-slice" Margin="0,0,12,0">
+        <StackPanel Spacing="0">
+          <TextBlock Classes="section-title" Text="SERVICIOS" Margin="0,0,0,10" />
+          <Grid ColumnDefinitions="18,*,118,122" Margin="0,0,0,5">
+            <TextBlock Grid.Column="1" Text="SERVICIO" Classes="muted" FontSize="11" FontWeight="SemiBold" Margin="8,0" />
+            <TextBlock Grid.Column="2" Text="ORIGEN" Classes="muted" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" />
+            <TextBlock Grid.Column="3" Text="ESTADO" Classes="muted" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" />
+          </Grid>
+          <Border Height="1" Background="#294057" Margin="0,0,0,2" />
+          <ItemsControl ItemsSource="{Binding Services}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border BorderBrush="#1D3042" BorderThickness="0,0,0,1" Padding="0,7">
+                  <Grid ColumnDefinitions="18,*,118,122" VerticalAlignment="Center">
+                    <Border Width="8" Height="8" CornerRadius="4" Background="{Binding Accent}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="{Binding Name}" Margin="8,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+                    <Border Grid.Column="2" MinWidth="92" MaxWidth="104" Padding="8,3" CornerRadius="0" Background="Transparent" BorderBrush="{Binding OriginAccent}" BorderThickness="0" HorizontalAlignment="Center" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding Origin}" Foreground="{Binding OriginAccent}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" />
+                    </Border>
+                    <Border Grid.Column="3" MinWidth="112" Padding="8,3" CornerRadius="0" Background="Transparent" BorderBrush="{Binding Accent}" BorderThickness="0" HorizontalAlignment="Center" VerticalAlignment="Center">
+                      <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Border Width="7" Height="7" CornerRadius="4" Background="{Binding Accent}" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding Status}" Foreground="{Binding Accent}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Border>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Column="1" Classes="workspace-section">
+        <StackPanel Spacing="0">
+          <TextBlock Classes="section-title" Text="DEPENDENCIAS" Margin="0,0,0,10" />
+          <Grid ColumnDefinitions="18,*,118,122" Margin="0,0,0,5">
+            <TextBlock Grid.Column="1" Text="DEPENDENCIA" Classes="muted" FontSize="11" FontWeight="SemiBold" Margin="8,0" />
+            <TextBlock Grid.Column="2" Text="ORIGEN" Classes="muted" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" />
+            <TextBlock Grid.Column="3" Text="ESTADO" Classes="muted" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" />
+          </Grid>
+          <Border Height="1" Background="#294057" Margin="0,0,0,2" />
+          <ItemsControl ItemsSource="{Binding Dependencies}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border BorderBrush="#1D3042" BorderThickness="0,0,0,1" Padding="0,7">
+                  <Grid ColumnDefinitions="18,*,118,122" VerticalAlignment="Center">
+                    <Border Width="8" Height="8" CornerRadius="4" Background="{Binding Accent}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="{Binding Name}" Margin="8,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+                    <Border Grid.Column="2" MinWidth="92" MaxWidth="104" Padding="8,3" CornerRadius="0" Background="Transparent" BorderBrush="{Binding OriginAccent}" BorderThickness="0" HorizontalAlignment="Center" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding Origin}" Foreground="{Binding OriginAccent}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" />
+                    </Border>
+                    <Border Grid.Column="3" MinWidth="112" Padding="8,3" CornerRadius="0" Background="Transparent" BorderBrush="{Binding Accent}" BorderThickness="0" HorizontalAlignment="Center" VerticalAlignment="Center">
+                      <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Border Width="7" Height="7" CornerRadius="4" Background="{Binding Accent}" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding Status}" Foreground="{Binding Accent}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Border>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+    </Grid>
+  </StackPanel>
+</UserControl>

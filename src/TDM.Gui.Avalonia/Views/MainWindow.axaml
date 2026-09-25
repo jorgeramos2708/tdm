@@ -1,0 +1,136 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:TDM.Gui.Avalonia.Views"
+        xmlns:avares="clr-namespace:Avalonia;assembly=Avalonia.Base"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="1500" d:DesignHeight="900"
+        x:Class="TDM.Gui.Avalonia.Views.MainWindow"
+        Title="TSplus Diagnostic Monitor (TDM)"
+        Icon="/Assets/tdm-logo.ico"
+        MinWidth="1180" MinHeight="600" Width="1500" Height="900"
+        WindowStartupLocation="CenterScreen">
+  <Grid RowDefinitions="Auto,*" Margin="18">
+    <Border Classes="toolbar">
+      <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+        <Grid ColumnDefinitions="Auto,Auto" VerticalAlignment="Center">
+          <Image Width="78" Height="78" Source="/Assets/tdm-logo.png" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          <StackPanel Grid.Column="1" Spacing="0" VerticalAlignment="Center" Margin="14,0,0,0">
+            <TextBlock Text="TSplus" FontSize="17" FontWeight="SemiBold" Foreground="#19C8FF" />
+            <TextBlock Text="Diagnostic" FontSize="19" FontWeight="Bold" Foreground="#EAF7FF" />
+            <TextBlock Text="Monitor" FontSize="19" FontWeight="Bold" Foreground="#35F2C0" />
+            <TextBlock Text="Monitoreo y diagnóstico operativo" FontSize="11" Foreground="#FFFFFF" Margin="0,4,0,0" />
+          </StackPanel>
+        </Grid>
+
+        <Grid Grid.Column="1" ColumnDefinitions="190,16,Auto" RowDefinitions="Auto,Auto" Margin="12,0,0,0" VerticalAlignment="Center">
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="PERIODO DE INVESTIGACIÓN" Classes="section-title" FontSize="11" VerticalAlignment="Bottom" Margin="0,0,0,6" />
+          <TextBlock Grid.Row="0" Grid.Column="2" Text="TIEMPO DE EJECUCIÓN" Classes="section-title" FontSize="11" VerticalAlignment="Bottom" Margin="0,0,0,6" />
+
+          <ComboBox Grid.Row="1" Grid.Column="0" Classes="toolbar-combo" ItemsSource="{Binding PeriodOptions}" SelectedItem="{Binding SelectedPeriod}" IsEnabled="{Binding Diagnostics.CanStartDiagnostic}" />
+
+          <Grid Grid.Row="1" Grid.Column="2" ColumnDefinitions="40,8,40,12,104,16,40,12,40,12,40" Height="40" VerticalAlignment="Center">
+            <Button Grid.Column="0" Classes="icon-nav" Width="40" Height="40" Command="{Binding Diagnostics.RunDiagnosticCommand}" IsEnabled="{Binding Diagnostics.CanStartDiagnostic}" ToolTip.Tip="Ejecutar diagnóstico" VerticalAlignment="Center" HorizontalAlignment="Center">
+              <Viewbox Width="24" Height="24" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Polygon Points="6,3 20,12 6,21" Fill="#67E8A5" Stroke="#67E8A5" StrokeThickness="1.5" StrokeLineCap="Round" StrokeJoin="Round" />
+              </Viewbox>
+            </Button>
+            <Button Grid.Column="2" Classes="icon-nav" Width="40" Height="40" Command="{Binding Diagnostics.CancelDiagnosticCommand}" IsEnabled="{Binding Diagnostics.CanStopDiagnostic}" ToolTip.Tip="Pausar / detener diagnóstico" VerticalAlignment="Center" HorizontalAlignment="Center">
+              <Viewbox Width="24" Height="24" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Canvas Width="24" Height="24">
+                  <Rectangle Canvas.Left="6" Canvas.Top="4" Width="4" Height="16" RadiusX="1" RadiusY="1" Fill="#F5FAFF" />
+                  <Rectangle Canvas.Left="14" Canvas.Top="4" Width="4" Height="16" RadiusX="1" RadiusY="1" Fill="#F5FAFF" />
+                </Canvas>
+              </Viewbox>
+            </Button>
+            <Border Grid.Column="4" Width="104" Height="40" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" VerticalAlignment="Center" Padding="0">
+              <TextBlock Text="{Binding Diagnostics.ExecutionTimerText}" FontFamily="fonts:Tdm#DejaVu Sans Mono" FontSize="20" FontWeight="Bold" Foreground="#F5FAFF" VerticalAlignment="Center" HorizontalAlignment="Center" TextAlignment="Center" Margin="0,3,0,0" />
+            </Border>
+
+            <Button Grid.Column="6" Classes="icon-nav" Width="38" Height="38" Command="{Binding RefreshFromToolbarCommand}" VerticalAlignment="Center" HorizontalAlignment="Center" ToolTip.Tip="Actualizar y reiniciar cronómetro">
+              <Viewbox Width="24" Height="24" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Path Data="M21,12 A9,9 0 1 1 12,3 C14.52,3 16.93,4 18.74,5.74 L21,8 M21,3 V8 H16"
+                      Stroke="#F5FAFF" StrokeThickness="2" StrokeLineCap="Round" StrokeJoin="Round" Fill="Transparent" />
+              </Viewbox>
+            </Button>
+            <Button Grid.Column="8" Classes="icon-nav" Width="40" Height="40" Command="{Binding Diagnostics.ExportReportCommand}" IsEnabled="{Binding Diagnostics.HasReport}" VerticalAlignment="Center" HorizontalAlignment="Center" ToolTip.Tip="Descargar reporte">
+              <Viewbox Width="24" Height="24" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Path Data="M21,15 V19 A2,2 0 0 1 19,21 H5 A2,2 0 0 1 3,19 V15 M7,10 L12,15 L17,10 M12,15 V3"
+                      Stroke="#F5FAFF" StrokeThickness="2" StrokeLineCap="Round" StrokeJoin="Round" Fill="Transparent" />
+              </Viewbox>
+            </Button>
+            <Button Grid.Column="10" Classes="icon-nav" Width="40" Height="40" Command="{Binding ToggleAdministrationCommand}" VerticalAlignment="Center" HorizontalAlignment="Center" ToolTip.Tip="Configuración">
+              <Viewbox Width="24" Height="24" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Canvas Width="24" Height="24">
+                  <Path Data="M12.22,2 H11.78 A2,2 0 0 0 9.78,4 V4.18 A2,2 0 0 1 8.78,5.91 L8.35,6.16 A2,2 0 0 1 6.35,6.16 L6.2,6.08 A2,2 0 0 0 3.47,6.81 L3.25,7.19 A2,2 0 0 0 3.98,9.92 L4.13,10.02 A2,2 0 0 1 5.13,11.74 V12.25 A2,2 0 0 1 4.13,13.99 L3.98,14.08 A2,2 0 0 0 3.25,16.81 L3.47,17.19 A2,2 0 0 0 6.2,17.92 L6.35,17.84 A2,2 0 0 1 8.35,17.84 L8.78,18.09 A2,2 0 0 1 9.78,19.82 V20 A2,2 0 0 0 11.78,22 H12.22 A2,2 0 0 0 14.22,20 V19.82 A2,2 0 0 1 15.22,18.09 L15.65,17.84 A2,2 0 0 1 17.65,17.84 L17.8,17.92 A2,2 0 0 0 20.53,17.19 L20.75,16.8 A2,2 0 0 0 20.02,14.07 L19.87,13.99 A2,2 0 0 1 18.87,12.25 V11.75 A2,2 0 0 1 19.87,10.01 L20.02,9.92 A2,2 0 0 0 20.75,7.19 L20.53,6.81 A2,2 0 0 0 17.8,6.08 L17.65,6.16 A2,2 0 0 1 15.65,6.16 L15.22,5.91 A2,2 0 0 1 14.22,4.18 V4 A2,2 0 0 0 12.22,2 Z"
+                        Stroke="#F5FAFF" StrokeThickness="2" StrokeLineCap="Round" StrokeJoin="Round" Fill="Transparent" />
+                  <Ellipse Canvas.Left="9" Canvas.Top="9" Width="6" Height="6" Stroke="#F5FAFF" StrokeThickness="2" Fill="Transparent" />
+                </Canvas>
+              </Viewbox>
+            </Button>
+          </Grid>
+        </Grid>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="1">
+      <TabControl Classes="main-tabs" IsVisible="{Binding IsDashboardOpen}">
+        <TabItem Header="Centro de soporte">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0"><views:SupportDashboardView DataContext="{Binding Support}" /></ScrollViewer>
+        </TabItem>
+        <TabItem Header="Diagnóstico">
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0"><views:DiagnosticWorkspaceView DataContext="{Binding Diagnostics}" /></ScrollViewer>
+        </TabItem>
+        <TabItem Header="Rendimiento">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0"><views:PerformanceDashboardView DataContext="{Binding Performance}" /></ScrollViewer>
+        </TabItem>
+        <TabItem Header="TSplus">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0"><views:TsplusDashboardView DataContext="{Binding Tsplus}" /></ScrollViewer>
+        </TabItem>
+        <TabItem Header="Servidores/Granja">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0">
+            <StackPanel Spacing="12">
+              <views:MultiServerDashboardView DataContext="{Binding MultiServer}" />
+              <Border Classes="workspace-section" Padding="14">
+                <StackPanel Spacing="5">
+                  <TextBlock Text="SERVIDORES/GRANJA" Classes="section-title" />
+                                    <TextBox Text="{Binding Administration.FederationEditor}" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="120" FontFamily="Consolas" />
+                  <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                    <Button Classes="detail" Content="Agregar servidor local" Command="{Binding Administration.AddLocalServerCommand}" />
+                    <Button Classes="detail" Content="Borrar servidores" Command="{Binding Administration.ClearFederationCommand}" />
+                    <Button Classes="primary-action" Content="Guardar servidores" Command="{Binding Administration.SaveFederationCommand}" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+        <TabItem Header="Servicios/Dependencias">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0"><views:ServicesDashboardView DataContext="{Binding Services}" /></ScrollViewer>
+        </TabItem>
+        <TabItem Header="Sesiones">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0"><views:SessionsDashboardView DataContext="{Binding Sessions}" /></ScrollViewer>
+        </TabItem>
+        <TabItem Header="Incidentes">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0"><views:IncidentsDashboardView DataContext="{Binding Incidents}" /></ScrollViewer>
+        </TabItem>
+        <TabItem Header="Causalidad">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0"><views:CausalityDashboardView DataContext="{Binding Causality}" /></ScrollViewer>
+        </TabItem>
+        <TabItem Header="Preventivo">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0"><views:PreventiveDashboardView DataContext="{Binding Preventive}" /></ScrollViewer>
+        </TabItem>
+        <TabItem Header="Salud TDM">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0"><views:TdmHealthDashboardView DataContext="{Binding TdmHealth}" /></ScrollViewer>
+        </TabItem>
+        <TabItem Header="Logs">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0"><views:LogsView DataContext="{Binding Logs}" /></ScrollViewer>
+        </TabItem>
+      </TabControl>
+
+      <ScrollViewer IsVisible="{Binding IsAdministrationOpen}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0">
+        <views:AdministrationWorkspaceView DataContext="{Binding Administration}" />
+      </ScrollViewer>
+    </Grid>
+  </Grid>
+</Window>

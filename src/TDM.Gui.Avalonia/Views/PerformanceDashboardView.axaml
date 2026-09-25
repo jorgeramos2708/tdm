@@ -1,0 +1,76 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:TDM.Gui.Avalonia.Controls"
+             x:Class="TDM.Gui.Avalonia.Views.PerformanceDashboardView">
+  <StackPanel Spacing="12">
+    <TextBlock Text="RENDIMIENTO" FontSize="24" FontWeight="SemiBold" Foreground="#39D0FF" />
+
+    <Grid ColumnDefinitions="*,*">
+      <Border Grid.Column="0" Classes="workspace-slice" Margin="0,0,12,0">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="section-title" Text="CPU Y MEMORIA"/>
+          <Grid ColumnDefinitions="Auto,Auto,*">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+              <TextBlock Text="CPU" Foreground="#39D0FF"/>
+              <TextBlock Text="{Binding CpuValue}" FontWeight="SemiBold"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="18,0,0,0">
+              <TextBlock Text="Memoria" Foreground="#A78BFA"/>
+              <TextBlock Text="{Binding MemoryValue}" FontWeight="SemiBold"/>
+            </StackPanel>
+          </Grid>
+          <controls:LineChart Height="190" SeriesA="{Binding CpuSeries}" SeriesB="{Binding MemorySeries}" PointLabels="{Binding TimeLabels}" Maximum="100" WarningThreshold="70" CriticalThreshold="85" SeriesABrush="#39D0FF" SeriesBBrush="#A78BFA" SeriesALabel="CPU" SeriesBLabel="Memoria" ValueSuffix="%"/>
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="1" Classes="workspace-section">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="section-title" Text="RED"/>
+          <StackPanel Orientation="Horizontal" Spacing="18">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <TextBlock Text="Entrada" Foreground="#67E8A5"/>
+              <TextBlock Text="{Binding NetworkReceiveValue}" FontWeight="SemiBold"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <TextBlock Text="Salida" Foreground="#FFD166"/>
+              <TextBlock Text="{Binding NetworkSendValue}" FontWeight="SemiBold"/>
+            </StackPanel>
+          </StackPanel>
+          <controls:LineChart Height="190" SeriesA="{Binding NetworkRxSeries}" SeriesB="{Binding NetworkTxSeries}" PointLabels="{Binding TimeLabels}" Maximum="{Binding NetworkMaximum}" WarningThreshold="{Binding NetworkWarning}" CriticalThreshold="{Binding NetworkCritical}" SeriesABrush="#67E8A5" SeriesBBrush="#FFD166" SeriesALabel="Entrada" SeriesBLabel="Salida" ValueSuffix="Mbps"/>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid ColumnDefinitions="*,*">
+      <Border Grid.Column="0" Classes="workspace-slice" Margin="0,0,12,0">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="section-title" Text="PROCESOS PRINCIPALES"/>
+          <ItemsControl ItemsSource="{Binding TopProcesses}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Grid ColumnDefinitions="*,Auto" Margin="0,4">
+                  <StackPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold"/><TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11"/></StackPanel>
+                  <TextBlock Grid.Column="1" Text="{Binding Value}" Foreground="{Binding Accent}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="1" Classes="workspace-section">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="section-title" Text="DISCOS"/>
+          <ItemsControl ItemsSource="{Binding Disks}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Grid ColumnDefinitions="*,Auto" Margin="0,4">
+                  <StackPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold"/><TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11"/></StackPanel>
+                  <TextBlock Grid.Column="1" Text="{Binding Value}" Foreground="{Binding Accent}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+    </Grid>
+  </StackPanel>
+</UserControl>

@@ -1,0 +1,264 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using TDM.Models;
+
+namespace TDM.Reporting;
+
+public sealed record ReportExportResult(string JsonPath, string HtmlPath);
+
+public static class ReportExporter
+{
+    public static async Task<ReportExportResult> ExportAsync(
+        DiagnosticReport report,
+        string directory,
+        CancellationToken ct = default,
+        DiagnosticReport? previousReport = null)
+    {
+        Directory.CreateDirectory(directory);
+        // Exportación segura por defecto: contenido y nombre de archivo usan la misma
+        // pseudonimización para no filtrar hostname/identidades fuera de TDM.
+        var safeReport = SupportBundleSanitizer.Sanitize(report);
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");
+        var safeHost = SanitizeFileName(safeReport.Sistema.Equipo);
+        var baseName = $"TDM-{safeHost}-{stamp}-{Guid.NewGuid().ToString("N")[..6]}";
+        var jsonPath = Path.Combine(directory, baseName + ".json");
+        var htmlPath = Path.Combine(directory, baseName + ".html");
+
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+        var json = JsonSerializer.Serialize(safeReport, options);
+        // S9: valida que el JSON serializado esté bien formado antes de escribirlo; un truncado
+        // parcial ya no puede exportarse como éxito operativo.
+        try { using var _ = JsonDocument.Parse(json); }
+        catch (JsonException ex) { throw new IOException("La serialización del reporte produjo JSON inválido.", ex); }
+        await File.WriteAllTextAsync(jsonPath, json, new UTF8Encoding(false), ct);
+        var html = BuildHtml(safeReport, sanitized: true);
+        // P0-diff: tarjeta día-a-día. Se calcula sobre versiones sanitizadas (la anterior se
+        // sanitiza igual que la actual) y se inyecta antes del cierre del body. Sin reporte
+        // anterior o sin cambios, el HTML es byte-idéntico al de antes. El diff jamás tumba la exportación.
+        if (previousReport is not null)
+        {
+            try
+            {
+                var diff = ReportDiffer.Compute(SupportBundleSanitizer.Sanitize(previousReport), safeReport);
+                if (diff is { Changes.Count: > 0 })
+                    html = html.Replace("</body>", ReportDiffer.ToHtmlCard(diff) + "</body>", StringComparison.Ordinal);
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                _ = ex;
+            }
+        }
+        await File.WriteAllTextAsync(htmlPath, html, new UTF8Encoding(false), ct);
+
+        // P23: un reporte vacío/corrupto nunca debe exportarse como éxito operativo.
+        var jsonBytes = new FileInfo(jsonPath).Length;
+        var htmlBytes = new FileInfo(htmlPath).Length;
+        if (jsonBytes <= 0 || htmlBytes <= 0)
+            throw new IOException($"La exportación generó archivos vacíos: json={jsonBytes} bytes, html={htmlBytes} bytes.");
+
+        // Mission Assurance: la acción Generar reporte produce exclusivamente dos archivos operativos:
+        // HTML para lectura humana y JSON para evidencia estructurada. No se crea ZIP ni archivos auxiliares.
+        return new ReportExportResult(jsonPath, htmlPath);
+    }
+
+    private sealed record CompactReportEventGroup(
+        DateTimeOffset First,
+        DateTimeOffset Last,
+        int Count,
+        string Component,
+        string Detail,
+        DiagnosticSeverity Severity);
+
+    private static string ExecutiveState(DiagnosticReport report, RootCauseCandidate? cause)
+    {
+        var criticalCoverageIncomplete = report.CoberturaDiagnostica?.Fuentes.Any(
+            x => x.Critica && x.Estado is not "Disponible" and not "No aplica") == true;
+
+        if (report.ImpactoFuncional is { } impact)
+        {
+            return impact.EstadoGeneral switch
+            {
+                FunctionalImpactState.Interrumpido => "ERROR",
+                FunctionalImpactState.Degradado => "ADVERTENCIA",
+                FunctionalImpactState.SinImpactoObservado => criticalCoverageIncomplete ? "NO EVALUADO" : "SALUDABLE",
+                _ => cause is null ? "NO EVALUADO" : InvestigationStateForReport(cause)
+            };
+        }
+
+        if (cause is not null) return InvestigationStateForReport(cause);
+        if (report.Hallazgos.Any(x => x.Severidad >= DiagnosticSeverity.Error)) return "ADVERTENCIA";
+        return criticalCoverageIncomplete ? "NO EVALUADO" : "SALUDABLE";
+    }
+
+    private static string ExecutiveStateCss(string? state)
+    {
+        var text = state ?? string.Empty;
+        if (text.Contains("ERROR", StringComparison.OrdinalIgnoreCase) || text.Contains("INTERRUMP", StringComparison.OrdinalIgnoreCase) || text.Contains("FALLA", StringComparison.OrdinalIgnoreCase)) return "state-error";
+        if (text.Contains("ADVERT", StringComparison.OrdinalIgnoreCase) || text.Contains("DEGRAD", StringComparison.OrdinalIgnoreCase) || text.Contains("PROBABLE", StringComparison.OrdinalIgnoreCase)) return "state-warn";
+        if (text.Contains("SALUD", StringComparison.OrdinalIgnoreCase) || text.Contains("SIN IMPACTO", StringComparison.OrdinalIgnoreCase) || text.Contains("CONFIRMADA", StringComparison.OrdinalIgnoreCase)) return "state-ok";
+        return "state-muted";
+    }
+
+    private static string CompactImpactState(FunctionalImpactState state) => state switch
+    {
+        FunctionalImpactState.SinImpactoObservado => "SALUDABLE",
+        FunctionalImpactState.Degradado => "ADVERTENCIA",
+        FunctionalImpactState.Interrumpido => "ERROR",
+        _ => "NO EVALUADO"
+    };
+
+    private static IReadOnlyList<CompactReportEventGroup> BuildCompactReportEventGroups(DiagnosticReport report)
+    {
+        return report.Eventos
+            .Where(e => e.Timestamp.HasValue && !IsCurrentStateEventForReport(e))
+            .Where(e => e.Severidad != DiagnosticSeverity.Informativo || e.Tipo is "RDP_AUTHENTICATION_STAGE" or "RDP_SESSION_LOGON_STAGE" or "RDP_SHELL_START_STAGE")
+            .GroupBy(e => $"{e.Componente}|{e.Tipo}|{ReportEventFingerprint(e.Mensaje)}", StringComparer.OrdinalIgnoreCase)
+            .Select(g => new CompactReportEventGroup(
+                g.Min(x => x.Timestamp!.Value),
+                g.Max(x => x.Timestamp!.Value),
+                g.Count(),
+                g.OrderByDescending(x => x.Timestamp).First().Componente,
+                FirstLineForReport(g.OrderByDescending(x => x.Timestamp).First().Mensaje, g.OrderByDescending(x => x.Timestamp).First().Tipo),
+                g.OrderByDescending(x => x.Severidad).First().Severidad))
+            .OrderBy(x => x.Last)
+            .ToList();
+    }
+
+    private static string ReportEventFingerprint(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return string.Empty;
+        var line = message.Replace("\r", string.Empty).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? message;
+        line = Regex.Replace(line, @"\d{1,4}[-/:.]\d{1,4}[-/:.]\d{1,4}", "#");
+        line = Regex.Replace(line, @"\b\d+\b", "#");
+        return Regex.Replace(line, @"\s+", " ").Trim();
+    }
+
+    private static string OwnerForReport(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "INDETERMINADO";
+        if (value.Contains("TSPLUS", StringComparison.OrdinalIgnoreCase)) return "TSPLUS";
+        if (value.Contains("WINDOWS", StringComparison.OrdinalIgnoreCase)) return "WINDOWS";
+        if (value.Contains("EXTER", StringComparison.OrdinalIgnoreCase) || value.Contains("DEPENDENCIA EXTERNA", StringComparison.OrdinalIgnoreCase)) return "EXTERNO";
+        return "INDETERMINADO";
+    }
+
+    private static string FindingOwnerForReport(DiagnosticFinding f)
+    {
+        if (f.Id.StartsWith("THIRD-PARTY-", StringComparison.OrdinalIgnoreCase)) return "EXTERNO";
+        if (f.Id.StartsWith("TSPLUS-", StringComparison.OrdinalIgnoreCase) || f.Capa == DiagnosticLayer.Tsplus) return "TSPLUS";
+        if (f.Id.StartsWith("WINDOWS-", StringComparison.OrdinalIgnoreCase) || f.Capa is DiagnosticLayer.Windows or DiagnosticLayer.Rdp or DiagnosticLayer.Red) return "WINDOWS";
+        if (f.Capa == DiagnosticLayer.Seguridad)
+        {
+            var text = $"{f.Id} {f.Componente} {f.Resumen}";
+            if (text.Contains("TSplus", StringComparison.OrdinalIgnoreCase) || text.Contains("Advanced Security", StringComparison.OrdinalIgnoreCase)) return "TSPLUS";
+            if (text.Contains("third-party", StringComparison.OrdinalIgnoreCase) || text.Contains("tercero", StringComparison.OrdinalIgnoreCase) || text.Contains("extern", StringComparison.OrdinalIgnoreCase)) return "EXTERNO";
+            return "WINDOWS";
+        }
+        return "INDETERMINADO";
+    }
+
+    private static string EvidenceSourceForFindingReport(DiagnosticFinding finding)
+    {
+        if (finding.Id.StartsWith("TSPLUS-CRASH-LOOP-", StringComparison.OrdinalIgnoreCase))
+            return "TDM";
+
+        return FindingOwnerForReport(finding) switch
+        {
+            "TSPLUS" => "TSplus",
+            "WINDOWS" => "Windows",
+            "EXTERNO" => "Externo",
+            _ => finding.Capa == DiagnosticLayer.Desconocida ? "No determinada" : finding.Capa.ToString()
+        };
+    }
+
+    private static string EvidenceSourceForEventReport(DiagnosticEvent diagnosticEvent)
+    {
+        if (diagnosticEvent.Fuente.Equals("TDM", StringComparison.OrdinalIgnoreCase)) return "TDM";
+        if (diagnosticEvent.Tipo.StartsWith("THIRD_PARTY_", StringComparison.OrdinalIgnoreCase)) return "Externo";
+        if (diagnosticEvent.Capa == DiagnosticLayer.Tsplus) return "TSplus";
+        if (diagnosticEvent.Capa is DiagnosticLayer.Windows or DiagnosticLayer.Rdp or DiagnosticLayer.Red) return "Windows";
+        if (diagnosticEvent.Capa == DiagnosticLayer.Seguridad)
+        {
+            var text = $"{diagnosticEvent.Fuente} {diagnosticEvent.Componente} {diagnosticEvent.Tipo} {diagnosticEvent.Archivo}";
+            if (text.Contains("TSplus", StringComparison.OrdinalIgnoreCase) || diagnosticEvent.Producto == TsplusProduct.AdvancedSecurity) return "TSplus";
+            if (text.Contains("third-party", StringComparison.OrdinalIgnoreCase) || text.Contains("tercero", StringComparison.OrdinalIgnoreCase) || text.Contains("extern", StringComparison.OrdinalIgnoreCase)) return "Externo";
+            return "Windows";
+        }
+        return diagnosticEvent.Capa == DiagnosticLayer.Desconocida ? "No determinada" : diagnosticEvent.Capa.ToString();
+    }
+
+    private static string InvestigationStateForReport(RootCauseCandidate? candidate)
+    {
+        if (candidate is null) return "INDETERMINADA";
+        var explicitState = candidate.Evidencia.FirstOrDefault(e =>
+            e.Clave.Contains("Estado del origen", StringComparison.OrdinalIgnoreCase) ||
+            e.Clave.Contains("Estado de investigación", StringComparison.OrdinalIgnoreCase))?.Valor;
+        if (!string.IsNullOrWhiteSpace(explicitState)) return explicitState;
+        return InvestigationGuidanceBuilder.State(candidate);
+    }
+
+    private static bool IsCurrentStateEventForReport(DiagnosticEvent e) => DiagnosticEventCatalog.IsReportCurrentState(e.Tipo);
+
+    private static bool IsLikelyCausalForReport(DiagnosticEvent e) => e.Tipo is
+        "APPLICATION_CRASH" or "DOTNET_UNHANDLED_EXCEPTION" or "WER_REPORT" or "WINDOWS_EVENT" or
+        "SIDEBYSIDE_DEPENDENCY_FAILURE" or "DEPENDENCY_NOT_FOUND" or "DEPENDENCY_LOAD_FAILURE" or
+        "DLL_NOT_FOUND" or "INVALID_IMAGE_FORMAT" or "USER_LOGON_FAILURE" or "USER_PROFILE_SERVICE_EVENT" or
+        "TSPLUS_HTML5_JVM_CRASH" or "RDP_AUTHENTICATION_STAGE" or "RDP_SESSION_LOGON_STAGE" or "RDP_SHELL_START_STAGE" or
+        "TSPLUS_CRASH_LOOP_PATTERN";
+
+    private static string FirstLineForReport(string? message, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return fallback;
+        var first = message.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n')
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        return string.IsNullOrWhiteSpace(first) ? fallback : first.Trim();
+    }
+
+    private static string FirstSentenceForReport(string value)
+    {
+        var normalized = (value ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim();
+        if (normalized.Length == 0) return "Recopilar evidencia adicional";
+        var index = normalized.IndexOf('.');
+        return index > 0 ? normalized[..(index + 1)] : normalized;
+    }
+
+    private static bool IsRelevantDependencyRow(DiagnosticEvent e)
+    {
+        if (e.Producto == TsplusProduct.RemoteAccess) return true;
+        string V(string key) => e.Evidencia?.FirstOrDefault(x => x.Clave.Equals(key, StringComparison.OrdinalIgnoreCase))?.Valor ?? string.Empty;
+        var text = $"{V("Servicio")} {V("Dependencia")} {V("Dependiente")} {e.Componente}";
+        string[] markers = ["TSplus", "TermService", "Spooler", "RpcSs", "ProfSvc", "SessionEnv", "UmRdpService", "Netlogon", "W32Time", "Dnscache", "APSC", "HTML5", "WebPortal", "Remote Desktop"];
+        return markers.Any(m => text.Contains(m, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string DependencyClassForReport(string value)
+    {
+        var v = value ?? string.Empty;
+        if (new[] { "Stopped", "Detenido", "No operativo", "Falla", "Failed", "Error", "No encontrado", "No disponible", "Missing", "Crítico", "Critico", "Critical", "Fatal" }.Any(x => v.Contains(x, StringComparison.OrdinalIgnoreCase))) return "critical";
+        if (new[] { "Unknown", "Desconoc", "Indeterminado", "Parcial", "Advertencia", "Ninguno identificado" }.Any(x => v.Contains(x, StringComparison.OrdinalIgnoreCase))) return "warn";
+        return "ok";
+    }
+
+    private static string CompactForReport(string value, int max)
+        => string.IsNullOrEmpty(value) || value.Length <= max ? value : value[..Math.Max(0, max - 3)] + "...";
+
+    private static string FormatLookback(TimeSpan value)
+    {
+        if (value.TotalHours >= 1) return value.TotalHours == 1 ? "1 h" : $"{value.TotalHours:0} h";
+        if (value.TotalMinutes >= 1) return value.TotalMinutes == 1 ? "1 min" : $"{value.TotalMinutes:0} min";
+        return $"{value.TotalSeconds:0} s";
+    }
+
+private static string SanitizeFileName(string value)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars()) value = value.Replace(c, '_');
+        return string.IsNullOrWhiteSpace(value) ? "equipo" : value;
+    }
+
+

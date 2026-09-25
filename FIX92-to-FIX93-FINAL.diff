@@ -1,0 +1,3130 @@
+diff --git a/AUDITORIA-BASE-FIX92.md b/AUDITORIA-BASE-FIX92.md
+new file mode 100644
+index 0000000..a3cd3e9
+--- /dev/null
++++ b/AUDITORIA-BASE-FIX92.md
+@@ -0,0 +1,80 @@
++# Auditoría TDM FIX92 CLEAN
++
++## Objetivo
++
++FIX92 conserva la interfaz operativa de FIX91 y cambia la configuración de memoria de TDM de MB a porcentaje. También elimina el bloque superior de estado de Configuración y simplifica el encabezado de la vista.
++
++La revisión se concentra en tres riesgos:
++
++1. pérdida accidental de bindings o comandos;
++2. uso de propiedades XAML incompatibles con Avalonia 11.1.3;
++3. regresiones visuales en datos extensos o en la resolución mínima.
++
++## Alcance visual
++
++| Vista | Tratamiento FIX88 |
++|---|---|
++| Centro de soporte | Composición operativa diferenciada para donas, sesiones e incidentes |
++| Diagnóstico | Franja métrica y reportes abiertos |
++| Rendimiento | Gráficas integradas y listas separadas por divisores |
++| TSplus | Estado global y tabla funcional sin tarjetas |
++| Servidores/Granja | Franja métrica, cabecera de columnas y editor abierto |
++| Servicios/Dependencias | Tablas abiertas; origen y estado sin cápsulas |
++| Sesiones | Franja métrica y tabla operativa |
++| Incidentes | Resumen compacto y línea temporal sin cajas |
++| Causalidad | Franja causal y dos áreas de evidencia |
++| Preventivo | Dos franjas métricas, tres áreas de evidencia y gráfica abierta |
++| Salud TDM | Seis series distribuidas en tres gráficas abiertas |
++
++## Invariantes funcionales
++
++- Se conservan todos los bindings existentes en las vistas.
++- Los comandos de detalle continúan asociados a los mismos ViewModels.
++- La barra superior mantiene cuatro botones de 40 × 40 px y el botón Actualizar de 38 × 38 px; los cinco iconos permanecen en 24 × 24 px.
++- El cronómetro conserva su columna fija, fuente integrada, pausa, reanudación y reinicio manual.
++- La exportación conserva selector de carpeta, validación de HTML/JSON y revelado del archivo.
++- Las columnas de Servicios/Dependencias conservan la geometría fija 18,*,118,122.
++- CPU, memoria, red, duración, recursos abiertos e hilos mantienen sus series, máximos y umbrales.
++- Las pestañas principales e internas comparten el estilo global de 14 px, peso Medium y espaciado aprobado.
++- Actualizar permanece centrado dentro de su columna fija de 40 px y conserva `RefreshFromToolbarCommand`.
++- CPU y memoria de TDM mantienen escalas porcentuales comunes, con umbrales independientes ligados a la configuración vigente.
++- Los umbrales de memoria se almacenan, validan y representan directamente como porcentaje.
++- Los nombres de servicio permanecen intactos; sólo se traducen estados y nombres funcionales de presentación.
++
++## Validaciones incorporadas
++
++VERIFY-TDM-READINESS.ps1 comprueba:
++
++- parseo XML de todos los archivos AXAML;
++- presencia de los cuatro estilos estructurales de FIX88;
++- ausencia del radio genérico de 14 px;
++- composición específica de las once pestañas;
++- conservación de las reglas funcionales acumuladas de FIX65 a FIX87;
++- retícula y bandas de umbral de baja intensidad;
++- tamaño global de 14 px para todos los títulos de pestaña;
++- conexión de los cuatro umbrales configurables de CPU/memoria de TDM;
++- conversión de MB a porcentaje para los umbrales gráficos de memoria;
++- ausencia de estados operativos ingleses en las tarjetas preventivas;
++- clasificación correcta de `SIN FALLA` como estado saludable;
++- contrato porcentual de memoria de TDM con rango válido de 0.1 a 100;
++- conservación de las columnas `260,126,126` y controles de 118 px en la fila modificada;
++- ausencia del bloque visual de estado/ruta/recarga solicitado;
++- encabezado único `CONFIGURACIÓN`;
++- compilación Release con advertencias tratadas como errores;
++- pruebas de paridad;
++- inicio real de GUI y Notifier;
++- estructura limpia del paquete.
++
++## Resultado estático en el entorno de preparación
++
++- 18 archivos AXAML analizados.
++- 0 errores XML.
++- 0 bindings eliminados.
++- 1 uso adicional de Accent para el marcador visual de la línea de incidentes.
++- 0 cambios en servicios de recopilación, persistencia, notificaciones o exportación.
++- 1 cambio visual global: `TabItem.FontSize`, de 12 a 14 px.
++- 1 ajuste de FIX90: área interactiva de Actualizar, de 40 × 40 a 38 × 38 px.
++- FIX91 amplía `LineChart` con umbrales independientes por serie y actualiza únicamente la presentación/cálculo gráfico de Salud TDM y Preventivo.
++- FIX92 sustituye los campos persistentes `TdmRamWarningMb` y `TdmRamCriticalMb` por `TdmMemoryWarningPercent` y `TdmMemoryCriticalPercent`.
++
++La compilación y la prueba de inicio requieren Windows con .NET SDK 8; el gate incluido ejecuta ambas antes de considerar la entrega validada en el equipo de destino.
+diff --git a/AUDITORIA-CIERRE-TDM-FIX93.md b/AUDITORIA-CIERRE-TDM-FIX93.md
+new file mode 100644
+index 0000000..5a676aa
+--- /dev/null
++++ b/AUDITORIA-CIERRE-TDM-FIX93.md
+@@ -0,0 +1,121 @@
++# Cierre técnico — TDM v1.0 RC18.21.0 FIX93
++
++Fecha: 6 de septiembre de 2026  
++Base: `TDM-v1.0-rc18.21.0-FIX92-CLEAN`  
++Objetivo: corregir los bloqueadores de precisión/causalidad detectados en FIX92 y preparar una candidata empresarial verificable en Windows.
++
++## Dictamen de esta etapa
++
++**Validación estática: PASS.**  
++**Promoción a producción: PENDIENTE del gate dinámico Windows/TSplus.**
++
++No se declara GO empresarial desde este entorno porque no dispone de .NET SDK/MSBuild, Windows Event Log, Service Control Manager ni una instalación TSplus real. El paquete incorpora un gate actualizado para ejecutar esas comprobaciones en Windows.
++
++## Controles estáticos finales
++
++- 18 proyectos `.csproj`.
++- 5 proyectos raíz en `TDM.sln`; los 18 proyectos quedan alcanzables por referencias transitivas.
++- 0 `ProjectReference` rotos.
++- 0 ciclos entre proyectos.
++- 170 archivos C# revisados léxicamente.
++- 18 AXAML parseables.
++- 17 `TDM.ProductionTests` de verdad funcional/regresión.
++- 0 carpetas `bin/obj` en el SOURCE.
++- 0 usos de `TolerateQueryErrors = true`.
++- 0 usos de `EffectiveTime(...)` como sustituto causal.
++- 0 coincidencias `Contains(user...)` para identidad.
++- 0 textos visibles `Condición recuperada`, `Recuperado · ...`, `Memoria / tendencia` o `CPU / tendencia` en `src`.
++- 0 referencias a la revisión binaria antigua `FIX74_NO_NOTIFICATION_FOOTER` en `src`.
++
++## Correcciones principales
++
++### Tiempo causal e incidentes
++
++- `EventTime` (`Timestamp`) es obligatorio para una incidencia funcional.
++- `IngestedAt` queda sólo como metadato de adquisición/orden auxiliar y no convierte evidencia histórica sin fecha en incidente actual.
++- Evidencia sin fecha se conserva como contexto no temporal y queda fuera de la causalidad temporal.
++- Fechas TSplus ambiguas `dd/MM` vs `MM/dd` sólo se resuelven si la ventana de investigación hace inequívoca una interpretación; de lo contrario permanecen sin hora causal.
++
++### Logs TSplus
++
++- Cursor durable por archivo.
++- Detección de truncado/recreación.
++- Backlog controlado.
++- Lectura segura de prefijos UTF-8/UTF-16 sin avanzar sobre caracteres incompletos.
++- Registros multilinea: excepción + inner exception + stack trace se conservan como una sola evidencia.
++- Si no puede persistirse el cursor se degrada cobertura; no se presenta continuidad garantizada.
++
++### Event Viewer
++
++- Cursor durable y replay acotado.
++- Detección de discontinuidad/recreación de canal.
++- Consultas críticas dejan de tolerar silenciosamente errores parciales.
++- Fallos de lectura se representan como pérdida de cobertura, no como “0 eventos”.
++
++### Servicios, dependencias y módulos
++
++- Servicio detenido no equivale automáticamente a incidente.
++- Se consideran modo de inicio/rol/producto y evidencia SCM relacionada.
++- Se redujo la clasificación por tokens genéricos de servicios TSplus.
++- Perfiles/archivos inaccesibles se distinguen de ausencia confirmada mediante `FileSystemProbe`.
++- Web/HTML5 valida listener + PID/proceso propietario; puerto ocupado por otro proceso es conflicto y propietario indeterminado es `NO EVALUADO`.
++
++### Correlación Windows ↔ TSplus
++
++- Ventanas temporales acotadas por regla.
++- Identidad exacta de usuario en lugar de substrings (`ann` no coincide con `joann`).
++- Schannel no se promueve por mera proximidad temporal.
++- EDR/Defender requiere proceso/ruta/producto compartido para ser antecedente fuerte de un crash.
++- Disk/NTFS/volmgr/Resource-Exhaustion requiere identidad técnica compatible; un volumen ajeno permanece como contexto.
++- Configuración, integridad y granja no adquieren confianza alta sólo por estar en la misma ventana.
++- La granja local se conserva como hipótesis Media hasta disponer de validación distribuida de nodos.
++
++### RDP
++
++- El gap de shell sólo se declara después de vencer realmente el SLA de 3 minutos.
++- Una sesión todavía dentro del SLA queda pendiente, no degradada.
++- Eventos sanos del pipeline RDP permanecen como contexto y no inflan calidad causal.
++
++### Persistencia y autosalud
++
++- `IncidentLedger` serializa escritores concurrentes dentro y entre procesos.
++- Errores de persistencia/monitor/SMTP dejan de quedar silenciosos en rutas corregidas.
++- Se endurece el almacenamiento de la contraseña SMTP y sus ACL en Windows.
++- La sanitización cubre identidades asignadas adicionales.
++
++### Alertas
++
++- Títulos explícitos, por ejemplo: `TDM · Alerta de memoria libre en descenso`.
++- Eliminadas las etiquetas visibles `/ tendencia`.
++- Una condición que vuelve a la normalidad se cierra en el estado interno pero **no genera popup, alerta portable ni correo de recuperación**.
++- Journal, coordinadores de popup y SMTP tienen barreras defensivas contra `Recovered`.
++- El Notifier usa la revisión binaria `FIX93_EXPLICIT_ALERTS_NO_RECOVERED`; el arranque y el gate rechazan binarios anteriores.
++
++### QA
++
++- Nueva suite `tests/TDM.ProductionTests` con 17 pruebas, incluyendo evidencia sin fecha, timestamps, fechas ambiguas, stack trace, alertas, recuperación, cursores, concurrencia, identidad, configuración histórica, Schannel y distractores Windows.
++- `VERIFY-TDM-READINESS.ps1` ejecuta paridad + ProductionTests y verifica `TDM.Service`.
++- Restore reproducible: primer restore genera `packages.lock.json`; se exige un lock por proyecto y después se repite con `--locked-mode`.
++
++## Pendiente obligatorio en Windows antes de GO
++
++Ejecutar desde la raíz del paquete:
++
++```cmd
++VALIDAR-FIX93.cmd
++```
++
++El gate debe terminar en PASS. En particular debe confirmar restore locked, build Release con warnings-as-errors, ParityTests, ProductionTests, generación de GUI/Service/Notifier y startup.
++
++Después del gate de compilación deben ejecutarse pruebas dinámicas sobre un laboratorio Windows Server + TSplus: caída real de servicios, Event IDs SCM, ACL denegada, clear/recreate de EVTX, rotación/truncado de logs, RDP/RemoteApp/HTML5, certificados, impresión, 2FA, complementos y, si aplica, granja. Para promoción empresarial se mantiene además el requisito de soak prolongado y revisión de diagnósticos reales.
++
++## Limitaciones todavía abiertas
++
++1. Este SOURCE no incluye `packages.lock.json` pregenerados porque el entorno de preparación no dispone de `dotnet`; el gate Windows los genera y luego exige `--locked-mode`.
++2. Los proyectos siguen usando .NET 8. Debe planificarse migración a una LTS con horizonte suficiente antes del fin de soporte de .NET 8; no se migró dentro de FIX93 para no introducir una regresión de plataforma sin compilación Windows disponible.
++3. TDM no puede certificar de forma autónoma todos los nodos de una granja remota si no existe sondeo distribuido. FIX93 reduce la confianza de esa hipótesis en vez de afirmar salud/causa remota.
++4. Ninguna auditoría estática reemplaza la medición real de falsos positivos/falsos negativos en el corpus y laboratorio objetivo.
++
++## Criterio para GO
++
++No promover a producción general hasta obtener: gate Windows PASS, cero bloqueadores funcionales en el corpus P0/P1, continuidad comprobada ante reinicio/rotación, 100% de pérdida de cobertura representada explícitamente y soak sin degradación o crecimiento anormal de TDM.
+diff --git a/README.md b/README.md
+index d6b5e6c..ce228e4 100644
+--- a/README.md
++++ b/README.md
+@@ -1,4 +1,4 @@
+-# TDM FIX92 CLEAN
++# TDM FIX93 CLEAN
+ 
+ Paquete limpio de desarrollo, validación y distribución de TSplus Diagnostic Monitor.
+ 
+@@ -96,7 +96,7 @@ La vista **Servicios/Dependencias** amplía el monitoreo de Windows relevante pa
+ 
+ - La notificación de escritorio muestra únicamente el título, el mensaje principal y los botones; no presenta `Detectado`, `Escalado`, `Recuperado`, severidad ni fecha/hora.
+ - `BUILD-TDM.cmd`, el gate y la publicación ejecutan una limpieza previa para impedir que MSBuild reutilice XAML o binarios de una entrega anterior.
+-- El ensamblado del Notifier incorpora la revisión `FIX74_NO_NOTIFICATION_FOOTER`; el gate valida que esté dentro del DLL compilado.
++- El ensamblado del Notifier incorpora la revisión `FIX93_EXPLICIT_ALERTS_NO_RECOVERED`; el gate valida que esté dentro del DLL compilado.
+ - `START-TDM.cmd` rechaza un Notifier obsoleto y solicita recompilar, en vez de iniciar silenciosamente una interfaz anterior.
+ - El arranque termina instancias actuales y heredadas del Notifier antes de abrir el binario de FIX74.
+ 
+@@ -253,3 +253,22 @@ Comparta únicamente:
+ - Se elimina el bloque superior de estado, origen, ruta y recarga de configuración.
+ - El encabezado `CONFIGURACIÓN Y ESTADO` cambia a `CONFIGURACIÓN`.
+ - Los archivos de configuración anteriores que aún contengan campos de memoria en MB cargan los nuevos valores porcentuales predeterminados; los demás ajustes se conservan.
++
++
++## FIX93 — Precisión diagnóstica empresarial
++
++FIX93 parte de FIX92 y endurece el núcleo diagnóstico y de observabilidad sin modificar la filosofía de solo lectura. Cambios principales:
++
++- `EventTime` queda separado de `IngestedAt`; evidencia sin fecha no puede convertirse en incidente funcional ni causa temporal.
++- Correlación Windows ↔ TSplus más conservadora: exige identidad técnica y ventanas temporales acotadas.
++- Cursor durable/replay para Event Viewer y logs TSplus; pérdida de persistencia degrada cobertura.
++- Parser TSplus multilinea, continuidad de stack trace y manejo seguro de límites de caracteres UTF-8/UTF-16.
++- Fechas `dd/MM` vs `MM/dd` se resuelven sólo si la ventana de investigación hace inequívoca una interpretación.
++- Servicios manuales/trigger-start y productos complementarios no se convierten automáticamente en fallas.
++- Puertos Web/HTML5 se validan con PID/proceso propietario; incertidumbre = `NO EVALUADO`.
++- Identidad de usuario exacta; se evitan coincidencias por substring.
++- `IncidentLedger` con serialización entre procesos y endurecimiento de estado/SMTP/sanitización.
++- Alertas visibles con títulos explícitos (por ejemplo, `TDM · Alerta de memoria libre en descenso`) y sin notificaciones de recuperación.
++- Nueva suite `TDM.ProductionTests` y gate de restore reproducible con `packages.lock.json` + `--locked-mode`.
++
++La validación estática de este paquete no sustituye el gate dinámico de Windows/TSplus. Antes de promoción a producción debe ejecutarse `VERIFY-TDM-READINESS.cmd` en un host Windows compatible y completar las pruebas operativas/laboratorio documentadas.
+diff --git a/START-TDM.cmd b/START-TDM.cmd
+index 6d3d7f2..3e02eae 100644
+--- a/START-TDM.cmd
++++ b/START-TDM.cmd
+@@ -1,19 +1,19 @@
+-@echo off
+-cd /d "%~dp0"
+-if not exist "src\TDM.Gui.Avalonia\bin\Release\net8.0-windows\TDM.Application.exe" (
+-  echo ERROR: TDM no esta compilado. Ejecute BUILD-TDM.cmd o VERIFY-TDM-READINESS.cmd.
+-  exit /b 1
+-)
+-powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='src\TDM.Notifier.Avalonia\bin\Release\net8.0-windows\TDM.Notifier.dll'; if(-not (Test-Path -LiteralPath $p)){exit 74}; $b=[IO.File]::ReadAllBytes($p); $u8=[Text.Encoding]::UTF8.GetString($b); $u16=[Text.Encoding]::Unicode.GetString($b); if(-not ($u8.Contains('FIX74_NO_NOTIFICATION_FOOTER') -or $u16.Contains('FIX74_NO_NOTIFICATION_FOOTER'))){exit 74}"
+-if errorlevel 1 (
+-  echo ERROR: El Notifier compilado es anterior a FIX74. Ejecute BUILD-TDM.cmd.
+-  exit /b 1
+-)
+-if exist "src\TDM.Notifier.Avalonia\bin\Release\net8.0-windows\TDM.Notifier.exe" (
+-  rem Replace every notifier loaded from an earlier delivery.
+-  taskkill /IM TDM.Notifier.exe /T /F >nul 2>nul
+-  taskkill /IM TDM.Notifier.Avalonia.exe /T /F >nul 2>nul
+-  start "" "src\TDM.Notifier.Avalonia\bin\Release\net8.0-windows\TDM.Notifier.exe"
+-)
+-start "" "src\TDM.Gui.Avalonia\bin\Release\net8.0-windows\TDM.Application.exe"
+-exit /b 0
++@echo off
++cd /d "%~dp0"
++if not exist "src\TDM.Gui.Avalonia\bin\Release\net8.0-windows\TDM.Application.exe" (
++  echo ERROR: TDM no esta compilado. Ejecute BUILD-TDM.cmd o VERIFY-TDM-READINESS.cmd.
++  exit /b 1
++)
++powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='src\TDM.Notifier.Avalonia\bin\Release\net8.0-windows\TDM.Notifier.dll'; if(-not (Test-Path -LiteralPath $p)){exit 74}; $b=[IO.File]::ReadAllBytes($p); $u8=[Text.Encoding]::UTF8.GetString($b); $u16=[Text.Encoding]::Unicode.GetString($b); if(-not ($u8.Contains('FIX93_EXPLICIT_ALERTS_NO_RECOVERED') -or $u16.Contains('FIX93_EXPLICIT_ALERTS_NO_RECOVERED'))){exit 74}"
++if errorlevel 1 (
++  echo ERROR: El Notifier compilado es anterior a FIX74. Ejecute BUILD-TDM.cmd.
++  exit /b 1
++)
++if exist "src\TDM.Notifier.Avalonia\bin\Release\net8.0-windows\TDM.Notifier.exe" (
++  rem Replace every notifier loaded from an earlier delivery.
++  taskkill /IM TDM.Notifier.exe /T /F >nul 2>nul
++  taskkill /IM TDM.Notifier.Avalonia.exe /T /F >nul 2>nul
++  start "" "src\TDM.Notifier.Avalonia\bin\Release\net8.0-windows\TDM.Notifier.exe"
++)
++start "" "src\TDM.Gui.Avalonia\bin\Release\net8.0-windows\TDM.Application.exe"
++exit /b 0
+diff --git a/TDM.sln b/TDM.sln
+index 383b308..e2e0a42 100644
+--- a/TDM.sln
++++ b/TDM.sln
+@@ -10,6 +10,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TDM.Service", "src\TDM.Serv
+ EndProject
+ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TDM.AvaloniaParityTests", "tests\TDM.AvaloniaParityTests\TDM.AvaloniaParityTests.csproj", "{A3333333-3333-4333-8333-333333333333}"
+ EndProject
++Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TDM.ProductionTests", "tests\TDM.ProductionTests\TDM.ProductionTests.csproj", "{A5555555-5555-4555-8555-555555555555}"
++EndProject
+ Global
+     GlobalSection(SolutionConfigurationPlatforms) = preSolution
+         Debug|Any CPU = Debug|Any CPU
+@@ -32,5 +34,9 @@ Global
+         {A4444444-4444-4444-8444-444444444444}.Debug|Any CPU.Build.0 = Debug|Any CPU
+         {A4444444-4444-4444-8444-444444444444}.Release|Any CPU.ActiveCfg = Release|Any CPU
+         {A4444444-4444-4444-8444-444444444444}.Release|Any CPU.Build.0 = Release|Any CPU
++        {A5555555-5555-4555-8555-555555555555}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
++        {A5555555-5555-4555-8555-555555555555}.Debug|Any CPU.Build.0 = Debug|Any CPU
++        {A5555555-5555-4555-8555-555555555555}.Release|Any CPU.ActiveCfg = Release|Any CPU
++        {A5555555-5555-4555-8555-555555555555}.Release|Any CPU.Build.0 = Release|Any CPU
+     EndGlobalSection
+ EndGlobal
+diff --git a/VALIDACION-ESTATICA-FIX93.json b/VALIDACION-ESTATICA-FIX93.json
+new file mode 100644
+index 0000000..ed3f151
+--- /dev/null
++++ b/VALIDACION-ESTATICA-FIX93.json
+@@ -0,0 +1,18 @@
++{
++  "result": "PASS",
++  "stats": {
++    "projects": 18,
++    "solution_roots": 5,
++    "solution_reachable": 18,
++    "csharp": 170,
++    "axaml": 18,
++    "production_tests": 17,
++    "packages_lock": 0,
++    "bin_obj": 0
++  },
++  "errors": [],
++  "warnings": [
++    "packages.lock.json: 0 in SOURCE; Windows gate generates one per project then enforces --locked-mode.",
++    ".NET 8 remains in FIX93; migration to a supported LTS is a separate lifecycle gate."
++  ]
++}
+\ No newline at end of file
+diff --git a/VALIDAR-FIX93.cmd b/VALIDAR-FIX93.cmd
+new file mode 100644
+index 0000000..26bb0f2
+--- /dev/null
++++ b/VALIDAR-FIX93.cmd
+@@ -0,0 +1,18 @@
++@echo off
++setlocal EnableExtensions
++chcp 65001 >nul
++cd /d "%~dp0"
++echo ============================================================
++echo TDM FIX93 - Gate de validacion Windows
++echo ============================================================
++call ".\VERIFY-TDM-READINESS.cmd"
++set "RC=%ERRORLEVEL%"
++echo.
++if "%RC%"=="0" (
++  echo [PASS] Gate FIX93 completado correctamente.
++) else (
++  echo [FAIL] Gate FIX93 devolvio codigo %RC%.
++)
++echo.
++pause
++exit /b %RC%
+diff --git a/VERIFY-TDM-READINESS.ps1 b/VERIFY-TDM-READINESS.ps1
+index 5b864b4..9ca2947 100644
+--- a/VERIFY-TDM-READINESS.ps1
++++ b/VERIFY-TDM-READINESS.ps1
+@@ -1,4 +1,4 @@
+-﻿$ErrorActionPreference = 'Stop'
++$ErrorActionPreference = 'Stop'
+ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+ Set-Location -LiteralPath $root
+ 
+@@ -35,6 +35,10 @@ try {
+             'src\TDM.Service\TDM.Service.csproj',
+             'src\TDM.Application\TDM.Application.csproj',
+             'tests\TDM.AvaloniaParityTests\TDM.AvaloniaParityTests.csproj',
++            'tests\TDM.ProductionTests\TDM.ProductionTests.csproj',
++            'tests\TDM.ProductionTests\Program.cs',
++            'src\TDM.Core\CollectorCursorStore.cs',
++            'src\TDM.Notifications\AlertTitleFormatter.cs',
+             'src\TDM.Models\TdmVisibleText.cs',
+             'src\TDM.Notifications\NotificationSignalPolicy.cs',
+             'src\TDM.Gui.Avalonia\Assets\tdm-logo.png',
+@@ -103,11 +107,23 @@ try {
+         $visibleSanitizer = Get-Content -LiteralPath (Join-Path $root 'src\TDM.Models\TdmVisibleText.cs') -Raw -Encoding UTF8
+         $notificationDispatcher = Get-Content -LiteralPath (Join-Path $root 'src\TDM.Notifications\NotificationDispatcher.cs') -Raw -Encoding UTF8
+         $notificationSignalPolicy = Get-Content -LiteralPath (Join-Path $root 'src\TDM.Notifications\NotificationSignalPolicy.cs') -Raw -Encoding UTF8
++        $alertTitleFormatter = Get-Content -LiteralPath (Join-Path $root 'src\TDM.Notifications\AlertTitleFormatter.cs') -Raw -Encoding UTF8
++        $diagnosticEventCatalog = Get-Content -LiteralPath (Join-Path $root 'src\TDM.Models\DiagnosticEventCatalog.cs') -Raw -Encoding UTF8
++        $diagnosticEngine = Get-Content -LiteralPath (Join-Path $root 'src\TDM.Core\DiagnosticEngine.cs') -Raw -Encoding UTF8
++        $resourceTrend = Get-Content -LiteralPath (Join-Path $root 'src\TDM.Persistence\ResourceTrendAnalyzer.cs') -Raw -Encoding UTF8
+         Require ($visibleSanitizer.Contains('TDM.Notifier.exe')) 'Falta el nombre público TDM.Notifier.exe en el sanitizador.'
+         Require ($visibleSanitizer.Contains('TDM.Application.exe')) 'Falta el nombre público TDM.Application.exe en el sanitizador.'
+         Require ($notificationDispatcher.Contains('TdmVisibleText.Sanitize')) 'Las notificaciones no aplican el sanitizador global.'
+         Require ($notificationDispatcher.Contains('NotificationSignalPolicy.CanonicalKey')) 'Las notificaciones no consolidan eventos equivalentes de un mismo crash.'
+         Require ($notificationSignalPolicy.Contains('"PROCESS_CRASH"')) 'Falta la identidad canónica para crashes correlacionados.'
++        Require ($alertTitleFormatter.Contains('memoria libre en descenso')) 'Las alertas de memoria no usan un título explícito.'
++        Require (-not $resourceTrend.Contains('Memoria / tendencia')) 'La etiqueta obsoleta Memoria / tendencia sigue presente.'
++        Require (-not $resourceTrend.Contains('CPU / tendencia')) 'La etiqueta obsoleta CPU / tendencia sigue presente.'
++        Require (-not $notificationDispatcher.Contains('NotificationTransition.Recovered')) 'NotificationDispatcher todavía emite recuperaciones visibles.'
++        Require ($diagnosticEventCatalog.Contains('if (e.Timestamp is null')) 'Las incidencias funcionales todavía aceptan IngestedAt como EventTime.'
++        Require ($diagnosticEngine.Contains('IsNonTemporalContext')) 'DiagnosticEngine no separa evidencia sin tiempo de la causalidad.'
++        $tolerantQueries = @(Get-ChildItem -Path (Join-Path $root 'src') -Filter *.cs -Recurse | Where-Object { (Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8).Contains('TolerateQueryErrors = true') })
++        Require ($tolerantQueries.Count -eq 0) 'Persisten consultas EventLog con TolerateQueryErrors=true que pueden ocultar cobertura parcial.'
+ 
+         $projectIdentities = foreach($projectFile in Get-ChildItem -Path (Join-Path $root 'src'),(Join-Path $root 'tests') -Filter *.csproj -Recurse){
+             [xml]$projectXml = Get-Content -LiteralPath $projectFile.FullName -Raw -Encoding UTF8
+@@ -242,10 +258,10 @@ try {
+         Require (-not $notifierPopup.Contains('MetaText')) 'La notificación todavía muestra transición/severidad/fecha.'
+         Require (-not $notifierPopupCode.Contains('MetaText.Text')) 'El código de notificación todavía escribe el pie técnico.'
+         Require (-not $notifierPopupCode.Contains('TransitionText(')) 'El Notifier conserva el formateador del pie técnico eliminado.'
+-        Require ($notifierPopupCode.Contains('FIX74_NO_NOTIFICATION_FOOTER')) 'Falta la revisión visual FIX74 del Notifier.'
++        Require ($notifierPopupCode.Contains('FIX93_EXPLICIT_ALERTS_NO_RECOVERED')) 'Falta la revisión FIX93 del Notifier para alertas explícitas sin recuperación.'
+         Require ($startScript.Contains('taskkill /IM TDM.Notifier.exe /T /F')) 'El arranque no sustituye una instancia antigua del notificador.'
+         Require ($startScript.Contains('taskkill /IM TDM.Notifier.Avalonia.exe /T /F')) 'El arranque no termina una instancia heredada del notificador.'
+-        Require ($startScript.Contains('FIX74_NO_NOTIFICATION_FOOTER')) 'El arranque no rechaza binarios anteriores a FIX74.'
++        Require ($startScript.Contains('FIX93_EXPLICIT_ALERTS_NO_RECOVERED')) 'El arranque no rechaza binarios anteriores a la revisión de alertas FIX93.'
+         Require ($installerCommand.Contains('taskkill /IM TDM.Notifier.exe /T /F')) 'El instalador no termina el árbol del Notifier actual.'
+         Require ($installerCommand.Contains('taskkill /IM TDM.Notifier.Avalonia.exe /T /F')) 'El instalador no termina el Notifier heredado.'
+         Require ($installerCommand.Contains('taskkill /IM TDM.Application.exe /T /F')) 'El instalador no termina la GUI antes de actualizarla.'
+@@ -343,9 +359,16 @@ try {
+         if($LASTEXITCODE -ne 0){ throw "dotnet clean devolvió $LASTEXITCODE" }
+     }
+ 
+-    Step '[3/7] Restore...' {
+-        & dotnet restore '.\TDM.sln' --force-evaluate
+-        if($LASTEXITCODE -ne 0){ throw "dotnet restore devolvió $LASTEXITCODE" }
++    Step '[3/7] Restore reproducible + locked-mode...' {
++        & dotnet restore '.\TDM.sln' --force-evaluate -p:RestorePackagesWithLockFile=true
++        if($LASTEXITCODE -ne 0){ throw "dotnet restore inicial devolvió $LASTEXITCODE" }
++
++        $projectFiles = @(Get-ChildItem -Path (Join-Path $root 'src'),(Join-Path $root 'tests') -Filter *.csproj -Recurse)
++        $lockFiles = @(Get-ChildItem -Path (Join-Path $root 'src'),(Join-Path $root 'tests') -Filter packages.lock.json -Recurse)
++        Require ($lockFiles.Count -eq $projectFiles.Count) "packages.lock.json incompletos: $($lockFiles.Count)/$($projectFiles.Count)."
++
++        & dotnet restore '.\TDM.sln' --locked-mode
++        if($LASTEXITCODE -ne 0){ throw "dotnet restore --locked-mode devolvió $LASTEXITCODE" }
+     }
+ 
+     Step '[4/7] Build Release warnings-as-errors...' {
+@@ -354,17 +377,24 @@ try {
+ 
+         $notifierDll = Join-Path $root 'src\TDM.Notifier.Avalonia\bin\Release\net8.0-windows\TDM.Notifier.dll'
+         Require (Test-Path -LiteralPath $notifierDll) 'No se generó TDM.Notifier.dll.'
++        $serviceDll = Join-Path $root 'src\TDM.Service\bin\Release\net8.0-windows\TDM.Service.dll'
++        Require (Test-Path -LiteralPath $serviceDll) 'No se generó TDM.Service.dll.'
+         $notifierBinaryBytes = [IO.File]::ReadAllBytes($notifierDll)
+         $notifierBinaryUtf8 = [Text.Encoding]::UTF8.GetString($notifierBinaryBytes)
+         $notifierBinaryUtf16 = [Text.Encoding]::Unicode.GetString($notifierBinaryBytes)
+-        Require ($notifierBinaryUtf8.Contains('FIX74_NO_NOTIFICATION_FOOTER') -or $notifierBinaryUtf16.Contains('FIX74_NO_NOTIFICATION_FOOTER')) 'Se generó un Notifier obsoleto sin la revisión visual FIX74.'
++        Require ($notifierBinaryUtf8.Contains('FIX93_EXPLICIT_ALERTS_NO_RECOVERED') -or $notifierBinaryUtf16.Contains('FIX93_EXPLICIT_ALERTS_NO_RECOVERED')) 'Se generó un Notifier obsoleto sin la revisión FIX93 de alertas explícitas/sin recuperación.'
+     }
+ 
+-    Step '[5/7] Pruebas de paridad...' {
++    Step '[5/7] Pruebas de paridad + producción...' {
+         $dll = Join-Path $root 'tests\TDM.AvaloniaParityTests\bin\Release\net8.0-windows\TDM.ParityTests.dll'
+         Require (Test-Path $dll) "No existe $dll"
+         & dotnet $dll
+         if($LASTEXITCODE -ne 0){ throw "ParityTests devolvió $LASTEXITCODE" }
++
++        $productionDll = Join-Path $root 'tests\TDM.ProductionTests\bin\Release\net8.0-windows\TDM.ProductionTests.dll'
++        Require (Test-Path $productionDll) "No existe $productionDll"
++        & dotnet $productionDll
++        if($LASTEXITCODE -ne 0){ throw "ProductionTests devolvió $LASTEXITCODE" }
+     }
+ 
+     Step '[6/7] Startup GUI + Notifier...' {
+@@ -433,7 +463,7 @@ try {
+     }
+ 
+     Step '[7/7] Verificación de estructura limpia...' {
+-        foreach($legacy in @('src\TDM.Gui','src\TDM.Notifier','src\TDM.Cli','tests\TDM.ProductionTests','tools')){
++        foreach($legacy in @('src\TDM.Gui','src\TDM.Notifier','src\TDM.Cli','tools')){
+             Require (-not (Test-Path -LiteralPath (Join-Path $root $legacy))) "Contenido no necesario presente: $legacy"
+         }
+         Write-Host '[OK] Paquete limpio PASS' -ForegroundColor Green
+diff --git a/src/TDM.Collectors.Rdp/RdpEventCollector.cs b/src/TDM.Collectors.Rdp/RdpEventCollector.cs
+index 7bc979c..aa32498 100644
+--- a/src/TDM.Collectors.Rdp/RdpEventCollector.cs
++++ b/src/TDM.Collectors.Rdp/RdpEventCollector.cs
+@@ -26,7 +26,7 @@ public sealed class RdpEventCollector : IReadOnlyCollector
+         foreach (var channel in Channels)
+             ReadChannel(channel, start, end, events, cancellationToken);
+ 
+-        EvaluateSessionPipeline(events, findings);
++        EvaluateSessionPipeline(events, findings, end);
+ 
+         var failures = events.Where(e => e.Severidad is DiagnosticSeverity.Error or DiagnosticSeverity.Critico).ToList();
+         if (context.Sistema.TsplusDetectado && failures.Count > 0)
+@@ -56,7 +56,7 @@ public sealed class RdpEventCollector : IReadOnlyCollector
+     }
+ 
+ 
+-    private static void EvaluateSessionPipeline(List<DiagnosticEvent> events, List<DiagnosticFinding> findings)
++    private static void EvaluateSessionPipeline(List<DiagnosticEvent> events, List<DiagnosticFinding> findings, DateTimeOffset analysisEnd)
+     {
+         var logons = events
+             .Where(e => e.Tipo == "RDP_SESSION_LOGON_STAGE" && e.Timestamp.HasValue)
+@@ -92,7 +92,12 @@ public sealed class RdpEventCollector : IReadOnlyCollector
+             var endedQuickly = endings.Any(e => IsSameSession(logon, e) &&
+                                                 e.Timestamp!.Value >= logon.Timestamp!.Value &&
+                                                 e.Timestamp.Value - logon.Timestamp.Value <= TimeSpan.FromSeconds(45));
+-            if (!endedQuickly) missing.Add((logon, identity));
++            if (endedQuickly) continue;
++
++            // No declarar un gap antes de que realmente venza el SLA de tres minutos.
++            // Durante ese intervalo la sesión permanece pendiente, no degradada.
++            if (analysisEnd < logon.Timestamp!.Value + TimeSpan.FromMinutes(3)) continue;
++            missing.Add((logon, identity));
+         }
+ 
+         events.Add(new DiagnosticEvent(
+@@ -224,7 +229,7 @@ public sealed class RdpEventCollector : IReadOnlyCollector
+                 $"*[System[(Level=1 or Level=2 or Level=3 or EventID=1149 or EventID=21 or EventID=22 or EventID=23 or EventID=24 or EventID=25) and {timeClause}]]")
+             {
+                 ReverseDirection = true,
+-                TolerateQueryErrors = true
++                TolerateQueryErrors = false
+             };
+ 
+             using var reader = new EventLogReader(query);
+diff --git a/src/TDM.Collectors.Rdp/SchannelEventCollector.cs b/src/TDM.Collectors.Rdp/SchannelEventCollector.cs
+index 792c448..c1c6a69 100644
+--- a/src/TDM.Collectors.Rdp/SchannelEventCollector.cs
++++ b/src/TDM.Collectors.Rdp/SchannelEventCollector.cs
+@@ -23,7 +23,7 @@ public sealed class SchannelEventCollector : IReadOnlyCollector
+                 $"*[System[Provider[@Name='Schannel'] and (Level=1 or Level=2 or Level=3) and {timeClause}]]")
+             {
+                 ReverseDirection = true,
+-                TolerateQueryErrors = true
++                TolerateQueryErrors = false
+             };
+             using var reader = new EventLogReader(query);
+             var max = context.Lookback.TotalHours switch
+diff --git a/src/TDM.Collectors.Rdp/UserSessionProfileCollector.cs b/src/TDM.Collectors.Rdp/UserSessionProfileCollector.cs
+index 1d65ccf..cea63bb 100644
+--- a/src/TDM.Collectors.Rdp/UserSessionProfileCollector.cs
++++ b/src/TDM.Collectors.Rdp/UserSessionProfileCollector.cs
+@@ -180,9 +180,16 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
+ 
+     private static void AuditProfile(UserProfileInfo profile, List<DiagnosticFinding> findings, List<DiagnosticEvent> events)
+     {
+-        var pathExists = !string.IsNullOrWhiteSpace(profile.Path) && Directory.Exists(profile.Path);
++        var pathProbe = string.IsNullOrWhiteSpace(profile.Path)
++            ? ProbeResult<bool>.Unavailable("ProfileImagePath vacío")
++            : FileSystemProbe.Directory(profile.Path);
++        var pathExists = pathProbe.IsAvailable;
+         var ntUser = pathExists ? Path.Combine(profile.Path, "NTUSER.DAT") : string.Empty;
+-        var ntUserExists = pathExists && File.Exists(ntUser);
++        var ntUserProbe = pathExists
++            ? FileSystemProbe.File(ntUser)
++            : pathProbe.IsAbsent
++                ? ProbeResult<bool>.Absent("La carpeta del perfil está ausente")
++                : ProbeResult<bool>.Unavailable("No se pudo evaluar la carpeta padre del perfil");
+         var temporary = profile.IsBak || profile.Path.Contains("\\TEMP", StringComparison.OrdinalIgnoreCase) || profile.Path.EndsWith("\\Temp", StringComparison.OrdinalIgnoreCase);
+ 
+         events.Add(new DiagnosticEvent(
+@@ -198,8 +205,8 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
+             [
+                 new EvidenceItem("SID", profile.Sid),
+                 new EvidenceItem("Ruta", profile.Path),
+-                new EvidenceItem("Carpeta existe", pathExists ? "Sí" : "No"),
+-                new EvidenceItem("NTUSER.DAT", ntUserExists ? "Presente" : "No confirmado"),
++                new EvidenceItem("Carpeta del perfil", FileSystemProbe.Display(pathProbe, "Presente", "Ausente confirmado")),
++                new EvidenceItem("NTUSER.DAT", FileSystemProbe.Display(ntUserProbe, "Presente", "Ausente confirmado")),
+                 new EvidenceItem("Clave .bak", profile.IsBak ? "Sí" : "No"),
+                 new EvidenceItem("State", profile.State?.ToString() ?? "N/D"),
+                 new EvidenceItem("RefCount", profile.RefCount?.ToString() ?? "N/D")
+@@ -222,7 +229,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
+                 DiagnosticLayer.Windows));
+         }
+ 
+-        if (!pathExists && !string.IsNullOrWhiteSpace(profile.Path))
++        if (pathProbe.IsAbsent && !string.IsNullOrWhiteSpace(profile.Path))
+         {
+             findings.Add(new DiagnosticFinding(
+                 $"USER-PROFILE-PATH-MISSING-{Sanitize(profile.Sid)}",
+@@ -238,6 +245,31 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
+                 DiagnosticLayer.Windows));
+         }
+ 
++        if (pathProbe.IsUnavailable)
++        {
++            findings.Add(new DiagnosticFinding(
++                $"USER-PROFILE-PATH-NOT-EVALUATED-{Sanitize(profile.Sid)}",
++                "Windows User Profile",
++                DiagnosticSeverity.Advertencia,
++                "No fue posible comprobar la carpeta registrada del perfil.",
++                "TDM conserva este estado como NO EVALUADO; un error de permisos o E/S nunca se convierte en 'perfil ausente'.",
++                [new EvidenceItem("SID", profile.Sid), new EvidenceItem("Ruta registrada", profile.Path), new EvidenceItem("Cobertura", pathProbe.StatusText), new EvidenceItem("Detalle", pathProbe.Detail ?? "N/D")],
++                ConfidenceLevel.Confirmada,
++                Capa: DiagnosticLayer.Windows));
++        }
++        else if (pathProbe.IsAvailable && ntUserProbe.IsUnavailable)
++        {
++            findings.Add(new DiagnosticFinding(
++                $"USER-PROFILE-HIVE-NOT-EVALUATED-{Sanitize(profile.Sid)}",
++                "Windows User Profile",
++                DiagnosticSeverity.Advertencia,
++                "No fue posible comprobar NTUSER.DAT del perfil.",
++                "La colmena no se reporta como ausente cuando la lectura está bloqueada o falla por E/S.",
++                [new EvidenceItem("SID", profile.Sid), new EvidenceItem("Archivo", ntUser), new EvidenceItem("Cobertura", ntUserProbe.StatusText), new EvidenceItem("Detalle", ntUserProbe.Detail ?? "N/D")],
++                ConfidenceLevel.Confirmada,
++                Capa: DiagnosticLayer.Windows));
++        }
++
+         if (temporary)
+         {
+             findings.Add(new DiagnosticFinding(
+@@ -278,7 +310,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
+             var query = new EventLogQuery("Security", PathType.LogName, $"*[System[(EventID=4624 or EventID=4625 or EventID=4740 or EventID=4771 or EventID=4776) and {timeClause}]]")
+             {
+                 ReverseDirection = true,
+-                TolerateQueryErrors = true
++                TolerateQueryErrors = false
+             };
+             using var reader = new EventLogReader(query);
+             for (var i = 0; i < authLimit; i++)
+@@ -668,7 +700,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
+             var query = new EventLogQuery("Security", PathType.LogName, $"*[System[(EventID=4625 or EventID=4776) and {timeClause}]]")
+             {
+                 ReverseDirection = true,
+-                TolerateQueryErrors = true
++                TolerateQueryErrors = false
+             };
+             using var reader = new EventLogReader(query);
+             for (var i = 0; i < securityLimit; i++)
+@@ -732,7 +764,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
+             var query = new EventLogQuery("System", PathType.LogName, $"*[System[(Level=1 or Level=2 or Level=3) and {timeClause}]]")
+             {
+                 ReverseDirection = true,
+-                TolerateQueryErrors = true
++                TolerateQueryErrors = false
+             };
+             using var reader = new EventLogReader(query);
+             for (var i = 0; i < systemLimit; i++)
+@@ -885,7 +917,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
+             var xpath = provider is null
+                 ? $"*[System[(Level=1 or Level=2 or Level=3) and {timeClause}]]"
+                 : $"*[System[Provider[@Name='{provider}'] and (Level=1 or Level=2 or Level=3) and {timeClause}]]";
+-            var query = new EventLogQuery(channel, PathType.LogName, xpath) { ReverseDirection = true, TolerateQueryErrors = true };
++            var query = new EventLogQuery(channel, PathType.LogName, xpath) { ReverseDirection = true, TolerateQueryErrors = false };
+             using var reader = new EventLogReader(query);
+             var max = ResolveEventLimit(500, to - from, 4_000);
+             for (var i = 0; i < max; i++)
+diff --git a/src/TDM.Collectors.Security/DefenderEventCollector.cs b/src/TDM.Collectors.Security/DefenderEventCollector.cs
+index f75e95c..530a518 100644
+--- a/src/TDM.Collectors.Security/DefenderEventCollector.cs
++++ b/src/TDM.Collectors.Security/DefenderEventCollector.cs
+@@ -24,7 +24,7 @@ public sealed class DefenderEventCollector : IReadOnlyCollector
+             var query = new EventLogQuery(Channel, PathType.LogName, $"*[System[(EventID=1116 or EventID=1117 or EventID=5007) and {timeClause}]]")
+             {
+                 ReverseDirection = true,
+-                TolerateQueryErrors = true
++                TolerateQueryErrors = false
+             };
+ 
+             using var reader = new EventLogReader(query);
+diff --git a/src/TDM.Collectors.TSplus/IncrementalTsplusLogCollector.cs b/src/TDM.Collectors.TSplus/IncrementalTsplusLogCollector.cs
+index 1033aa7..074cba9 100644
+--- a/src/TDM.Collectors.TSplus/IncrementalTsplusLogCollector.cs
++++ b/src/TDM.Collectors.TSplus/IncrementalTsplusLogCollector.cs
+@@ -21,25 +21,54 @@ public sealed class IncrementalTsplusLogCollector : IReadOnlyCollector
+     private readonly object _sync = new();
+     private readonly Dictionary<string, long> _offsets = new(StringComparer.OrdinalIgnoreCase);
+     private readonly Dictionary<string, string> _partialLines = new(StringComparer.OrdinalIgnoreCase);
++    private readonly Dictionary<string, long> _creationTicks = new(StringComparer.OrdinalIgnoreCase);
+     private readonly Dictionary<string, Queue<DiagnosticEvent>> _pendingEvents = new(StringComparer.OrdinalIgnoreCase);
+     private IReadOnlyList<TsplusLogSource> _sources = [];
++    private string? _cursorPersistenceWarning;
+     private TsplusLogDiscoveryResult? _discovery;
+     private DateTimeOffset _lastDiscovery = DateTimeOffset.MinValue;
+     private bool _primed;
+ 
++    private sealed record FileCursorState(long Offset, long CreationUtcTicks, string PartialLine);
++    private sealed record TsplusCursorState(Dictionary<string, FileCursorState> Files, DateTimeOffset SavedAt);
++
+     public void Prime(string? installPath)
+     {
+         lock (_sync)
+         {
+             _offsets.Clear();
+             _partialLines.Clear();
++            _creationTicks.Clear();
+             _pendingEvents.Clear();
+             _discovery = TsplusLogDiscovery.DiscoverDetailed(installPath);
+             _sources = _discovery.Sources;
+             _lastDiscovery = DateTimeOffset.Now;
++
++            var loaded = CollectorCursorStore.TryLoad<TsplusCursorState>("tsplus-log-cursors", out var state, out var error)
++                         && state?.Files is not null;
++            _cursorPersistenceWarning = error;
+             foreach (var candidate in EnumerateCandidates(_sources).Candidates.Take(MaxFiles))
+             {
+-                try { _offsets[candidate.Path] = new FileInfo(candidate.Path).Length; }
++                try
++                {
++                    var info = new FileInfo(candidate.Path);
++                    var creation = info.CreationTimeUtc.Ticks;
++                    if (loaded && state!.Files.TryGetValue(candidate.Path, out var saved)
++                               && saved.CreationUtcTicks == creation
++                               && saved.Offset >= 0 && saved.Offset <= info.Length)
++                    {
++                        _offsets[candidate.Path] = saved.Offset;
++                        _creationTicks[candidate.Path] = creation;
++                        if (!string.IsNullOrEmpty(saved.PartialLine)) _partialLines[candidate.Path] = saved.PartialLine;
++                    }
++                    else
++                    {
++                        // Primer arranque evita inundar con historial; tras existir un estado durable,
++                        // un archivo nuevo se procesa desde el inicio para no perder lo ocurrido offline.
++                        _offsets[candidate.Path] = loaded ? 0 : info.Length;
++                        _creationTicks[candidate.Path] = creation;
++                    }
++                }
+                 catch { }
+             }
+             _primed = true;
+@@ -87,7 +116,13 @@ public sealed class IncrementalTsplusLogCollector : IReadOnlyCollector
+             }
+ 
+             long length;
+-            try { length = new FileInfo(candidate.Path).Length; }
++            long creationTicks;
++            try
++            {
++                var info = new FileInfo(candidate.Path);
++                length = info.Length;
++                creationTicks = info.CreationTimeUtc.Ticks;
++            }
+             catch (UnauthorizedAccessException ex)
+             {
+                 events.Add(SourceUnavailable(candidate, "Sin permisos de lectura", ex.Message));
+@@ -101,16 +136,22 @@ public sealed class IncrementalTsplusLogCollector : IReadOnlyCollector
+                 continue;
+             }
+ 
+-            if (length < previous)
++            var knownCreation = CreationTicks(candidate.Path);
++            if ((knownCreation != 0 && knownCreation != creationTicks) || length < previous)
+             {
+                 previous = 0;
+                 lock (_sync)
+                 {
+                     _offsets[candidate.Path] = 0;
++                    _creationTicks[candidate.Path] = creationTicks;
+                     _partialLines.Remove(candidate.Path);
+                     _pendingEvents.Remove(candidate.Path);
+                 }
+             }
++            else if (knownCreation == 0)
++            {
++                lock (_sync) _creationTicks[candidate.Path] = creationTicks;
++            }
+             if (length == previous) continue;
+ 
+             var cycleRemaining = MaxNewBytesPerCycle - bytesReadThisCycle;
+@@ -150,11 +191,23 @@ public sealed class IncrementalTsplusLogCollector : IReadOnlyCollector
+             if (newOffset < length || PendingCount(candidate.Path) > 0) backlogFiles++;
+         }
+ 
++        if (!PersistCursorState(out var persistError))
++        {
++            _cursorPersistenceWarning = persistError ?? "No fue posible persistir el cursor incremental TSplus.";
++            events.Add(new DiagnosticEvent(DateTimeOffset.Now, "TDM", "Persistencia de logs TSplus", DiagnosticLayer.Tsplus,
++                DiagnosticSeverity.Advertencia, "TSPLUS_INCREMENTAL_CURSOR_NOT_PERSISTED",
++                "Los logs se leyeron, pero TDM no pudo persistir el cursor durable; la continuidad después de reiniciar no está garantizada.",
++                Evidencia: [new EvidenceItem("Cobertura", "Parcial"), new EvidenceItem("Detalle", _cursorPersistenceWarning)],
++                Producto: TsplusProduct.RemoteAccess));
++            readLosses++;
++        }
++
+         foreach (var group in events
+                      .Where(e => e.Severidad is DiagnosticSeverity.Advertencia or DiagnosticSeverity.Error or DiagnosticSeverity.Critico)
++                     .Where(e => e.Timestamp.HasValue)
+                      .GroupBy(e => new { e.Componente, e.Tipo, e.Severidad, e.Capa }))
+         {
+-            var latest = group.OrderByDescending(x => x.Timestamp ?? x.IngestedAt ?? DateTimeOffset.MinValue).First();
++            var latest = group.OrderByDescending(x => x.Timestamp).First();
+             findings.Add(new DiagnosticFinding(
+                 $"LIVE-TSLOG-{SanitizeId(group.Key.Componente)}-{group.Key.Tipo}",
+                 group.Key.Componente,
+@@ -163,7 +216,7 @@ public sealed class IncrementalTsplusLogCollector : IReadOnlyCollector
+                 latest.Mensaje,
+                 [
+                     new EvidenceItem("Cantidad nueva", group.Count().ToString()),
+-                    new EvidenceItem("Último registro", (latest.Timestamp ?? latest.IngestedAt)?.ToString("O") ?? "N/D"),
++                    new EvidenceItem("Último registro", latest.Timestamp?.ToString("O") ?? "N/D"),
+                     new EvidenceItem("Archivo", latest.Archivo ?? "N/D"),
+                     new EvidenceItem("Modo captura", "Incremental por cursor de bytes; backlog persistente")
+                 ],
+@@ -228,6 +281,52 @@ public sealed class IncrementalTsplusLogCollector : IReadOnlyCollector
+         lock (_sync) return _partialLines.TryGetValue(path, out var value) ? value : string.Empty;
+     }
+ 
++    private long CreationTicks(string path)
++    {
++        lock (_sync) return _creationTicks.TryGetValue(path, out var value) ? value : 0;
++    }
++
++    private bool PersistCursorState(out string? error)
++    {
++        Dictionary<string, FileCursorState> files;
++        lock (_sync)
++        {
++            files = _offsets.ToDictionary(
++                pair => pair.Key,
++                pair => new FileCursorState(
++                    pair.Value,
++                    _creationTicks.TryGetValue(pair.Key, out var creation) ? creation : 0,
++                    _partialLines.TryGetValue(pair.Key, out var partial) ? partial : string.Empty),
++                StringComparer.OrdinalIgnoreCase);
++        }
++        return CollectorCursorStore.TrySave("tsplus-log-cursors", new TsplusCursorState(files, DateTimeOffset.Now), out error);
++    }
++
++    private static (string Text, int BytesUsed) DecodeSafePrefix(Encoding encoding, byte[] buffer, int count)
++    {
++        if (count <= 0) return (string.Empty, 0);
++        Encoding strict = encoding.CodePage switch
++        {
++            65001 => new UTF8Encoding(false, true),
++            1200 => new UnicodeEncoding(false, false, true),
++            1201 => new UnicodeEncoding(true, false, true),
++            _ => encoding
++        };
++
++        var maxTrim = encoding.CodePage == 65001 ? Math.Min(3, count) : encoding.CodePage is 1200 or 1201 ? Math.Min(2, count) : 0;
++        for (var trim = 0; trim <= maxTrim; trim++)
++        {
++            var usable = count - trim;
++            if (usable <= 0) break;
++            if (encoding.CodePage is 1200 or 1201 && usable % 2 != 0) continue;
++            try { return (strict.GetString(buffer, 0, usable), usable); }
++            catch (DecoderFallbackException) { }
++        }
++        // Si hay bytes inválidos en el interior (p. ej. log ANSI sin BOM), no bloquear el
++        // cursor indefinidamente: conservar la evidencia con sustitución de caracteres.
++        return (encoding.GetString(buffer, 0, count), count);
++    }
++
+     private static DiagnosticEvent SourceUnavailable(LogCandidate candidate, string state, string detail) =>
+         new(DateTimeOffset.Now, "TDM", candidate.Component, candidate.Layer, DiagnosticSeverity.Advertencia,
+             "TSPLUS_INCREMENTAL_SOURCE_UNAVAILABLE",
+@@ -265,13 +364,11 @@ public sealed class IncrementalTsplusLogCollector : IReadOnlyCollector
+             }
+             if (read == 0) return new IncrementalReadResult([], priorPartial, 0, null);
+ 
+-            var decoder = encoding.GetDecoder();
+-            var chars = new char[encoding.GetMaxCharCount(read)];
+-            decoder.Convert(buffer, 0, read, chars, 0, chars.Length, false,
+-                out var bytesUsed, out var charsUsed, out _);
++            var decoded = DecodeSafePrefix(encoding, buffer, read);
++            var bytesUsed = decoded.BytesUsed;
+             if (bytesUsed <= 0) return new IncrementalReadResult([], priorPartial, 0, null);
+ 
+-            var appended = new string(chars, 0, charsUsed);
++            var appended = decoded.Text;
+             if (start == 0) appended = appended.TrimStart('\uFEFF');
+             var combined = priorPartial + appended;
+             var lastBreak = combined.LastIndexOf('\n');
+@@ -286,6 +383,7 @@ public sealed class IncrementalTsplusLogCollector : IReadOnlyCollector
+             if (remainder.Length > MaxPartialChars) remainder = remainder[^MaxPartialChars..];
+ 
+             var result = new List<DiagnosticEvent>();
++            DiagnosticEvent? current = null;
+             var lineNumber = 0;
+             using var lines = new StringReader(complete);
+             string? line;
+@@ -298,13 +396,19 @@ public sealed class IncrementalTsplusLogCollector : IReadOnlyCollector
+                     context, candidate.Layer, candidate.SourceName, candidate.Product);
+                 if (parsed is not null)
+                 {
++                    if (current is not null) result.Add(current);
+                     var evidence = (parsed.Evidencia ?? []).Concat([
+                         new EvidenceItem("Offset inicial del bloque", start.ToString()),
+                         new EvidenceItem("Línea", $"relativa al bloque: {lineNumber}")
+                     ]).ToList();
+-                    result.Add(parsed with { Evidencia = evidence });
++                    current = parsed with { Evidencia = evidence };
++                    continue;
+                 }
++
++                if (current is not null && TsplusLogParser.IsContinuationLine(line))
++                    current = current with { Mensaje = current.Mensaje + Environment.NewLine + line.TrimEnd() };
+             }
++            if (current is not null) result.Add(current);
+ 
+             return new IncrementalReadResult(result, remainder, bytesUsed, null);
+         }
+diff --git a/src/TDM.Collectors.TSplus/TcpListenerOwnershipProbe.cs b/src/TDM.Collectors.TSplus/TcpListenerOwnershipProbe.cs
+new file mode 100644
+index 0000000..4fb9e3a
+--- /dev/null
++++ b/src/TDM.Collectors.TSplus/TcpListenerOwnershipProbe.cs
+@@ -0,0 +1,205 @@
++using System.Diagnostics;
++using System.Net;
++using System.Runtime.InteropServices;
++
++namespace TDM.Collectors.TSplus;
++
++internal enum TcpListenerOwnershipState
++{
++    ExpectedProcess,
++    NoListener,
++    OtherProcess,
++    OwnerUnknown,
++    NotEvaluated
++}
++
++internal sealed record TcpListenerOwnershipResult(
++    TcpListenerOwnershipState State,
++    int Port,
++    IReadOnlyList<int> Pids,
++    IReadOnlyList<string> Processes,
++    string Detail)
++{
++    public string EvidenceText => State switch
++    {
++        TcpListenerOwnershipState.ExpectedProcess => $"Listener TSplus compatible · {Detail}",
++        TcpListenerOwnershipState.NoListener => "No se observó listener TCP",
++        TcpListenerOwnershipState.OtherProcess => $"CONFLICTO · {Detail}",
++        TcpListenerOwnershipState.OwnerUnknown => $"NO EVALUADO completamente · {Detail}",
++        _ => $"NO EVALUADO · {Detail}"
++    };
++}
++
++/// <summary>
++/// Consulta la tabla TCP OWNER_PID de Windows para diferenciar un puerto realmente atendido
++/// por el runtime esperado de un puerto ocupado por otro proceso. Sólo lectura.
++/// </summary>
++internal static class TcpListenerOwnershipProbe
++{
++    private const uint ErrorInsufficientBuffer = 122;
++    private const int AfInet = 2;
++    private const int AfInet6 = 23;
++
++    public static TcpListenerOwnershipResult Probe(int port, string installRoot, string? configuredExecutable)
++    {
++        if (!OperatingSystem.IsWindows())
++            return new(TcpListenerOwnershipState.NotEvaluated, port, [], [], "La inspección de PID del listener requiere Windows.");
++
++        try
++        {
++            var pids = QueryPids(AfInet, port).Concat(QueryPids(AfInet6, port)).Distinct().OrderBy(x => x).ToList();
++            if (pids.Count == 0)
++                return new(TcpListenerOwnershipState.NoListener, port, [], [], "Sin PID propietario para el puerto configurado.");
++
++            var expectedName = string.IsNullOrWhiteSpace(configuredExecutable)
++                ? null
++                : Path.GetFileNameWithoutExtension(configuredExecutable);
++            var processLabels = new List<string>();
++            var anyExpected = false;
++            var anyUnknown = false;
++            var allClearlyOther = true;
++
++            foreach (var pid in pids)
++            {
++                try
++                {
++                    using var process = Process.GetProcessById(pid);
++                    var name = process.ProcessName;
++                    string? imagePath = null;
++                    try { imagePath = process.MainModule?.FileName; } catch { }
++                    processLabels.Add(string.IsNullOrWhiteSpace(imagePath) ? $"{name} (PID {pid})" : $"{name} (PID {pid}) · {imagePath}");
++
++                    var nameMatches = !string.IsNullOrWhiteSpace(expectedName)
++                                      && name.Equals(expectedName, StringComparison.OrdinalIgnoreCase);
++                    var pathMatches = !string.IsNullOrWhiteSpace(imagePath)
++                                      && IsUnderRoot(imagePath, installRoot);
++                    if (nameMatches || pathMatches)
++                    {
++                        anyExpected = true;
++                        allClearlyOther = false;
++                    }
++                    else if (string.IsNullOrWhiteSpace(imagePath))
++                    {
++                        anyUnknown = true;
++                        allClearlyOther = false;
++                    }
++                }
++                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
++                {
++                    _ = ex;
++                    processLabels.Add($"PID {pid} · propietario no legible");
++                    anyUnknown = true;
++                    allClearlyOther = false;
++                }
++            }
++
++            var detail = string.Join(" | ", processLabels);
++            if (anyExpected)
++                return new(TcpListenerOwnershipState.ExpectedProcess, port, pids, processLabels, detail);
++            if (allClearlyOther)
++                return new(TcpListenerOwnershipState.OtherProcess, port, pids, processLabels, detail);
++            if (anyUnknown)
++                return new(TcpListenerOwnershipState.OwnerUnknown, port, pids, processLabels, detail);
++            return new(TcpListenerOwnershipState.OwnerUnknown, port, pids, processLabels, detail);
++        }
++        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
++        {
++            return new(TcpListenerOwnershipState.NotEvaluated, port, [], [], ex.Message);
++        }
++    }
++
++    private static bool IsUnderRoot(string candidate, string root)
++    {
++        if (string.IsNullOrWhiteSpace(candidate) || string.IsNullOrWhiteSpace(root)) return false;
++        try
++        {
++            var fullCandidate = Path.GetFullPath(candidate).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
++            var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
++            return fullCandidate.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase);
++        }
++        catch { return false; }
++    }
++
++    private static IEnumerable<int> QueryPids(int addressFamily, int targetPort)
++    {
++        var size = 0;
++        var first = GetExtendedTcpTable(IntPtr.Zero, ref size, true, addressFamily, TcpTableClass.OwnerPidListener, 0);
++        if (first != 0 && first != ErrorInsufficientBuffer)
++            throw new System.ComponentModel.Win32Exception((int)first);
++        if (size <= sizeof(uint)) yield break;
++
++        var buffer = Marshal.AllocHGlobal(size);
++        try
++        {
++            var result = GetExtendedTcpTable(buffer, ref size, true, addressFamily, TcpTableClass.OwnerPidListener, 0);
++            if (result != 0) throw new System.ComponentModel.Win32Exception((int)result);
++
++            var count = Marshal.ReadInt32(buffer);
++            var current = IntPtr.Add(buffer, sizeof(uint));
++            if (addressFamily == AfInet)
++            {
++                var rowSize = Marshal.SizeOf<MibTcpRowOwnerPid>();
++                for (var i = 0; i < count; i++)
++                {
++                    var row = Marshal.PtrToStructure<MibTcpRowOwnerPid>(current);
++                    if (Port(row.LocalPort) == targetPort && row.OwningPid > 0 && row.OwningPid <= int.MaxValue)
++                        yield return (int)row.OwningPid;
++                    current = IntPtr.Add(current, rowSize);
++                }
++            }
++            else
++            {
++                var rowSize = Marshal.SizeOf<MibTcp6RowOwnerPid>();
++                for (var i = 0; i < count; i++)
++                {
++                    var row = Marshal.PtrToStructure<MibTcp6RowOwnerPid>(current);
++                    if (Port(row.LocalPort) == targetPort && row.OwningPid > 0 && row.OwningPid <= int.MaxValue)
++                        yield return (int)row.OwningPid;
++                    current = IntPtr.Add(current, rowSize);
++                }
++            }
++        }
++        finally { Marshal.FreeHGlobal(buffer); }
++    }
++
++    private static int Port(uint networkOrder)
++        => unchecked((ushort)IPAddress.NetworkToHostOrder((short)(networkOrder & 0xFFFF)));
++
++    private enum TcpTableClass
++    {
++        OwnerPidListener = 3
++    }
++
++    [StructLayout(LayoutKind.Sequential)]
++    private struct MibTcpRowOwnerPid
++    {
++        public uint State;
++        public uint LocalAddr;
++        public uint LocalPort;
++        public uint RemoteAddr;
++        public uint RemotePort;
++        public uint OwningPid;
++    }
++
++    [StructLayout(LayoutKind.Sequential)]
++    private struct MibTcp6RowOwnerPid
++    {
++        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)] public byte[] LocalAddr;
++        public uint LocalScopeId;
++        public uint LocalPort;
++        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)] public byte[] RemoteAddr;
++        public uint RemoteScopeId;
++        public uint RemotePort;
++        public uint State;
++        public uint OwningPid;
++    }
++
++    [DllImport("iphlpapi.dll", SetLastError = true)]
++    private static extern uint GetExtendedTcpTable(
++        IntPtr tcpTable,
++        ref int size,
++        [MarshalAs(UnmanagedType.Bool)] bool order,
++        int ipVersion,
++        TcpTableClass tableClass,
++        uint reserved);
++}
+diff --git a/src/TDM.Collectors.TSplus/TsplusInternalConfigurationCollector.cs b/src/TDM.Collectors.TSplus/TsplusInternalConfigurationCollector.cs
+index e0c0dc7..000e2cc 100644
+--- a/src/TDM.Collectors.TSplus/TsplusInternalConfigurationCollector.cs
++++ b/src/TDM.Collectors.TSplus/TsplusInternalConfigurationCollector.cs
+@@ -103,9 +103,52 @@ public sealed partial class TsplusInternalConfigurationCollector : IReadOnlyColl
+ 
+     private static string? FindWebArtifact(string install, string expectedPath, string fileName, params string[] pathTokens)
+     {
+-        // Diagnóstico normal dirigido: la ruta oficial/conocida es la fuente de verdad.
+-        // La auditoría recursiva completa queda fuera del flujo normal.
+-        return File.Exists(expectedPath) ? expectedPath : null;
++        // La ruta oficial es la primera fuente de verdad, pero File.Exists no puede distinguir
++        // ausencia de acceso denegado. Si la ruta no puede evaluarse la conservamos para que
++        // el caller la represente como NO EVALUADO, nunca como ausente.
++        var expectedProbe = FileSystemProbe.File(expectedPath);
++        if (expectedProbe.IsAvailable || expectedProbe.IsUnavailable) return expectedPath;
++
++        // Compatibilidad acotada con layouts personalizados/entre versiones. La búsqueda está
++        // limitada en profundidad y número de directorios para no convertir el diagnóstico en
++        // un escaneo invasivo del disco.
++        var queue = new Queue<(string Path, int Depth)>();
++        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
++        queue.Enqueue((install, 0));
++        const int maxDepth = 4;
++        const int maxDirectories = 160;
++        var examined = 0;
++        while (queue.Count > 0 && examined < maxDirectories)
++        {
++            var (dir, depth) = queue.Dequeue();
++            string full;
++            try { full = Path.GetFullPath(dir); } catch { continue; }
++            if (!visited.Add(full)) continue;
++            examined++;
++
++            var pathText = full.Replace('/', '\\');
++            var tokenCompatible = pathTokens.Length == 0 || pathTokens.Any(t => pathText.Contains(t, StringComparison.OrdinalIgnoreCase));
++            if (tokenCompatible)
++            {
++                var candidate = Path.Combine(full, fileName);
++                var probe = FileSystemProbe.File(candidate);
++                if (probe.IsAvailable || probe.IsUnavailable) return candidate;
++            }
++
++            if (depth >= maxDepth) continue;
++            try
++            {
++                foreach (var child in Directory.EnumerateDirectories(full).Take(64))
++                    queue.Enqueue((child, depth + 1));
++            }
++            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
++            {
++                _ = ex;
++                // Un subárbol no evaluable no demuestra que el artefacto esté ausente.
++                // La ruta esperada ya fue evaluada como ausente; seguimos con el resto del árbol.
++            }
++        }
++        return null;
+     }
+ 
+     private static void AuditAppControl(
+@@ -402,10 +445,14 @@ public sealed partial class TsplusInternalConfigurationCollector : IReadOnlyColl
+         var webServer = Path.Combine(install, "Clients", "webserver");
+         var webPortal = Path.Combine(install, "Clients", "webportal");
+         var settingsJs = Path.Combine(webRoot, "software", "html5", "settings.js");
++        var webRootProbe = FileSystemProbe.Directory(webRoot);
++        var webServerProbe = FileSystemProbe.Directory(webServer);
++        var webPortalProbe = FileSystemProbe.Directory(webPortal);
++        var settingsJsProbe = FileSystemProbe.File(settingsJs);
+ 
+-        if (Directory.Exists(webRoot))
++        if (webRootProbe.IsAvailable)
+         {
+-            if (File.Exists(settingsJs))
++            if (settingsJsProbe.IsAvailable)
+             {
+                 try
+                 {
+@@ -467,6 +514,18 @@ public sealed partial class TsplusInternalConfigurationCollector : IReadOnlyColl
+                         Capa: DiagnosticLayer.Tsplus));
+                 }
+             }
++            else if (settingsJsProbe.IsUnavailable)
++            {
++                findings.Add(new DiagnosticFinding(
++                    "TSPLUS-WEB-SETTINGSJS-NOT-EVALUATED",
++                    "TSplus Web / HTML5",
++                    DiagnosticSeverity.Advertencia,
++                    "No fue posible comprobar settings.js.",
++                    "La fuente queda como NO EVALUADA; un error de permisos o E/S no se interpreta como archivo ausente ni como Web saludable.",
++                    [new EvidenceItem("Archivo", settingsJs), new EvidenceItem("Cobertura", settingsJsProbe.StatusText), new EvidenceItem("Detalle", settingsJsProbe.Detail ?? "N/D")],
++                    ConfidenceLevel.Confirmada,
++                    Capa: DiagnosticLayer.Tsplus));
++            }
+             else if (enforceKnownFiles)
+             {
+                 findings.Add(new DiagnosticFinding(
+@@ -483,6 +542,18 @@ public sealed partial class TsplusInternalConfigurationCollector : IReadOnlyColl
+                     DiagnosticLayer.Tsplus));
+             }
+         }
++        else if (webRootProbe.IsUnavailable)
++        {
++            findings.Add(new DiagnosticFinding(
++                "TSPLUS-WEB-ROOT-NOT-EVALUATED",
++                "TSplus Web / HTML5",
++                DiagnosticSeverity.Advertencia,
++                "No fue posible comprobar el árbol Clients\www de TSplus.",
++                "La cobertura Web queda parcial; TDM no convierte un fallo de acceso/E/S en ausencia de módulo.",
++                [new EvidenceItem("Ruta", webRoot), new EvidenceItem("Cobertura", webRootProbe.StatusText), new EvidenceItem("Detalle", webRootProbe.Detail ?? "N/D")],
++                ConfidenceLevel.Confirmada,
++                Capa: DiagnosticLayer.Tsplus));
++        }
+ 
+         var appSettingsCandidates = new List<string>
+         {
+@@ -681,12 +752,26 @@ public sealed partial class TsplusInternalConfigurationCollector : IReadOnlyColl
+         var webServer = !string.IsNullOrWhiteSpace(runBat) ? Path.GetDirectoryName(runBat)!
+             : !string.IsNullOrWhiteSpace(jar) ? Path.GetDirectoryName(jar)!
+             : expectedWebServer;
+-        if (!Directory.Exists(webServer) && string.IsNullOrWhiteSpace(runBat) && string.IsNullOrWhiteSpace(jar)) return;
++        var webServerDirectoryProbe = FileSystemProbe.Directory(webServer);
++        if (webServerDirectoryProbe.IsAbsent && string.IsNullOrWhiteSpace(runBat) && string.IsNullOrWhiteSpace(jar)) return;
++        if (webServerDirectoryProbe.IsUnavailable && string.IsNullOrWhiteSpace(runBat) && string.IsNullOrWhiteSpace(jar))
++        {
++            findings.Add(new DiagnosticFinding(
++                "TSPLUS-WEB-RUNTIME-NOT-EVALUATED",
++                "TSplus HTML5 / Web Server",
++                DiagnosticSeverity.Advertencia,
++                "No fue posible comprobar el directorio del runtime Web/HTML5.",
++                "La cobertura queda como NO EVALUADA; no se infiere que el Web Server esté ausente o detenido.",
++                [new EvidenceItem("Ruta", webServer), new EvidenceItem("Cobertura", webServerDirectoryProbe.StatusText), new EvidenceItem("Detalle", webServerDirectoryProbe.Detail ?? "N/D")],
++                ConfidenceLevel.Confirmada,
++                Capa: DiagnosticLayer.Tsplus));
++            return;
++        }
+         string javaExe = string.Empty;
+         int? httpPort = null;
+         int? httpsPort = null;
+ 
+-        if (File.Exists(runBat))
++        if (!string.IsNullOrWhiteSpace(runBat) && FileSystemProbe.File(runBat).IsAvailable)
+         {
+             try
+             {
+@@ -750,37 +835,66 @@ public sealed partial class TsplusInternalConfigurationCollector : IReadOnlyColl
+                 DiagnosticLayer.Tsplus));
+         }
+ 
+-        HashSet<int> listeners = [];
+-        try { listeners = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Select(x => x.Port).ToHashSet(); }
+-        catch { }
++        var listenerEvidence = new List<EvidenceItem>();
+         foreach (var port in new[] { httpPort, httpsPort }.Where(p => p.HasValue).Select(p => p!.Value).Distinct())
+         {
+-            if (listeners.Contains(port)) continue;
+-            findings.Add(new DiagnosticFinding(
+-                $"TSPLUS-WEB-PORT-NOT-LISTENING-{port}",
+-                "TSplus HTML5 / Web Server",
+-                DiagnosticSeverity.Advertencia,
+-                $"El puerto web {port} aparece configurado en runwebserver.bat pero no se observó un listener TCP durante la captura.",
+-                "Esto puede indicar que el gateway/servidor web no está iniciado, cayó o que la arquitectura usa un servidor web/proxy externo. Se requiere correlación con weblog.txt y eventos del proceso antes de declararlo causa.",
+-                [new EvidenceItem("Puerto", port.ToString()), new EvidenceItem("Archivo", runBat!)],
+-                ConfidenceLevel.Media,
+-                "TSplus Documentation — Built-in Web Server",
+-                "https://docs.tsplus.net/tsplus/built-in-web-server/",
+-                "Revise el estado del Web Server en AdminTool y los logs del gateway. No abra/cierre puertos ni reinicie servicios automáticamente desde TDM.",
+-                DiagnosticLayer.Tsplus));
++            var owner = TcpListenerOwnershipProbe.Probe(port, install, javaExe);
++            listenerEvidence.Add(new EvidenceItem($"Puerto {port} / propietario", owner.EvidenceText));
++
++            if (owner.State == TcpListenerOwnershipState.NoListener)
++            {
++                findings.Add(new DiagnosticFinding(
++                    $"TSPLUS-WEB-PORT-NOT-LISTENING-{port}",
++                    "TSplus HTML5 / Web Server",
++                    DiagnosticSeverity.Advertencia,
++                    $"El puerto web {port} aparece configurado en runwebserver.bat pero no se observó un listener TCP durante la captura.",
++                    "Esto puede indicar que el gateway/servidor web no está iniciado, cayó o que la arquitectura usa un servidor web/proxy externo. Se requiere correlación con weblog.txt y eventos del proceso antes de declararlo causa.",
++                    [new EvidenceItem("Puerto", port.ToString()), new EvidenceItem("Archivo", runBat ?? "N/D")],
++                    ConfidenceLevel.Media,
++                    "TSplus Documentation — Built-in Web Server",
++                    "https://docs.tsplus.net/tsplus/built-in-web-server/",
++                    "Revise el estado del Web Server en AdminTool y los logs del gateway. No abra/cierre puertos ni reinicie servicios automáticamente desde TDM.",
++                    DiagnosticLayer.Tsplus));
++            }
++            else if (owner.State == TcpListenerOwnershipState.OtherProcess)
++            {
++                findings.Add(new DiagnosticFinding(
++                    $"TSPLUS-WEB-PORT-OWNED-BY-OTHER-{port}",
++                    "TSplus HTML5 / Web Server",
++                    DiagnosticSeverity.Advertencia,
++                    $"El puerto web {port} está ocupado por un proceso que no pudo relacionarse con el runtime TSplus esperado.",
++                    "Un listener ajeno puede ocultar una caída del Web Server si sólo se valida el número de puerto. TDM conserva el PID/proceso observado y exige correlación antes de declarar saludable el módulo.",
++                    [new EvidenceItem("Puerto", port.ToString()), new EvidenceItem("Propietario", owner.Detail)],
++                    ConfidenceLevel.Alta,
++                    Capa: DiagnosticLayer.Tsplus));
++            }
++            else if (owner.State is TcpListenerOwnershipState.OwnerUnknown or TcpListenerOwnershipState.NotEvaluated)
++            {
++                findings.Add(new DiagnosticFinding(
++                    $"TSPLUS-WEB-PORT-OWNER-NOT-EVALUATED-{port}",
++                    "TSplus HTML5 / Web Server",
++                    DiagnosticSeverity.Advertencia,
++                    $"El listener del puerto {port} no pudo atribuirse con certeza al runtime TSplus.",
++                    "La presencia de un puerto abierto no se interpreta como salud del módulo cuando el proceso propietario no puede comprobarse.",
++                    [new EvidenceItem("Puerto", port.ToString()), new EvidenceItem("Estado", owner.EvidenceText)],
++                    ConfidenceLevel.Confirmada,
++                    Capa: DiagnosticLayer.Tsplus));
++            }
+         }
+ 
++        var runtimeEvidence = new List<EvidenceItem>
++        {
++            new("runwebserver.bat", FileSystemProbe.Display(runBatProbe, $"Presente: {runBat}", "No presente en el árbol TSplus")),
++            new("Ejecutable Java/HTML5service", string.IsNullOrWhiteSpace(javaExe) ? "No determinado" : javaExe),
++            new("Ejecutable existe", string.IsNullOrWhiteSpace(javaExe) ? "No determinado" : FileSystemProbe.Display(FileSystemProbe.File(javaExe), "Sí", "No")),
++            new("httpwebs.jar", FileSystemProbe.Display(jarProbe, $"Presente: {jar}", "No presente en el árbol TSplus")),
++            new("Puerto HTTP configurado", httpPort?.ToString() ?? "No determinado"),
++            new("Puerto HTTPS configurado", httpsPort?.ToString() ?? "No determinado")
++        };
++        runtimeEvidence.AddRange(listenerEvidence);
+         events.Add(new DiagnosticEvent(DateTimeOffset.Now, "TDM", "TSplus HTML5 / Web Server", DiagnosticLayer.Tsplus,
+             DiagnosticSeverity.Informativo, "TSPLUS_WEB_RUNTIME_STATE", "Estado local del runtime HTML5 capturado.",
+-            Evidencia:
+-            [
+-                new EvidenceItem("runwebserver.bat", FileSystemProbe.Display(runBatProbe, $"Presente: {runBat}", "No presente en el árbol TSplus")),
+-                new EvidenceItem("Ejecutable Java/HTML5service", string.IsNullOrWhiteSpace(javaExe) ? "No determinado" : javaExe),
+-                new EvidenceItem("Ejecutable existe", string.IsNullOrWhiteSpace(javaExe) ? "No determinado" : FileSystemProbe.Display(FileSystemProbe.File(javaExe), "Sí", "No")),
+-                new EvidenceItem("httpwebs.jar", FileSystemProbe.Display(jarProbe, $"Presente: {jar}", "No presente en el árbol TSplus")),
+-                new EvidenceItem("Puerto HTTP observado", httpPort?.ToString() ?? "No determinado"),
+-                new EvidenceItem("Puerto HTTPS observado", httpsPort?.ToString() ?? "No determinado")
+-            ], Producto: TsplusProduct.RemoteAccess));
++            Evidencia: runtimeEvidence, Producto: TsplusProduct.RemoteAccess));
+ 
+         // Crash reports JVM/HTML5 ya existentes: la fecha del archivo permite correlación temporal sin habilitar dumps.
+         try
+diff --git a/src/TDM.Collectors.TSplus/TsplusLogCollector.cs b/src/TDM.Collectors.TSplus/TsplusLogCollector.cs
+index c615336..ef4d354 100644
+--- a/src/TDM.Collectors.TSplus/TsplusLogCollector.cs
++++ b/src/TDM.Collectors.TSplus/TsplusLogCollector.cs
+@@ -307,6 +307,7 @@ public sealed class TsplusLogCollector : IReadOnlyCollector
+                     Producto: product));
+             }
+             int lineNumber = 0;
++            DiagnosticEvent? current = null;
+             while (!reader.EndOfStream && result.Count < MaxEvents)
+             {
+                 ct.ThrowIfCancellationRequested();
+@@ -316,15 +317,16 @@ public sealed class TsplusLogCollector : IReadOnlyCollector
+                 var parsed = TsplusLogParser.ParseLine(component, path, line, lineNumber, context, layer, sourceName, product);
+                 if (parsed is not null)
+                 {
++                    if (current is not null) result.Add(current);
+                     if (truncated)
+                     {
+                         var evidence = (parsed.Evidencia ?? []).Concat([new EvidenceItem("Línea", $"relativa al tail: {lineNumber}")]).ToList();
+                         parsed = parsed with { Evidencia = evidence };
+                     }
+-                    result.Add(parsed);
++                    current = parsed;
+                     if (product == TsplusProduct.RemoteAccess &&
+                         (parsed.Tipo is "CONNECTION_CLIENT" or "APPLICATION_PUBLISHING" or "OPERATION_FAILED" or "SESSION") &&
+-                        HasNonAscii(line) && result.Count < MaxEvents)
++                        HasNonAscii(line) && result.Count < MaxEvents - 1)
+                     {
+                         result.Add(new DiagnosticEvent(
+                             parsed.Timestamp,
+@@ -345,8 +347,13 @@ public sealed class TsplusLogCollector : IReadOnlyCollector
+                             ],
+                             Producto: TsplusProduct.RemoteAccess));
+                     }
++                    continue;
+                 }
++
++                if (current is not null && TsplusLogParser.IsContinuationLine(line))
++                    current = current with { Mensaje = current.Mensaje + Environment.NewLine + line.TrimEnd() };
+             }
++            if (current is not null && result.Count < MaxEvents) result.Add(current);
+         }
+         catch (UnauthorizedAccessException ex)
+         {
+diff --git a/src/TDM.Collectors.TSplus/TsplusLogParser.cs b/src/TDM.Collectors.TSplus/TsplusLogParser.cs
+index dee7d69..ba38ffa 100644
+--- a/src/TDM.Collectors.TSplus/TsplusLogParser.cs
++++ b/src/TDM.Collectors.TSplus/TsplusLogParser.cs
+@@ -34,7 +34,7 @@ public static partial class TsplusLogParser
+         // No son eventos autónomos y no deben convertirse en falsos positivos.
+         if (LooksLikeStackTrace(line)) return null;
+ 
+-        var timestamp = TryParseTimestamp(line);
++        var timestamp = TryParseTimestamp(line, context);
+         if (timestamp.HasValue && !IsInsideWindow(timestamp.Value, context)) return null;
+ 
+         var severity = ClassifySeverity(line);
+@@ -130,6 +130,17 @@ public static partial class TsplusLogParser
+         };
+     }
+ 
++    public static bool IsContinuationLine(string line)
++    {
++        if (string.IsNullOrWhiteSpace(line)) return false;
++        var t = line.TrimStart();
++        return LooksLikeStackTrace(line)
++               || line.Length > t.Length
++               || t.StartsWith("--->", StringComparison.OrdinalIgnoreCase)
++               || t.StartsWith("Inner Exception", StringComparison.OrdinalIgnoreCase)
++               || t.StartsWith("Caused by", StringComparison.OrdinalIgnoreCase);
++    }
++
+     private static bool LooksLikeStackTrace(string line)
+     {
+         var t = line.TrimStart();
+@@ -156,19 +167,41 @@ public static partial class TsplusLogParser
+     }
+ 
+     public static DateTimeOffset? TryParseTimestamp(string line)
++        => TryParseTimestampCore(line, null);
++
++    public static DateTimeOffset? TryParseTimestamp(string line, DiagnosticContext context)
++        => TryParseTimestampCore(line, context);
++
++    private static DateTimeOffset? TryParseTimestampCore(string line, DiagnosticContext? context)
+     {
+         var match = TimestampRegex().Match(line);
+         if (!match.Success) return null;
+         var value = match.Value.Trim('[', ']', '(', ')', ' ');
+ 
+         // dd/MM y MM/dd son indistinguibles cuando ambos componentes están entre 1 y 12.
+-        // En ese caso no inventamos una fecha: el evento conserva IngestedAt y se marca como tiempo no determinado.
++        // Si conocemos la ventana de diagnóstico, evaluamos ambas interpretaciones y aceptamos
++        // únicamente la que cae de forma inequívoca dentro de esa ventana. Si ambas son plausibles,
++        // no inventamos EventTime y la evidencia permanece como contexto no temporal.
+         var ambiguous = Regex.Match(value, @"^(?<a>\d{2})[/-](?<b>\d{2})[/-](?<y>\d{4})\s");
+         if (ambiguous.Success
+             && int.TryParse(ambiguous.Groups["a"].Value, out var a)
+             && int.TryParse(ambiguous.Groups["b"].Value, out var b)
+             && a is >= 1 and <= 12 && b is >= 1 and <= 12 && a != b)
+-            return null;
++        {
++            var candidates = new List<DateTimeOffset>();
++            foreach (var format in new[] { "dd/MM/yyyy HH:mm:ss.fff", "dd/MM/yyyy HH:mm:ss", "MM/dd/yyyy HH:mm:ss.fff", "MM/dd/yyyy HH:mm:ss",
++                                           "dd-MM-yyyy HH:mm:ss.fff", "dd-MM-yyyy HH:mm:ss", "MM-dd-yyyy HH:mm:ss.fff", "MM-dd-yyyy HH:mm:ss" })
++            {
++                if (DateTimeOffset.TryParseExact(value, format, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var candidate)
++                    && !candidates.Any(x => x == candidate))
++                    candidates.Add(candidate);
++            }
++
++            if (context is null) return null;
++            var window = DiagnosticWindow.Resolve(context);
++            var inside = candidates.Where(window.Contains).Distinct().ToList();
++            return inside.Count == 1 ? inside[0] : null;
++        }
+ 
+         string[] formats =
+         [
+diff --git a/src/TDM.Collectors.Windows/IncrementalWindowsEventCollector.cs b/src/TDM.Collectors.Windows/IncrementalWindowsEventCollector.cs
+index f30a0c5..bdcde23 100644
+--- a/src/TDM.Collectors.Windows/IncrementalWindowsEventCollector.cs
++++ b/src/TDM.Collectors.Windows/IncrementalWindowsEventCollector.cs
+@@ -15,8 +15,11 @@ public sealed class IncrementalWindowsEventCollector : IReadOnlyCollector
+ 
+     private readonly object _sync = new();
+     private readonly Dictionary<string, long> _lastRecordIds = new(StringComparer.OrdinalIgnoreCase);
++    private string? _cursorPersistenceWarning;
+     private bool _primed;
+ 
++    private sealed record WindowsCursorState(Dictionary<string, long> Cursors, DateTimeOffset SavedAt);
++
+     private static readonly ChannelSpec[] Channels =
+     [
+         new("System", "*[System[(EventID=7031 or EventID=7034 or EventID=7040 or EventID=7045 or EventID=41 or EventID=51 or EventID=55)]]", DiagnosticLayer.Windows),
+@@ -46,10 +49,20 @@ public sealed class IncrementalWindowsEventCollector : IReadOnlyCollector
+         lock (_sync)
+         {
+             _lastRecordIds.Clear();
++            var loaded = CollectorCursorStore.TryLoad<WindowsCursorState>("windows-event-cursors", out var state, out var error)
++                         && state?.Cursors is not null;
++            _cursorPersistenceWarning = error;
++            if (loaded)
++            {
++                foreach (var pair in state!.Cursors)
++                    _lastRecordIds[pair.Key] = Math.Max(0, pair.Value);
++            }
++
+             foreach (var channel in Channels)
+             {
++                if (_lastRecordIds.ContainsKey(channel.Name)) continue;
+                 var latest = ReadLatestRecordId(channel.Name);
+-                if (latest.HasValue) _lastRecordIds[channel.Name] = latest.Value;
++                if (latest.HasValue) _lastRecordIds[channel.Name] = loaded ? 0 : latest.Value;
+             }
+             _primed = true;
+         }
+@@ -66,7 +79,16 @@ public sealed class IncrementalWindowsEventCollector : IReadOnlyCollector
+         {
+             cancellationToken.ThrowIfCancellationRequested();
+             var cursor = Cursor(channel.Name);
+-            var xpath = AppendCursor(channel.Filter, cursor);
++            var latestBeforeRead = ReadLatestRecordId(channel.Name);
++            var replayAfterReset = cursor > 0 && latestBeforeRead.HasValue && latestBeforeRead.Value < cursor;
++            if (replayAfterReset)
++            {
++                SetCursor(channel.Name, 0);
++                cursor = 0;
++                coverage.Add(new EvidenceItem(channel.Name, "Discontinuidad detectada; replay acotado de 15 min"));
++            }
++            var baseFilter = replayAfterReset ? AppendRecentWindow(channel.Filter, TimeSpan.FromMinutes(15)) : channel.Filter;
++            var xpath = AppendCursor(baseFilter, cursor);
+             try
+             {
+                 var query = new EventLogQuery(channel.Name, PathType.LogName, xpath) { ReverseDirection = false };
+@@ -109,7 +131,9 @@ public sealed class IncrementalWindowsEventCollector : IReadOnlyCollector
+                 UpdateCursor(channel.Name, maxRecord);
+                 coverage.Add(new EvidenceItem(channel.Name, backlog
+                     ? $"Parcial; backlog pendiente; registros procesados={read}"
+-                    : $"Disponible; registros leídos={read}"));
++                    : replayAfterReset
++                        ? $"Disponible tras replay de discontinuidad; registros leídos={read}"
++                        : $"Disponible; registros leídos={read}"));
+             }
+             catch (EventLogNotFoundException ex)
+             {
+@@ -128,9 +152,22 @@ public sealed class IncrementalWindowsEventCollector : IReadOnlyCollector
+             }
+         }
+ 
++        Dictionary<string, long> snapshot;
++        lock (_sync) snapshot = new Dictionary<string, long>(_lastRecordIds, StringComparer.OrdinalIgnoreCase);
++        if (!CollectorCursorStore.TrySave("windows-event-cursors", new WindowsCursorState(snapshot, DateTimeOffset.Now), out var persistError))
++        {
++            _cursorPersistenceWarning = persistError ?? "No fue posible persistir el bookmark incremental.";
++            coverage.Add(new EvidenceItem("Persistencia de cursores", "NO EVALUADO · " + _cursorPersistenceWarning));
++            events.Add(new DiagnosticEvent(DateTimeOffset.Now, "TDM", "Persistencia Event Viewer", DiagnosticLayer.Windows,
++                DiagnosticSeverity.Advertencia, "WINDOWS_INCREMENTAL_CURSOR_NOT_PERSISTED",
++                "Los eventos se leyeron, pero TDM no pudo persistir el cursor durable; la continuidad después de reiniciar no está garantizada.",
++                Evidencia: [new EvidenceItem("Cobertura", "Parcial"), new EvidenceItem("Detalle", _cursorPersistenceWarning)]));
++        }
++
+         var lost = coverage.Count(x => x.Valor.StartsWith("Sin permisos", StringComparison.OrdinalIgnoreCase)
+             || x.Valor.StartsWith("No legible", StringComparison.OrdinalIgnoreCase)
+             || x.Valor.StartsWith("Canal no disponible", StringComparison.OrdinalIgnoreCase)
++            || x.Valor.StartsWith("NO EVALUADO", StringComparison.OrdinalIgnoreCase)
+             || x.Valor.StartsWith("Parcial; backlog", StringComparison.OrdinalIgnoreCase));
+         events.Add(new DiagnosticEvent(DateTimeOffset.Now, "TDM", "Cobertura incremental Windows", DiagnosticLayer.Windows,
+             lost > 0 ? DiagnosticSeverity.Advertencia : DiagnosticSeverity.Informativo,
+@@ -439,6 +476,23 @@ public sealed class IncrementalWindowsEventCollector : IReadOnlyCollector
+     private long CursorUnsafe(string channel)
+         => _lastRecordIds.TryGetValue(channel, out var value) ? value : 0;
+ 
++    private void SetCursor(string channel, long value)
++    {
++        lock (_sync) _lastRecordIds[channel] = Math.Max(0, value);
++    }
++
++    private static string AppendRecentWindow(string filter, TimeSpan window)
++    {
++        var ms = Math.Max(1, (long)window.TotalMilliseconds);
++        var inner = filter.StartsWith("*[System[", StringComparison.Ordinal) && filter.EndsWith("]]", StringComparison.Ordinal)
++            ? filter[9..^2]
++            : string.Empty;
++        var time = $"TimeCreated[timediff(@SystemTime) <= {ms}]";
++        return string.IsNullOrWhiteSpace(inner)
++            ? $"*[System[{time}]]"
++            : $"*[System[({inner}) and {time}]]";
++    }
++
+     private static long? ReadLatestRecordId(string channel)
+     {
+         try
+diff --git a/src/TDM.Collectors.Windows/ServiceDependencyGraphCollector.cs b/src/TDM.Collectors.Windows/ServiceDependencyGraphCollector.cs
+index cf04e7d..2775cbb 100644
+--- a/src/TDM.Collectors.Windows/ServiceDependencyGraphCollector.cs
++++ b/src/TDM.Collectors.Windows/ServiceDependencyGraphCollector.cs
+@@ -1,4 +1,4 @@
+-﻿using System.ServiceProcess;
++using System.ServiceProcess;
+ using TDM.Core;
+ using TDM.Models;
+ 
+@@ -163,15 +163,20 @@ public sealed class ServiceDependencyGraphCollector : IReadOnlyCollector
+                         new EvidenceItem("Relación", "ServicesDependedOn")
+                     ], Producto: product));
+ 
+-                if (state.HasValue && state != ServiceControllerStatus.Running && IsCriticalForIncident(serviceName, product, context))
++                var dependencyStartMode = WindowsServiceCatalog.ReadStartMode(dep);
++                var dependencyExpectedRunning = dependencyStartMode.Equals("Automático", StringComparison.OrdinalIgnoreCase)
++                                                || (status != ServiceControllerStatus.Running && IsCriticalForIncident(serviceName, product, context));
++                if (state.HasValue && state != ServiceControllerStatus.Running
++                                   && dependencyExpectedRunning
++                                   && IsCriticalForIncident(serviceName, product, context))
+                 {
+                     findings.Add(new DiagnosticFinding(
+                         $"SERVICE-DEPENDENCY-{Sanitize(serviceName)}-{Sanitize(dep)}",
+-                        serviceName, DiagnosticSeverity.Error,
+-                        $"Una dependencia real del servicio {serviceName} no está en ejecución.",
+-                        "La relación fue obtenida directamente del Service Control Manager; TDM no infiere esta dependencia desde una lista fija.",
+-                        [new EvidenceItem("Servicio", serviceName), new EvidenceItem("Dependencia", dep), new EvidenceItem("Estado", state.ToString()!)],
+-                        ConfidenceLevel.Alta, Capa: layer));
++                        serviceName, DiagnosticSeverity.Advertencia,
++                        $"Una dependencia real del servicio {serviceName} no está en ejecución y requiere correlación.",
++                        "La relación fue obtenida directamente del Service Control Manager. El estado detenido por sí solo no se considera causa: debe correlacionarse con modo de inicio, falla SCM y síntoma funcional.",
++                        [new EvidenceItem("Servicio", serviceName), new EvidenceItem("Dependencia", dep), new EvidenceItem("Estado", state.ToString()!), new EvidenceItem("Inicio dependencia", dependencyStartMode)],
++                        ConfidenceLevel.Media, Capa: layer));
+                 }
+             }
+ 
+diff --git a/src/TDM.Collectors.Windows/ThirdPartyInterferenceCollector.cs b/src/TDM.Collectors.Windows/ThirdPartyInterferenceCollector.cs
+index e8818c6..924f1ab 100644
+--- a/src/TDM.Collectors.Windows/ThirdPartyInterferenceCollector.cs
++++ b/src/TDM.Collectors.Windows/ThirdPartyInterferenceCollector.cs
+@@ -61,7 +61,7 @@ public sealed class ThirdPartyInterferenceCollector : IReadOnlyCollector
+         var xpath = $"*[System[(EventID=1000) and {timeClause}]]";
+         try
+         {
+-            var query = new EventLogQuery("Application", PathType.LogName, xpath) { ReverseDirection = true, TolerateQueryErrors = true };
++            var query = new EventLogQuery("Application", PathType.LogName, xpath) { ReverseDirection = true, TolerateQueryErrors = false };
+             using var reader = new EventLogReader(query);
+             for (var i = 0; i < 300; i++)
+             {
+@@ -158,7 +158,7 @@ public sealed class ThirdPartyInterferenceCollector : IReadOnlyCollector
+                 var query = new EventLogQuery(log, PathType.LogName, $"*[System[(Level=1 or Level=2 or Level=3) and {timeClause}]]")
+                 {
+                     ReverseDirection = true,
+-                    TolerateQueryErrors = true
++                    TolerateQueryErrors = false
+                 };
+                 using var reader = new EventLogReader(query);
+                 for (var i = 0; i < 900; i++)
+diff --git a/src/TDM.Collectors.Windows/TsplusInstallDiscovery.cs b/src/TDM.Collectors.Windows/TsplusInstallDiscovery.cs
+index 7c3622c..9eaeac2 100644
+--- a/src/TDM.Collectors.Windows/TsplusInstallDiscovery.cs
++++ b/src/TDM.Collectors.Windows/TsplusInstallDiscovery.cs
+@@ -47,12 +47,14 @@ public static class TsplusInstallDiscovery
+ 
+                     var installLocation = sub?.GetValue("InstallLocation")?.ToString()?.Trim();
+                     var version = sub?.GetValue("DisplayVersion")?.ToString()?.Trim();
+-                    if (string.IsNullOrWhiteSpace(installLocation))
+-                    {
++                    if (string.IsNullOrWhiteSpace(installLocation) || !LooksLikeRemoteAccessRoot(installLocation))
+                         installLocation = KnownPaths().FirstOrDefault(LooksLikeRemoteAccessRoot);
+-                    }
+ 
+-                    return new TsplusInstallInfo(true, installLocation, version, $"Uninstall ({view})");
++                    // Una entrada Uninstall residual no demuestra una instalación funcional.
++                    if (string.IsNullOrWhiteSpace(installLocation) || !LooksLikeRemoteAccessRoot(installLocation))
++                        continue;
++
++                    return new TsplusInstallInfo(true, installLocation, version, $"Uninstall validado por artefactos Remote Access ({view})");
+                 }
+             }
+             catch { }
+@@ -67,6 +69,7 @@ public static class TsplusInstallDiscovery
+         if (displayName.Contains("Advanced Security", StringComparison.OrdinalIgnoreCase)) return false;
+         if (displayName.Contains("Server Monitoring", StringComparison.OrdinalIgnoreCase)) return false;
+         if (displayName.Contains("Remote Work", StringComparison.OrdinalIgnoreCase)) return false;
++        if (displayName.Contains("Remote Support", StringComparison.OrdinalIgnoreCase)) return false;
+         return displayName.Contains("Remote Access", StringComparison.OrdinalIgnoreCase)
+             || displayName.Equals("TSplus", StringComparison.OrdinalIgnoreCase)
+             || displayName.StartsWith("TSplus ", StringComparison.OrdinalIgnoreCase);
+diff --git a/src/TDM.Collectors.Windows/TsplusServiceClassifier.cs b/src/TDM.Collectors.Windows/TsplusServiceClassifier.cs
+index d1c49d6..30ea67e 100644
+--- a/src/TDM.Collectors.Windows/TsplusServiceClassifier.cs
++++ b/src/TDM.Collectors.Windows/TsplusServiceClassifier.cs
+@@ -12,10 +12,10 @@ internal static class TsplusServiceClassifier
+ {
+     private static readonly string[] Tokens =
+     [
+-        "TSplus", "Application Publishing", "APSC", "HTML5", "Gateway",
+-        "ServerMonitoring", "Server Monitoring", "Advanced Security", "TSplus-Security",
+-        "RemoteSupport", "Remote Support", "TwoFactor", "Two Factor", "2FA",
+-        "Universal Printer", "UniversalPrinter"
++        "TSplus", "Application Publishing Service", "APSC",
++        "ServerMonitoring", "TSplus-ServerMonitoring", "TSplus-Security",
++        "RemoteSupport", "TSplus-RemoteSupport", "TSplus-TwoFactor",
++        "UniversalPrinter"
+     ];
+ 
+     public static bool IsRelated(string name, string displayName)
+diff --git a/src/TDM.Collectors.Windows/WindowsChangeEventCollector.cs b/src/TDM.Collectors.Windows/WindowsChangeEventCollector.cs
+index 01e9563..93fc7d3 100644
+--- a/src/TDM.Collectors.Windows/WindowsChangeEventCollector.cs
++++ b/src/TDM.Collectors.Windows/WindowsChangeEventCollector.cs
+@@ -96,7 +96,7 @@ public sealed class WindowsChangeEventCollector : IReadOnlyCollector
+             var query = new EventLogQuery(log, PathType.LogName, xpath)
+             {
+                 ReverseDirection = true,
+-                TolerateQueryErrors = true
++                TolerateQueryErrors = false
+             };
+             using var reader = new EventLogReader(query);
+             var count = 0;
+diff --git a/src/TDM.Collectors.Windows/WindowsEventCollector.cs b/src/TDM.Collectors.Windows/WindowsEventCollector.cs
+index 1eb3075..3e752b5 100644
+--- a/src/TDM.Collectors.Windows/WindowsEventCollector.cs
++++ b/src/TDM.Collectors.Windows/WindowsEventCollector.cs
+@@ -28,7 +28,7 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
+                 var q = new EventLogQuery(log, PathType.LogName, xpath)
+                 {
+                     ReverseDirection = true,
+-                    TolerateQueryErrors = true
++                    TolerateQueryErrors = false
+                 };
+                 using var reader = new EventLogReader(q);
+                 var relevant = 0;
+diff --git a/src/TDM.Collectors.Windows/WindowsForensicEventCollector.cs b/src/TDM.Collectors.Windows/WindowsForensicEventCollector.cs
+index 81d3bfa..2c11841 100644
+--- a/src/TDM.Collectors.Windows/WindowsForensicEventCollector.cs
++++ b/src/TDM.Collectors.Windows/WindowsForensicEventCollector.cs
+@@ -66,7 +66,7 @@ public sealed class WindowsForensicEventCollector : IReadOnlyCollector
+         {
+             try
+             {
+-                var query = new EventLogQuery(spec.Log, PathType.LogName, xpath) { ReverseDirection = true, TolerateQueryErrors = true };
++                var query = new EventLogQuery(spec.Log, PathType.LogName, xpath) { ReverseDirection = true, TolerateQueryErrors = false };
+                 using var reader = new EventLogReader(query);
+                 var count = 0;
+                 var limit = ResolveLimit(spec.Max, context.Lookback);
+diff --git a/src/TDM.Collectors.Windows/WindowsServiceCollector.cs b/src/TDM.Collectors.Windows/WindowsServiceCollector.cs
+index 4d0b72e..7b7b318 100644
+--- a/src/TDM.Collectors.Windows/WindowsServiceCollector.cs
++++ b/src/TDM.Collectors.Windows/WindowsServiceCollector.cs
+@@ -27,7 +27,9 @@ public sealed class WindowsServiceCollector : IReadOnlyCollector
+                 var complementary = product is TsplusProduct.AdvancedSecurity or TsplusProduct.ServerMonitoring or TsplusProduct.RemoteSupport or TsplusProduct.TwoFactorAuthentication;
+                 var catalog = WindowsServiceCatalog.Find(name);
+                 var startMode = WindowsServiceCatalog.ReadStartMode(name);
+-                var requiredNow = (catalog?.RequiredWhenTsplus == true && context.Sistema.TsplusDetectado) || (tsplusRelated && !complementary);
++                var autoStart = startMode.Equals("Automático", StringComparison.OrdinalIgnoreCase);
++                var requiredNow = (catalog?.RequiredWhenTsplus == true && context.Sistema.TsplusDetectado)
++                                  || (tsplusRelated && !complementary && autoStart);
+                 var presentationState = WindowsServiceCatalog.PresentationState(status, startMode, requiredNow);
+                 var layer = name.Equals("TermService", StringComparison.OrdinalIgnoreCase) ||
+                             name.Equals("UmRdpService", StringComparison.OrdinalIgnoreCase) ||
+@@ -39,10 +41,10 @@ public sealed class WindowsServiceCollector : IReadOnlyCollector
+                     ? DiagnosticLayer.Rdp
+                     : tsplusRelated ? DiagnosticLayer.Tsplus : catalog?.Area == "Red" ? DiagnosticLayer.Red : DiagnosticLayer.Windows;
+ 
+-                var shouldWarn = tsplusRelated
+-                    ? status != ServiceControllerStatus.Running
+-                    : WindowsServiceCatalog.ShouldWarnWhenStopped(status, startMode, requiredNow);
+-                var stoppedSeverity = requiredNow ? DiagnosticSeverity.Critico : DiagnosticSeverity.Advertencia;
++                var shouldWarn = WindowsServiceCatalog.ShouldWarnWhenStopped(status, startMode, requiredNow);
++                var stoppedSeverity = catalog?.RequiredWhenTsplus == true && requiredNow
++                    ? DiagnosticSeverity.Critico
++                    : DiagnosticSeverity.Advertencia;
+                 events.Add(new DiagnosticEvent(
+                     DateTimeOffset.Now,
+                     "Service Control Manager",
+diff --git a/src/TDM.Core/CollectorCursorStore.cs b/src/TDM.Core/CollectorCursorStore.cs
+new file mode 100644
+index 0000000..fa43d74
+--- /dev/null
++++ b/src/TDM.Core/CollectorCursorStore.cs
+@@ -0,0 +1,75 @@
++using System.Text.Json;
++
++namespace TDM.Core;
++
++/// <summary>
++/// Persistencia atómica y de solo estado para cursores incrementales. Si no puede
++/// persistirse, el collector debe degradar cobertura; nunca se asume continuidad.
++/// </summary>
++public static class CollectorCursorStore
++{
++    private static readonly JsonSerializerOptions Json = new()
++    {
++        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
++        WriteIndented = false
++    };
++
++    public static bool TryLoad<T>(string key, out T? value, out string? error) where T : class
++    {
++        value = null;
++        error = null;
++        try
++        {
++            var path = StatePath(key);
++            if (!File.Exists(path)) return false;
++            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
++            value = JsonSerializer.Deserialize<T>(stream, Json);
++            return value is not null;
++        }
++        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or System.Security.SecurityException)
++        {
++            error = ex.Message;
++            return false;
++        }
++    }
++
++    public static bool TrySave<T>(string key, T value, out string? error) where T : class
++    {
++        error = null;
++        var path = StatePath(key);
++        var dir = Path.GetDirectoryName(path)!;
++        var tmp = path + ".tmp-" + Guid.NewGuid().ToString("N");
++        try
++        {
++            Directory.CreateDirectory(dir);
++            using (var stream = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None,
++                       16 * 1024, FileOptions.WriteThrough))
++            {
++                JsonSerializer.Serialize(stream, value, Json);
++                stream.Flush(true);
++            }
++            File.Move(tmp, path, true);
++            return true;
++        }
++        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
++        {
++            error = ex.Message;
++            return false;
++        }
++        finally
++        {
++            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
++        }
++    }
++
++    private static string StatePath(string key)
++    {
++        var overrideRoot = Environment.GetEnvironmentVariable("TDM_STATE_ROOT");
++        var root = !string.IsNullOrWhiteSpace(overrideRoot)
++            ? Path.GetFullPath(overrideRoot)
++            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "TDM", "collector-state");
++        var safe = new string(key.Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_').ToArray());
++        if (string.IsNullOrWhiteSpace(safe)) safe = "cursor";
++        return Path.Combine(root, safe + ".json");
++    }
++}
+diff --git a/src/TDM.Core/DiagnosticEngine.cs b/src/TDM.Core/DiagnosticEngine.cs
+index c912a29..cb2ca2b 100644
+--- a/src/TDM.Core/DiagnosticEngine.cs
++++ b/src/TDM.Core/DiagnosticEngine.cs
+@@ -155,9 +155,9 @@ public sealed class DiagnosticEngine
+         var rawEventCount = events.Count;
+         if (events.Count > _policy.MaxRawEvents)
+         {
+-            var causal = events.Where(e => e.Severidad != DiagnosticSeverity.Informativo).OrderByDescending(e => EffectiveTime(e) ?? DateTimeOffset.MinValue).Take((int)(_policy.MaxRawEvents * 0.8));
+-            var contextEvents = events.Where(e => e.Severidad == DiagnosticSeverity.Informativo).OrderByDescending(e => EffectiveTime(e) ?? DateTimeOffset.MinValue).Take(_policy.MaxRawEvents - (int)(_policy.MaxRawEvents * 0.8));
+-            events = causal.Concat(contextEvents).OrderBy(e => EffectiveTime(e) ?? DateTimeOffset.MaxValue).ToList();
++            var causal = events.Where(e => e.Severidad != DiagnosticSeverity.Informativo).OrderByDescending(OrderingTime).Take((int)(_policy.MaxRawEvents * 0.8));
++            var contextEvents = events.Where(e => e.Severidad == DiagnosticSeverity.Informativo).OrderByDescending(OrderingTime).Take(_policy.MaxRawEvents - (int)(_policy.MaxRawEvents * 0.8));
++            events = causal.Concat(contextEvents).OrderBy(OrderingTime).ToList();
+             findings.Add(new DiagnosticFinding(
+                 "TDM-EVENT-VOLUME-LIMIT",
+                 "Motor de diagnóstico",
+@@ -180,8 +180,10 @@ public sealed class DiagnosticEngine
+         var periodoFin = context.HoraIncidente ?? fin;
+         var periodoInicio = periodoFin - context.Lookback;
+         var strictEvents = normalizedEvents
+-            .Where(e => EffectiveTime(e) is DateTimeOffset t && t >= periodoInicio && t <= periodoFin)
+-            .OrderBy(EffectiveTime)
++            .Where(e => e.Timestamp is DateTimeOffset eventTime
++                ? eventTime >= periodoInicio && eventTime <= periodoFin
++                : IsNonTemporalContext(e))
++            .OrderBy(OrderingTime)
+             .ToList();
+         var strictFindings = findings
+             .Where(f => DiagnosticTimeWindow.IsFindingInside(f, periodoInicio, periodoFin))
+@@ -252,7 +254,7 @@ public sealed class DiagnosticEngine
+         var duplicateIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+         var werIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+ 
+-        foreach (var e in events.OrderBy(x => EffectiveTime(x) ?? DateTimeOffset.MaxValue))
++        foreach (var e in events.OrderBy(OrderingTime))
+         {
+             if (e.Tipo == "WER_REPORT")
+             {
+@@ -276,7 +278,9 @@ public sealed class DiagnosticEngine
+ 
+     private static string? EventIdentity(DiagnosticEvent e)
+     {
+-        var effective = EffectiveTime(e);
++        // La deduplicación temporal exige EventTime real. Evidencia sin fecha no se
++        // colapsa ni se vuelve causal mediante IngestedAt.
++        var effective = e.Timestamp;
+         if (!effective.HasValue || IsSnapshotType(e.Tipo)) return null;
+ 
+         // Preferir identificadores nativos evita colapsar eventos legítimos que ocurren
+@@ -299,7 +303,13 @@ public sealed class DiagnosticEngine
+         return $"FALLBACK|{rounded:O}|{e.Fuente}|{e.Codigo}|{message}";
+     }
+ 
+-    private static DateTimeOffset? EffectiveTime(DiagnosticEvent e) => e.Timestamp ?? e.IngestedAt;
++    private static DateTimeOffset OrderingTime(DiagnosticEvent e)
++        => e.Timestamp ?? e.IngestedAt ?? DateTimeOffset.MinValue;
++
++    private static bool IsNonTemporalContext(DiagnosticEvent e)
++        => !e.Timestamp.HasValue
++           && (e.IngestedAt.HasValue || e.Tipo == "UNDATED_LOG_EVIDENCE")
++           && !DiagnosticEventCatalog.IsFunctionalIncident(e);
+ 
+     private static string? EvidenceValue(DiagnosticEvent e, params string[] keys)
+         => EvidenceReader.Value(e, keys);
+diff --git a/src/TDM.Core/IdentityIncidentPromoter.cs b/src/TDM.Core/IdentityIncidentPromoter.cs
+index ab7a487..4ec49a9 100644
+--- a/src/TDM.Core/IdentityIncidentPromoter.cs
++++ b/src/TDM.Core/IdentityIncidentPromoter.cs
+@@ -30,7 +30,7 @@ public static class IdentityIncidentPromoter
+ 
+             var user = NormalizeIdentity(EvidenceReader.Value(evt, "Usuario", "TargetUserName", "User"));
+             var domain = NormalizeIdentity(EvidenceReader.Value(evt, "Dominio", "TargetDomainName", "Domain"));
+-            var ts = evt.Timestamp ?? evt.IngestedAt;
++            var ts = evt.Timestamp;
+             if (string.IsNullOrWhiteSpace(user) || user == "n/d" || ts is null)
+             {
+                 output.Add(Demote(evt, "Sin identidad o timestamp demostrable"));
+@@ -42,7 +42,7 @@ public static class IdentityIncidentPromoter
+                 if (ReferenceEquals(candidate, evt) || IdentityKinds.Contains(candidate.Tipo)) return false;
+                 if (candidate.Severidad is not (DiagnosticSeverity.Error or DiagnosticSeverity.Critico)) return false;
+                 if (candidate.Capa is not (DiagnosticLayer.Rdp or DiagnosticLayer.Tsplus)) return false;
+-                var cts = candidate.Timestamp ?? candidate.IngestedAt;
++                var cts = candidate.Timestamp;
+                 if (cts is null || Math.Abs((cts.Value - ts.Value).TotalSeconds) > window.TotalSeconds) return false;
+                 var cUser = NormalizeIdentity(EvidenceReader.Value(candidate, "Usuario", "TargetUserName", "User"));
+                 if (string.IsNullOrWhiteSpace(cUser) || cUser == "n/d" || !string.Equals(cUser, user, StringComparison.OrdinalIgnoreCase)) return false;
+diff --git a/src/TDM.Correlation/CausalChainAnalyzer.cs b/src/TDM.Correlation/CausalChainAnalyzer.cs
+index 0424a97..87f52a0 100644
+--- a/src/TDM.Correlation/CausalChainAnalyzer.cs
++++ b/src/TDM.Correlation/CausalChainAnalyzer.cs
+@@ -204,16 +204,23 @@ internal static class CausalChainAnalyzer
+     {
+         if (e.Capa == DiagnosticLayer.Tsplus || e.Severidad == DiagnosticSeverity.Informativo) return false;
+ 
++        // Una dependencia Windows sólo es antecedente fuerte cuando identifica el proceso/producto
++        // investigado. Que Remote Access sea el producto principal no convierte cualquier DLL/SideBySide
++        // cercano en causa del crash.
+         if (e.Tipo is "SIDEBYSIDE_DEPENDENCY_FAILURE" or "DEPENDENCY_NOT_FOUND" or "DEPENDENCY_LOAD_FAILURE" or "DLL_NOT_FOUND" or "INVALID_IMAGE_FORMAT")
+-            return Mentions(e, appName) || e.Producto == product || product == TsplusProduct.RemoteAccess;
++            return Mentions(e, appName) || (e.Producto == product && product != TsplusProduct.Ninguno);
+ 
++        // Defender/EDR requiere identidad técnica compartida (proceso, ruta, archivo o producto).
++        // Una señal genérica del antivirus sólo se conserva como contexto.
+         if (e.Tipo is "DEFENDER_ACTION_TAKEN" or "DEFENDER_THREAT_DETECTED" or "THIRD_PARTY_SECURITY_INTERFERENCE_SIGNAL")
+-            return MentionsProduct(e, product, appName) || e.Tipo == "THIRD_PARTY_SECURITY_INTERFERENCE_SIGNAL";
++            return MentionsProduct(e, product, appName) || SharesProcessOrPathIdentity(e, appName);
+ 
++        // Fallos AD/RDP pueden explicar un síntoma de sesión, pero no un crash arbitrario del proceso.
++        // Para elevarlos aquí deben mencionar explícitamente el proceso/producto o el componente dirigido.
+         if (product == TsplusProduct.RemoteAccess &&
+             (e.Tipo == "WINDOWS_AD_AUTH_DEPENDENCY_FAILURE" || e.Tipo == "WINDOWS_AD_TERMSRV_SPN_FAILURE" ||
+              e.Tipo == "WINDOWS_AD_DOMAIN_CONNECTIVITY_FAILURE" || e.Tipo == "RDP_SHELL_START_GAP" || e.Tipo == "RDP_SHELL_START_DELAY"))
+-            return true;
++            return Mentions(e, appName) || IsTargetedWindowsAntecedent(e, product, semanticComponent);
+ 
+         if (e.Tipo is "SERVICE_CONFIGURATION_CHANGE" or "SERVICE_INSTALLED")
+             return MentionsProduct(e, product, appName);
+@@ -224,19 +231,60 @@ internal static class CausalChainAnalyzer
+         if (e.Fuente.Contains("SideBySide", StringComparison.OrdinalIgnoreCase))
+             return MentionsProduct(e, product, appName);
+ 
+-        if (product == TsplusProduct.RemoteAccess &&
+-            (e.Capa == DiagnosticLayer.Rdp || e.Fuente.Contains("Schannel", StringComparison.OrdinalIgnoreCase)))
+-            return true;
++        // Schannel no es causa de un crash TSplus por proximidad temporal. Debe compartir endpoint,
++        // certificado, proceso/ruta o identidad explícita del producto investigado.
++        if (e.Fuente.Contains("Schannel", StringComparison.OrdinalIgnoreCase) || e.Capa == DiagnosticLayer.Rdp)
++            return Mentions(e, appName) || HasExplicitTsplusIdentity(e, product);
+ 
++        // Disk/NTFS/volmgr/Resource-Exhaustion sólo es fuerte si toca el proceso/ruta/producto
++        // investigado. Un volumen diferente permanece como contexto.
+         if (e.Fuente.Contains("Disk", StringComparison.OrdinalIgnoreCase) ||
+             e.Fuente.Contains("Ntfs", StringComparison.OrdinalIgnoreCase) ||
+             e.Fuente.Contains("volmgr", StringComparison.OrdinalIgnoreCase) ||
+             e.Fuente.Contains("Resource-Exhaustion", StringComparison.OrdinalIgnoreCase))
+-            return true;
++            return SharesProcessOrPathIdentity(e, appName) || HasExplicitTsplusIdentity(e, product) || IsTargetedWindowsAntecedent(e, product, semanticComponent);
+ 
+         return IsTargetedWindowsAntecedent(e, product, semanticComponent);
+     }
+ 
++    private static bool SharesProcessOrPathIdentity(DiagnosticEvent e, string appName)
++    {
++        if (Mentions(e, appName)) return true;
++        var stem = Path.GetFileNameWithoutExtension(appName);
++        var values = new[]
++        {
++            e.Archivo,
++            EvidenceValue(e, "Proceso"), EvidenceValue(e, "Process"), EvidenceValue(e, "Image"),
++            EvidenceValue(e, "Archivo"), EvidenceValue(e, "Ruta"), EvidenceValue(e, "Path"),
++            EvidenceValue(e, "Aplicación"), EvidenceValue(e, "Application")
++        };
++        return values.Where(v => !string.IsNullOrWhiteSpace(v)).Any(v =>
++            v!.Contains(appName, StringComparison.OrdinalIgnoreCase) ||
++            (!string.IsNullOrWhiteSpace(stem) && v.Contains(stem, StringComparison.OrdinalIgnoreCase)));
++    }
++
++    private static bool HasExplicitTsplusIdentity(DiagnosticEvent e, TsplusProduct product)
++    {
++        if (product == TsplusProduct.Ninguno) return false;
++        if (e.Producto == product) return true;
++        var text = string.Join(" ", new[]
++        {
++            e.Componente, e.Mensaje, e.Archivo,
++            EvidenceValue(e, "Proceso"), EvidenceValue(e, "Aplicación"), EvidenceValue(e, "Producto"),
++            EvidenceValue(e, "Endpoint"), EvidenceValue(e, "Host"), EvidenceValue(e, "Puerto"),
++            EvidenceValue(e, "Certificado"), EvidenceValue(e, "Thumbprint")
++        }.Where(x => !string.IsNullOrWhiteSpace(x)));
++        return product switch
++        {
++            TsplusProduct.RemoteAccess => text.Contains("TSplus", StringComparison.OrdinalIgnoreCase) || text.Contains("APSC", StringComparison.OrdinalIgnoreCase) || text.Contains("wsession", StringComparison.OrdinalIgnoreCase),
++            TsplusProduct.AdvancedSecurity => text.Contains("Advanced Security", StringComparison.OrdinalIgnoreCase) || text.Contains("TSplus-Security", StringComparison.OrdinalIgnoreCase),
++            TsplusProduct.ServerMonitoring => text.Contains("ServerMonitoring", StringComparison.OrdinalIgnoreCase),
++            TsplusProduct.RemoteSupport => text.Contains("RemoteSupport", StringComparison.OrdinalIgnoreCase) || text.Contains("Remote Support", StringComparison.OrdinalIgnoreCase),
++            TsplusProduct.TwoFactorAuthentication => text.Contains("TwoFactor", StringComparison.OrdinalIgnoreCase) || text.Contains("2FA", StringComparison.OrdinalIgnoreCase),
++            _ => false
++        };
++    }
++
+     private static bool IsTargetedWindowsAntecedent(DiagnosticEvent e, TsplusProduct product, string? semanticComponent)
+     {
+         if (e.Capa == DiagnosticLayer.Tsplus || e.Severidad == DiagnosticSeverity.Informativo) return false;
+diff --git a/src/TDM.Correlation/DiagnosticPrecisionAnalyzer.cs b/src/TDM.Correlation/DiagnosticPrecisionAnalyzer.cs
+index 5990b8f..3364ff2 100644
+--- a/src/TDM.Correlation/DiagnosticPrecisionAnalyzer.cs
++++ b/src/TDM.Correlation/DiagnosticPrecisionAnalyzer.cs
+@@ -1,4 +1,4 @@
+-﻿using TDM.Models;
++using TDM.Models;
+ 
+ namespace TDM.Correlation;
+ 
+@@ -27,11 +27,20 @@ public static class DiagnosticPrecisionAnalyzer
+             var reasons = new List<string>();
+             var independent = HasIndependentPrimaryEvidence(candidate);
+ 
+-            if (!coverageComplete && confidence == ConfidenceLevel.Confirmada)
++            if (!coverageComplete)
+             {
+-                confidence = ConfidenceLevel.Alta;
+-                score -= 5;
+-                reasons.Add("cobertura forense incompleta impide conservar estado CONFIRMADA");
++                if (confidence == ConfidenceLevel.Confirmada)
++                {
++                    confidence = ConfidenceLevel.Alta;
++                    score -= 7;
++                    reasons.Add("cobertura crítica incompleta impide conservar estado CONFIRMADA");
++                }
++                else if (confidence == ConfidenceLevel.Alta)
++                {
++                    confidence = ConfidenceLevel.Media;
++                    score -= 6;
++                    reasons.Add("cobertura crítica incompleta impide conservar confianza ALTA");
++                }
+             }
+ 
+             if (candidate.Id == "ROOT-PROCESS-CRASH" && confidence == ConfidenceLevel.Confirmada && !independent)
+diff --git a/src/TDM.Correlation/RootCauseCorrelator.Rules.Configuration.cs b/src/TDM.Correlation/RootCauseCorrelator.Rules.Configuration.cs
+index f320b67..ac718e2 100644
+--- a/src/TDM.Correlation/RootCauseCorrelator.Rules.Configuration.cs
++++ b/src/TDM.Correlation/RootCauseCorrelator.Rules.Configuration.cs
+@@ -1,4 +1,4 @@
+-﻿using TDM.Models;
++using TDM.Models;
+ 
+ namespace TDM.Correlation;
+ 
+@@ -32,7 +32,9 @@ public static partial class RootCauseCorrelator
+                     .Where(v => !string.IsNullOrWhiteSpace(v) && v.Length >= 4 && !v.Equals("N/D", StringComparison.OrdinalIgnoreCase))
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .ToList();
+-                var related = publishingErrors.LastOrDefault(e =>
++                var related = publishingErrors
++                    .Where(e => IsNearAnalysisEnd(report, e, TimeSpan.FromMinutes(15)))
++                    .LastOrDefault(e =>
+                     e.Mensaje.Contains(issue.Componente, StringComparison.OrdinalIgnoreCase) ||
+                     correlationNeedles.Any(needle => e.Mensaje.Contains(needle, StringComparison.OrdinalIgnoreCase)));
+                 return (issue, related);
+@@ -85,7 +87,7 @@ public static partial class RootCauseCorrelator
+         if (webConfigIssues.Count > 0)
+         {
+             var issue = webConfigIssues[0];
+-            var related = webErrors.LastOrDefault();
++            var related = webErrors.LastOrDefault(e => IsNearAnalysisEnd(report, e, TimeSpan.FromMinutes(15)));
+             drafts.Add(new CandidateDraft(
+                 "ROOT-TSPLUS-WEB-CONFIG",
+                 "TSplus Web Portal / Web Server",
+@@ -124,7 +126,7 @@ public static partial class RootCauseCorrelator
+             var file = issue.Evidencia.FirstOrDefault(e => e.Clave.Equals("Archivo", StringComparison.OrdinalIgnoreCase))?.Valor;
+             var fileName = string.IsNullOrWhiteSpace(file) ? null : Path.GetFileName(file);
+             var related = tsplusErrors
+-                .Where(e => e.Timestamp.HasValue)
++                .Where(e => e.Timestamp.HasValue && IsNearAnalysisEnd(report, e, TimeSpan.FromMinutes(15)))
+                 .Where(e => e.Componente.Contains(issue.Componente, StringComparison.OrdinalIgnoreCase) ||
+                             (!string.IsNullOrWhiteSpace(fileName) && $"{e.Mensaje} {e.Archivo} {e.Componente}".Contains(fileName, StringComparison.OrdinalIgnoreCase)))
+                 .OrderByDescending(e => e.Timestamp)
+@@ -163,7 +165,7 @@ public static partial class RootCauseCorrelator
+             var file = EvidenceValue(changed, "Archivo") ?? changed.Archivo ?? changed.Componente;
+             var fileName = Path.GetFileName(file);
+             var related = tsplusErrors
+-                .Where(e => e.Timestamp.HasValue && e.Timestamp >= changed.Timestamp)
++                .Where(e => e.Timestamp.HasValue && e.Timestamp >= changed.Timestamp && e.Timestamp <= changed.Timestamp + TimeSpan.FromMinutes(15))
+                 .Where(e => e.Componente.Contains(changed.Componente, StringComparison.OrdinalIgnoreCase) ||
+                             (!string.IsNullOrWhiteSpace(fileName) && $"{e.Mensaje} {e.Archivo}".Contains(fileName, StringComparison.OrdinalIgnoreCase)))
+                 .OrderBy(e => e.Timestamp)
+@@ -203,6 +205,7 @@ public static partial class RootCauseCorrelator
+             var fileName = string.IsNullOrWhiteSpace(file) ? null : Path.GetFileName(file);
+             var related = report.Eventos
+                 .Where(e => e.Timestamp.HasValue && e.Severidad != DiagnosticSeverity.Informativo)
++                .Where(e => IsNearAnalysisEnd(report, e, TimeSpan.FromMinutes(15)))
+                 .Where(e => !e.Fuente.Equals("TDM", StringComparison.OrdinalIgnoreCase))
+                 .Where(e => !string.IsNullOrWhiteSpace(fileName) &&
+                             ($"{e.Mensaje} {e.Archivo} {e.Componente}").Contains(fileName!, StringComparison.OrdinalIgnoreCase))
+diff --git a/src/TDM.Correlation/RootCauseCorrelator.Rules.IdentitySecurity.cs b/src/TDM.Correlation/RootCauseCorrelator.Rules.IdentitySecurity.cs
+index e9ff26d..ac048a7 100644
+--- a/src/TDM.Correlation/RootCauseCorrelator.Rules.IdentitySecurity.cs
++++ b/src/TDM.Correlation/RootCauseCorrelator.Rules.IdentitySecurity.cs
+@@ -1,4 +1,4 @@
+-﻿using TDM.Models;
++using TDM.Models;
+ 
+ namespace TDM.Correlation;
+ 
+@@ -21,7 +21,7 @@ public static partial class RootCauseCorrelator
+                 .Where(e => e.Severidad != DiagnosticSeverity.Informativo)
+                 .Where(e => e.Capa is DiagnosticLayer.Rdp or DiagnosticLayer.Tsplus)
+                 .Where(e => !ReferenceEquals(e, failure))
+-                .FirstOrDefault(e => EventIdentity(e)?.Contains(user, StringComparison.OrdinalIgnoreCase) == true || e.Mensaje.Contains(user, StringComparison.OrdinalIgnoreCase));
++                .FirstOrDefault(e => EventIdentity(e) is string candidate && SameIdentity(candidate, user));
+             if (related is null) continue;
+             var nla = failure.Tipo == "USER_NLA_PASSWORD_FAILURE";
+             drafts.Add(new CandidateDraft(
+@@ -63,7 +63,7 @@ public static partial class RootCauseCorrelator
+                 .Where(e => e.Timestamp.HasValue && e.Timestamp >= failure.Timestamp && e.Timestamp <= failure.Timestamp + TimeSpan.FromMinutes(3))
+                 .Where(e => e.Severidad != DiagnosticSeverity.Informativo)
+                 .Where(e => e.Capa is DiagnosticLayer.Rdp or DiagnosticLayer.Tsplus)
+-                .FirstOrDefault(e => EventIdentity(e)?.Contains(user, StringComparison.OrdinalIgnoreCase) == true || e.Mensaje.Contains(user, StringComparison.OrdinalIgnoreCase));
++                .FirstOrDefault(e => EventIdentity(e) is string candidate && SameIdentity(candidate, user));
+             if (related is null) continue;
+             var lockout = failure.Tipo == "ACCOUNT_LOCKOUT";
+             drafts.Add(new CandidateDraft(
+@@ -106,7 +106,7 @@ public static partial class RootCauseCorrelator
+                 .Where(e => e.Timestamp.HasValue && e.Timestamp >= failure.Timestamp && e.Timestamp <= failure.Timestamp + TimeSpan.FromMinutes(2))
+                 .Where(e => e.Severidad != DiagnosticSeverity.Informativo)
+                 .Where(e => e.Capa is DiagnosticLayer.Rdp or DiagnosticLayer.Tsplus)
+-                .FirstOrDefault(e => e.Mensaje.Contains(user, StringComparison.OrdinalIgnoreCase));
++                .FirstOrDefault(e => EventIdentity(e) is string candidate && SameIdentity(candidate, user));
+             if (related is null) continue;
+             drafts.Add(new CandidateDraft(
+                 $"ROOT-WINDOWS-REMOTE-LOGON-{user}",
+diff --git a/src/TDM.Correlation/RootCauseCorrelator.Rules.Infrastructure.cs b/src/TDM.Correlation/RootCauseCorrelator.Rules.Infrastructure.cs
+index 32456c3..079304a 100644
+--- a/src/TDM.Correlation/RootCauseCorrelator.Rules.Infrastructure.cs
++++ b/src/TDM.Correlation/RootCauseCorrelator.Rules.Infrastructure.cs
+@@ -79,8 +79,15 @@ public static partial class RootCauseCorrelator
+                 "MS-PRINT-SPOOLER"));
+         }
+ 
+-        var tlsPair = ClosestBefore(schannelErrors, tsplusErrors, TimeSpan.FromMinutes(5));
+-        if (tlsPair is not null)
++        var tlsSymptoms = tsplusErrors
++            .Where(e => e.Tipo is "WEB" or "CERTIFICATE_OR_TLS")
++            .Where(e => $"{e.Mensaje} {e.Componente}".Contains("tls", StringComparison.OrdinalIgnoreCase)
++                     || $"{e.Mensaje} {e.Componente}".Contains("ssl", StringComparison.OrdinalIgnoreCase)
++                     || $"{e.Mensaje} {e.Componente}".Contains("https", StringComparison.OrdinalIgnoreCase)
++                     || $"{e.Mensaje} {e.Componente}".Contains("certificate", StringComparison.OrdinalIgnoreCase))
++            .ToList();
++        var tlsPair = ClosestBefore(schannelErrors, tlsSymptoms, TimeSpan.FromMinutes(5));
++        if (tlsPair is not null && SharesTlsIdentity(tlsPair.Value.before, tlsPair.Value.after))
+         {
+             drafts.Add(new CandidateDraft(
+                 "ROOT-TLS-SCHANNEL",
+@@ -124,7 +131,18 @@ public static partial class RootCauseCorrelator
+             var dependencyProduct = depState?.Producto ?? TsplusProduct.Ninguno;
+             var tsplusService = serviceProduct == TsplusProduct.RemoteAccess || service.Contains("TSplus", StringComparison.OrdinalIgnoreCase) || service.Contains("APSC", StringComparison.OrdinalIgnoreCase) || service.Contains("Application Publishing", StringComparison.OrdinalIgnoreCase);
+             var rdpService = service.Equals("TermService", StringComparison.OrdinalIgnoreCase) || service.Equals("UmRdpService", StringComparison.OrdinalIgnoreCase);
+-            var compatibleSignal = tsplusService ? tsplusErrors.LastOrDefault() : rdpService ? rdpErrors.LastOrDefault() : null;
++            IReadOnlyList<DiagnosticEvent> signalPool = tsplusService ? tsplusErrors : rdpService ? rdpErrors : [];
++            var compatibleSignal = signalPool
++                .Where(e => IsNearAnalysisEnd(report, e, TimeSpan.FromMinutes(10)))
++                .Where(e => $"{e.Componente} {e.Mensaje}".Contains(service, StringComparison.OrdinalIgnoreCase)
++                         || $"{e.Componente} {e.Mensaje}".Contains(dependency, StringComparison.OrdinalIgnoreCase))
++                .OrderByDescending(e => e.Timestamp)
++                .FirstOrDefault();
++            var scmFailure = report.Eventos
++                .Where(e => e.Timestamp.HasValue && (e.Tipo is "SERVICE_TERMINATION" or "SERVICE_START_FAILURE"))
++                .Where(e => IsNearAnalysisEnd(report, e, TimeSpan.FromMinutes(15)))
++                .FirstOrDefault(e => $"{e.Componente} {e.Mensaje} {string.Join(" ", e.Evidencia?.Select(x => x.Valor) ?? [])}".Contains(service, StringComparison.OrdinalIgnoreCase)
++                                  || $"{e.Componente} {e.Mensaje} {string.Join(" ", e.Evidencia?.Select(x => x.Valor) ?? [])}".Contains(dependency, StringComparison.OrdinalIgnoreCase));
+             var origin = dependencyProduct != TsplusProduct.Ninguno && dependencyProduct != TsplusProduct.Desconocido
+                 ? "TSPLUS"
+                 : IsWindowsCoreService(dependency) ? "WINDOWS" : "INDETERMINADO";
+@@ -134,8 +152,8 @@ public static partial class RootCauseCorrelator
+                 $"ROOT-SERVICE-DEPENDENCY-{SafeDependencyId(service)}-{SafeDependencyId(dependency)}",
+                 $"{dependency} → {service}",
+                 rdpService ? DiagnosticLayer.Rdp : tsplusService ? DiagnosticLayer.Tsplus : DiagnosticLayer.Windows,
+-                compatibleSignal is null ? 80 : 91,
+-                compatibleSignal is null ? ConfidenceLevel.Media : ConfidenceLevel.Alta,
++                compatibleSignal is not null && scmFailure is not null ? 91 : scmFailure is not null ? 82 : 72,
++                compatibleSignal is not null && scmFailure is not null ? ConfidenceLevel.Alta : ConfidenceLevel.Media,
+                 $"Una dependencia real del SCM requerida por {service} no está operativa.",
+                 compatibleSignal is null
+                     ? "Service Control Manager confirmó la relación técnica y el estado no operativo de la dependencia. Sin una señal funcional compatible en la ventana, TDM la conserva como candidato y no como originador confirmado."
+@@ -143,6 +161,7 @@ public static partial class RootCauseCorrelator
+                 Merge(finding.Evidencia,
+                     new EvidenceItem("Relación SCM", "Confirmada por ServicesDependedOn"),
+                     new EvidenceItem("Señal funcional compatible", compatibleSignal?.Tipo ?? "No observada"),
++                    new EvidenceItem("Falla SCM del mismo servicio/dependencia", scmFailure?.Tipo ?? "No observada"),
+                     new EvidenceItem("Origen de la dependencia", origin)),
+                 null,
+                 compatibleSignal?.Timestamp,
+diff --git a/src/TDM.Correlation/RootCauseCorrelator.Rules.WindowsFarm.cs b/src/TDM.Correlation/RootCauseCorrelator.Rules.WindowsFarm.cs
+index 1396b5f..574da1a 100644
+--- a/src/TDM.Correlation/RootCauseCorrelator.Rules.WindowsFarm.cs
++++ b/src/TDM.Correlation/RootCauseCorrelator.Rules.WindowsFarm.cs
+@@ -271,18 +271,21 @@ public static partial class RootCauseCorrelator
+         var farmIssue = report.Hallazgos.FirstOrDefault(f => (f.Id is "TSPLUS-FARM-BALANCE-NAME-MISMATCH" or "TSPLUS-FARM-NO-SERVERS") || f.Id.StartsWith("TSPLUS-FARM-BALANCE-INCOMPLETE-", StringComparison.OrdinalIgnoreCase));
+         if (farmIssue is not null)
+         {
+-            var webSymptoms = tsplusErrors.Where(e => e.Tipo is "WEB" or "SESSION" or "APPLICATION_PUBLISHING" or "OPERATION_FAILED" or "PORT_BIND").ToList();
++            var webSymptoms = tsplusErrors
++                .Where(e => e.Tipo is "WEB" or "SESSION" or "APPLICATION_PUBLISHING" or "OPERATION_FAILED" or "PORT_BIND")
++                .Where(e => e.Timestamp.HasValue && IsNearAnalysisEnd(report, e, TimeSpan.FromMinutes(15)))
++                .ToList();
+             drafts.Add(new CandidateDraft(
+                 "ROOT-TSPLUS-FARM-CONFIG",
+                 "TSplus Farm / Load Balancing / Reverse Proxy",
+                 DiagnosticLayer.Tsplus,
+-                webSymptoms.Count > 0 ? 94 : 79,
+-                webSymptoms.Count > 0 ? ConfidenceLevel.Alta : ConfidenceLevel.Media,
++                webSymptoms.Count > 0 ? 86 : 79,
++                ConfidenceLevel.Media,
+                 webSymptoms.Count > 0
+-                    ? "Una inconsistencia documentada de la granja coincide con errores operativos TSplus en la ventana."
++                    ? "Una inconsistencia local de la granja coincide con errores operativos TSplus recientes; se conserva como hipótesis prioritaria, no como causa alta."
+                     : "Se detectó una inconsistencia de configuración de granja, sin un síntoma operativo correlacionado suficiente.",
+                 webSymptoms.Count > 0
+-                    ? "La configuración local de Load Balancing/Reverse Proxy no es coherente y existe evidencia de portal/sesión/publicación en el mismo periodo. Debe validarse la granja antes de intervenir Windows."
++                    ? "La configuración local de Load Balancing/Reverse Proxy no es coherente y existe evidencia reciente de portal/sesión/publicación. Como TDM no sondea todos los nodos de la granja, esta relación requiere validación distribuida antes de atribuir causa raíz."
+                     : "La inconsistencia es real, pero TDM no la declara causa primaria de otro incidente sin evidencia temporal compatible.",
+                 Merge(farmIssue.Evidencia, new EvidenceItem("Síntomas TSplus compatibles", webSymptoms.Count.ToString())),
+                 null,
+@@ -298,9 +301,9 @@ public static partial class RootCauseCorrelator
+                 "ROOT-TSPLUS-INSTALL-INTEGRITY",
+                 zeroBinary.Componente,
+                 DiagnosticLayer.Tsplus,
+-                88,
+-                ConfidenceLevel.Alta,
+-                "La instalación TSplus contiene un binario ejecutable vacío.",
++                82,
++                ConfidenceLevel.Media,
++                "La instalación TSplus contiene un binario ejecutable vacío; sin correlación funcional se conserva como hipótesis de integridad.",
+                 "Un EXE/DLL/JAR de cero bytes es una inconsistencia física confirmada de la instalación. El componente debe validarse contra la versión instalada y el incidente antes de reparar o reinstalar.",
+                 zeroBinary.Evidencia,
+                 null,
+diff --git a/src/TDM.Correlation/RootCauseCorrelator.cs b/src/TDM.Correlation/RootCauseCorrelator.cs
+index 930f3c3..b6056c9 100644
+--- a/src/TDM.Correlation/RootCauseCorrelator.cs
++++ b/src/TDM.Correlation/RootCauseCorrelator.cs
+@@ -127,6 +127,40 @@ public static partial class RootCauseCorrelator
+         return best;
+     }
+ 
++
++    private static bool IsNearAnalysisEnd(DiagnosticReport report, DiagnosticEvent e, TimeSpan maxAge)
++    {
++        if (e.Timestamp is not DateTimeOffset ts) return false;
++        var end = report.PeriodoAnalizadoFin != default ? report.PeriodoAnalizadoFin : report.Fin;
++        return ts <= end && end - ts <= maxAge;
++    }
++
++    private static bool SharesTlsIdentity(DiagnosticEvent left, DiagnosticEvent right)
++    {
++        static IEnumerable<string> Values(DiagnosticEvent e)
++        {
++            string[] keys = ["Endpoint", "Host", "Servidor", "Puerto", "Port", "Certificado", "Thumbprint", "Huella"];
++            foreach (var key in keys)
++            {
++                var value = EvidenceReader.Value(e, key);
++                if (!string.IsNullOrWhiteSpace(value) && !value.Equals("N/D", StringComparison.OrdinalIgnoreCase))
++                    yield return value.Trim();
++            }
++        }
++
++        var l = Values(left).ToHashSet(StringComparer.OrdinalIgnoreCase);
++        var r = Values(right).ToHashSet(StringComparer.OrdinalIgnoreCase);
++        if (l.Overlaps(r)) return true;
++
++        // Si una fuente no estructuró el dato, aceptar únicamente un token de identidad
++        // suficientemente específico presente en ambos textos; nunca sólo proximidad temporal.
++        var lt = $"{left.Mensaje} {left.Archivo} {left.Componente}";
++        var rt = $"{right.Mensaje} {right.Archivo} {right.Componente}";
++        foreach (var token in l.Concat(r).Where(x => x.Length >= 4))
++            if (lt.Contains(token, StringComparison.OrdinalIgnoreCase) && rt.Contains(token, StringComparison.OrdinalIgnoreCase)) return true;
++        return false;
++    }
++
+     private static bool IsDefenderEvent(DiagnosticEvent e) =>
+         e.Tipo is "DEFENDER_THREAT_DETECTED" or "DEFENDER_ACTION_TAKEN";
+ 
+diff --git a/src/TDM.Gui.Avalonia/Services/IntegratedMonitoringService.cs b/src/TDM.Gui.Avalonia/Services/IntegratedMonitoringService.cs
+index 6edf7a1..c6bb2cd 100644
+--- a/src/TDM.Gui.Avalonia/Services/IntegratedMonitoringService.cs
++++ b/src/TDM.Gui.Avalonia/Services/IntegratedMonitoringService.cs
+@@ -286,7 +286,7 @@ public sealed class IntegratedMonitoringService : IDisposable
+                 $"incident|{x.Node}|{x.Component}|{x.Kind}",
+                 x.LastSeenAt,
+                 x.Severity,
+-                $"TDM · {x.Component}",
++                AlertTitleFormatter.ForIncident(x),
+                 x.Summary,
+                 "IncidentLedger",
+                 x.Id))
+@@ -298,7 +298,7 @@ public sealed class IntegratedMonitoringService : IDisposable
+                 $"finding|{x.Id}",
+                 report.PeriodoAnalizadoFin != default ? report.PeriodoAnalizadoFin : DateTimeOffset.Now,
+                 x.Severidad.ToString(),
+-                $"TDM · {x.Componente}",
++                AlertTitleFormatter.ForFinding(x),
+                 x.Resumen,
+                 "PortableFinding",
+                 x.Id)));
+diff --git a/src/TDM.Gui.Avalonia/Views/AdministrationWorkspaceView.axaml b/src/TDM.Gui.Avalonia/Views/AdministrationWorkspaceView.axaml
+index 1b85a96..7c8c15d 100644
+--- a/src/TDM.Gui.Avalonia/Views/AdministrationWorkspaceView.axaml
++++ b/src/TDM.Gui.Avalonia/Views/AdministrationWorkspaceView.axaml
+@@ -94,7 +94,6 @@
+             <TextBlock Text="Enviar cuando" FontWeight="SemiBold" />
+             <CheckBox Classes="spaced-check" Content="Se abre una alerta" IsChecked="{Binding EmailNotifyOpened}" />
+             <CheckBox Classes="spaced-check" Content="Aumenta la severidad" IsChecked="{Binding EmailNotifyEscalated}" />
+-            <CheckBox Classes="spaced-check" Content="Se recupera la condición" IsChecked="{Binding EmailNotifyRecovered}" />
+           </StackPanel>
+         </Grid>
+ 
+diff --git a/src/TDM.Gui.Avalonia/Views/PortableNotificationCoordinator.cs b/src/TDM.Gui.Avalonia/Views/PortableNotificationCoordinator.cs
+index 6e858d8..fc9823e 100644
+--- a/src/TDM.Gui.Avalonia/Views/PortableNotificationCoordinator.cs
++++ b/src/TDM.Gui.Avalonia/Views/PortableNotificationCoordinator.cs
+@@ -19,10 +19,11 @@ internal sealed class PortableNotificationCoordinator : IDisposable
+ 
+     public void Show(IReadOnlyList<IncidentNotification> notifications)
+     {
+-        if (notifications.Count == 0) return;
++        var visible = notifications.Where(x => x.Transition != NotificationTransition.Recovered).ToList();
++        if (visible.Count == 0) return;
+         Dispatcher.UIThread.Post(() =>
+         {
+-            foreach (var notification in notifications)
++            foreach (var notification in visible)
+                 ShowOne(notification);
+         });
+     }
+diff --git a/src/TDM.Gui.Avalonia/Views/PortableNotificationWindow.axaml.cs b/src/TDM.Gui.Avalonia/Views/PortableNotificationWindow.axaml.cs
+index dffd009..3ffb242 100644
+--- a/src/TDM.Gui.Avalonia/Views/PortableNotificationWindow.axaml.cs
++++ b/src/TDM.Gui.Avalonia/Views/PortableNotificationWindow.axaml.cs
+@@ -9,7 +9,7 @@ namespace TDM.Gui.Avalonia.Views;
+ 
+ public partial class PortableNotificationWindow : Window
+ {
+-    internal const string VisualRevision = "FIX79_PORTABLE_NOTIFICATION_NO_FOOTER";
++    internal const string VisualRevision = "FIX93_EXPLICIT_ALERTS_NO_RECOVERED";
+ 
+     private readonly DispatcherTimer _autoClose;
+     private Action? _activateTdm;
+@@ -36,7 +36,7 @@ public partial class PortableNotificationWindow : Window
+         TitleText.Text = notification.Transition switch
+         {
+             NotificationTransition.Escalated => $"↑ {title}",
+-            NotificationTransition.Recovered => $"✓ {title}",
++            NotificationTransition.Recovered => $"⚠ {title}",
+             _ => $"⚠ {title}"
+         };
+         SummaryText.Text = ShortSummary(summary);
+@@ -68,9 +68,6 @@ public partial class PortableNotificationWindow : Window
+ 
+     private static IBrush BrushFor(IncidentNotification notification)
+     {
+-        if (notification.Transition == NotificationTransition.Recovered)
+-            return new SolidColorBrush(Color.FromRgb(103, 232, 165));
+-
+         return notification.Severity.Trim().ToLowerInvariant() switch
+         {
+             "critico" or "crítico" => new SolidColorBrush(Color.FromRgb(255, 77, 79)),
+diff --git a/src/TDM.Models/DiagnosticEventCatalog.cs b/src/TDM.Models/DiagnosticEventCatalog.cs
+index 9bc0cbc..3975bf3 100644
+--- a/src/TDM.Models/DiagnosticEventCatalog.cs
++++ b/src/TDM.Models/DiagnosticEventCatalog.cs
+@@ -166,7 +166,9 @@ public static class DiagnosticEventCatalog
+     /// </summary>
+     public static bool IsFunctionalIncident(DiagnosticEvent e)
+     {
+-        if ((e.Timestamp ?? e.IngestedAt) is null || !IsIncidentSeverity(e.Severidad)) return false;
++        // EventTime real es obligatorio para una incidencia funcional. IngestedAt sólo
++        // representa cuándo TDM adquirió la evidencia y nunca sustituye al tiempo causal.
++        if (e.Timestamp is null || !IsIncidentSeverity(e.Severidad)) return false;
+         if (!IsIncidentType(e.Tipo) || NonFunctionalIncidentSignals.Contains(e.Tipo)) return false;
+ 
+         if (IdentityIncidentTypes.Contains(e.Tipo)
+diff --git a/src/TDM.Notifications/AlertTitleFormatter.cs b/src/TDM.Notifications/AlertTitleFormatter.cs
+new file mode 100644
+index 0000000..9d0aac1
+--- /dev/null
++++ b/src/TDM.Notifications/AlertTitleFormatter.cs
+@@ -0,0 +1,48 @@
++using TDM.Models;
++using TDM.Persistence;
++
++namespace TDM.Notifications;
++
++/// <summary>
++/// Genera títulos claros y consistentes para alertas visibles.
++/// No expone etiquetas internas como "/ tendencia".
++/// </summary>
++public static class AlertTitleFormatter
++{
++    public static string ForIncident(ManagedIncident incident)
++    {
++        ArgumentNullException.ThrowIfNull(incident);
++        var component = NormalizeLabel(incident.Component);
++        if (string.IsNullOrWhiteSpace(component)) component = NormalizeLabel(incident.Kind);
++        if (string.IsNullOrWhiteSpace(component)) component = "incidente operativo";
++        return $"TDM · Incidencia de {TdmVisibleText.Sanitize(component)}";
++    }
++
++    public static string ForFinding(DiagnosticFinding finding)
++    {
++        ArgumentNullException.ThrowIfNull(finding);
++        var id = finding.Id?.Trim().ToUpperInvariant() ?? string.Empty;
++        var detail = id switch
++        {
++            var x when x.StartsWith("RESOURCE-TREND-MEMORY-", StringComparison.Ordinal) => "memoria libre en descenso",
++            var x when x.StartsWith("RESOURCE-TREND-CPU-", StringComparison.Ordinal) => "CPU elevada",
++            var x when x.StartsWith("RESOURCE-TREND-PROCESS-RAM-", StringComparison.Ordinal) => $"uso de memoria en aumento ({NormalizeLabel(finding.Componente)})",
++            var x when x.StartsWith("RESOURCE-TREND-PROCESS-HANDLES-", StringComparison.Ordinal) => $"handles en aumento ({NormalizeLabel(finding.Componente)})",
++            var x when x.StartsWith("RESOURCE-TREND-PROCESS-THREADS-", StringComparison.Ordinal) => $"hilos en aumento ({NormalizeLabel(finding.Componente)})",
++            var x when x.StartsWith("RDP-CERTIFICATE-", StringComparison.Ordinal) => "certificado RDP",
++            _ => NormalizeLabel(finding.Componente)
++        };
++        if (string.IsNullOrWhiteSpace(detail)) detail = "condición preventiva";
++        return $"TDM · Alerta de {TdmVisibleText.Sanitize(detail)}";
++    }
++
++    private static string NormalizeLabel(string? value)
++    {
++        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
++        var normalized = value.Trim()
++            .Replace(" / tendencia", string.Empty, StringComparison.OrdinalIgnoreCase)
++            .Replace("/ tendencia", string.Empty, StringComparison.OrdinalIgnoreCase)
++            .Trim(' ', '/', '-', '·');
++        return normalized;
++    }
++}
+diff --git a/src/TDM.Notifications/NotificationDispatcher.cs b/src/TDM.Notifications/NotificationDispatcher.cs
+index 1b55af0..0904f21 100644
+--- a/src/TDM.Notifications/NotificationDispatcher.cs
++++ b/src/TDM.Notifications/NotificationDispatcher.cs
+@@ -7,7 +7,8 @@ using TDM.Persistence;
+ namespace TDM.Notifications;
+ 
+ /// <summary>
+-/// Autoridad anti-ruido. Sólo emite apertura, escalamiento o recuperación.
++/// Autoridad anti-ruido. Emite apertura o escalamiento. Las recuperaciones se registran
++/// en el estado interno, pero no generan alertas visibles.
+ /// El estado vive en ProgramData y sólo el servicio debe modificarlo.
+ /// </summary>
+ public sealed class NotificationDispatcher
+@@ -94,19 +95,8 @@ public sealed class NotificationDispatcher
+                     emitted.Add(ToNotification(signal, transition, sampleTime));
+             }
+ 
+-            foreach (var old in priorActive.Values.Where(x => !current.ContainsKey(x.Key)).OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+-            {
+-                emitted.Add(new IncidentNotification(
+-                    StableId(old.Key, NotificationTransition.Recovered, sampleTime),
+-                    sampleTime,
+-                    NotificationTransition.Recovered,
+-                    "Informativo",
+-                    TdmVisibleText.Sanitize(old.Title),
+-                    $"Condición recuperada: {TdmVisibleText.Sanitize(old.Summary)}",
+-                    TdmVisibleText.Sanitize(old.SourceKind),
+-                    string.IsNullOrWhiteSpace(old.SourceId) ? old.SourceId : TdmVisibleText.Sanitize(old.SourceId),
+-                    old.Severity));
+-            }
++            // FIX93: una condición que deja de estar activa se cierra en el estado interno,
++            // pero no genera ninguna alerta visible de recuperación.
+ 
+             foreach (var notification in emitted)
+                 foreach (var sink in _sinks)
+diff --git a/src/TDM.Notifications/SmtpEmailNotificationSink.cs b/src/TDM.Notifications/SmtpEmailNotificationSink.cs
+index 3959797..ae24216 100644
+--- a/src/TDM.Notifications/SmtpEmailNotificationSink.cs
++++ b/src/TDM.Notifications/SmtpEmailNotificationSink.cs
+@@ -85,7 +85,7 @@ public sealed class SmtpEmailNotificationSink : INotificationSink
+         if (notification.Transition == NotificationTransition.Escalated && !settings.NotifyEscalated) return false;
+         var conditionSeverity = notification.ConditionSeverity ?? notification.Severity;
+         if (notification.Transition == NotificationTransition.Recovered)
+-            return settings.NotifyRecovered && SeverityRank(conditionSeverity) >= SeverityRank(settings.MinimumSeverity);
++            return false;
+         return SeverityRank(conditionSeverity) >= SeverityRank(settings.MinimumSeverity);
+     }
+ 
+@@ -96,6 +96,11 @@ public sealed class SmtpEmailNotificationSink : INotificationSink
+         CancellationToken ct,
+         bool force = false)
+     {
++        // FIX93: una recuperación nunca debe generar correo visible, incluso si una llamada
++        // futura intenta forzar el envío saltándose la política normal.
++        if (notification.Transition == NotificationTransition.Recovered)
++            return new EmailDeliveryResult(true, "Notificación de cierre omitida por política FIX93.", DateTimeOffset.Now);
++
+         if (!force && !ShouldSend(settings, notification))
+             return new EmailDeliveryResult(true, "Notificación omitida por política de correo.", DateTimeOffset.Now);
+ 
+@@ -216,7 +221,7 @@ public sealed class SmtpEmailNotificationSink : INotificationSink
+     {
+         NotificationTransition.Opened => "APERTURA",
+         NotificationTransition.Escalated => "ESCALAMIENTO",
+-        NotificationTransition.Recovered => "RECUPERACIÓN",
++        NotificationTransition.Recovered => "OMITIDO",
+         _ => transition.ToString().ToUpperInvariant()
+     };
+ 
+diff --git a/src/TDM.Notifier.Avalonia/JournalReader.cs b/src/TDM.Notifier.Avalonia/JournalReader.cs
+index f5f5f20..2945307 100644
+--- a/src/TDM.Notifier.Avalonia/JournalReader.cs
++++ b/src/TDM.Notifier.Avalonia/JournalReader.cs
+@@ -114,7 +114,8 @@ internal sealed class JournalReader
+             try
+             {
+                 var item = JsonSerializer.Deserialize<IncidentNotification>(line, _json);
+-                if (item is not null && recent.Add(item.Id)) items.Add(item);
++                if (item is null || item.Transition == NotificationTransition.Recovered) continue;
++                if (recent.Add(item.Id)) items.Add(item);
+             }
+             catch (JsonException) { }
+         }
+diff --git a/src/TDM.Notifier.Avalonia/PopupCoordinator.cs b/src/TDM.Notifier.Avalonia/PopupCoordinator.cs
+index 344ae9a..567cd61 100644
+--- a/src/TDM.Notifier.Avalonia/PopupCoordinator.cs
++++ b/src/TDM.Notifier.Avalonia/PopupCoordinator.cs
+@@ -11,6 +11,7 @@ internal sealed class PopupCoordinator
+ 
+     public void Show(IncidentNotification notification)
+     {
++        if (notification.Transition == NotificationTransition.Recovered) return;
+         while (_visible.Count >= MaxVisible)
+             _visible[0].Close();
+ 
+diff --git a/src/TDM.Notifier.Avalonia/PopupWindow.axaml.cs b/src/TDM.Notifier.Avalonia/PopupWindow.axaml.cs
+index ca878e6..7cbe2d7 100644
+--- a/src/TDM.Notifier.Avalonia/PopupWindow.axaml.cs
++++ b/src/TDM.Notifier.Avalonia/PopupWindow.axaml.cs
+@@ -12,7 +12,7 @@ public partial class PopupWindow : Window
+ {
+     // Embedded in the compiled assembly so startup/readiness can reject stale
+     // notifier binaries that still contain the removed technical footer.
+-    internal const string VisualRevision = "FIX74_NO_NOTIFICATION_FOOTER";
++    internal const string VisualRevision = "FIX93_EXPLICIT_ALERTS_NO_RECOVERED";
+ 
+     private readonly DispatcherTimer _autoClose;
+     public IncidentNotification? Notification { get; private set; }
+@@ -40,7 +40,7 @@ public partial class PopupWindow : Window
+         TitleText.Text = notification.Transition switch
+         {
+             NotificationTransition.Escalated => $"↑ {title}",
+-            NotificationTransition.Recovered => $"✓ {title}",
++            NotificationTransition.Recovered => $"⚠ {title}",
+             _ => $"⚠ {title}"
+         };
+         SummaryText.Text = ShortSummary(summary);
+@@ -77,9 +77,6 @@ public partial class PopupWindow : Window
+ 
+     private static IBrush BrushFor(IncidentNotification notification)
+     {
+-        if (notification.Transition == NotificationTransition.Recovered)
+-            return new SolidColorBrush(Color.FromRgb(103, 232, 165));
+-
+         return notification.Severity.Trim().ToLowerInvariant() switch
+         {
+             "critico" or "crítico" => new SolidColorBrush(Color.FromRgb(255, 77, 79)),
+diff --git a/src/TDM.Persistence/EmailNotificationSettings.cs b/src/TDM.Persistence/EmailNotificationSettings.cs
+index 35e7eee..21ff4a0 100644
+--- a/src/TDM.Persistence/EmailNotificationSettings.cs
++++ b/src/TDM.Persistence/EmailNotificationSettings.cs
+@@ -22,7 +22,7 @@ public sealed record EmailNotificationSettings
+     public string MinimumSeverity { get; init; } = "Error";
+     public bool NotifyOpened { get; init; } = true;
+     public bool NotifyEscalated { get; init; } = true;
+-    public bool NotifyRecovered { get; init; } = true;
++    public bool NotifyRecovered { get; init; } = false;
+     public int TimeoutSeconds { get; init; } = 15;
+ 
+     public static EmailNotificationSettings Default { get; } = new();
+@@ -74,8 +74,8 @@ public static class EmailNotificationSettingsValidator
+             errors.Add("Remitente: indique una dirección de correo válida.");
+         if (unique.Count == 0)
+             errors.Add("Destinatarios: indique al menos una dirección de correo.");
+-        if (!value.NotifyOpened && !value.NotifyEscalated && !value.NotifyRecovered)
+-            errors.Add("Seleccione al menos un tipo de notificación: apertura, escalamiento o recuperación.");
++        if (!value.NotifyOpened && !value.NotifyEscalated)
++            errors.Add("Seleccione al menos un tipo de notificación: apertura o escalamiento.");
+         if ((value.UserName ?? string.Empty).Length > 320)
+             errors.Add("Usuario SMTP: el valor es demasiado largo.");
+ 
+@@ -125,7 +125,8 @@ public sealed class EmailNotificationSettingsStore
+             return loaded with
+             {
+                 Recipients = NormalizeRecipients(loaded.Recipients),
+-                MinimumSeverity = NormalizeSeverity(loaded.MinimumSeverity)
++                MinimumSeverity = NormalizeSeverity(loaded.MinimumSeverity),
++                NotifyRecovered = false
+             };
+         }
+         catch (JsonException) { return EmailNotificationSettings.Default; }
+@@ -146,7 +147,8 @@ public sealed class EmailNotificationSettingsStore
+             UserName = (settings.UserName ?? string.Empty).Trim(),
+             FromAddress = (settings.FromAddress ?? string.Empty).Trim(),
+             Recipients = NormalizeRecipients(settings.Recipients),
+-            MinimumSeverity = NormalizeSeverity(settings.MinimumSeverity)
++            MinimumSeverity = NormalizeSeverity(settings.MinimumSeverity),
++            NotifyRecovered = false
+         };
+         var errors = EmailNotificationSettingsValidator.Validate(normalized);
+         if (errors.Count > 0)
+diff --git a/src/TDM.Persistence/IncidentLedger.cs b/src/TDM.Persistence/IncidentLedger.cs
+index d0bd6e5..bb9fd0d 100644
+--- a/src/TDM.Persistence/IncidentLedger.cs
++++ b/src/TDM.Persistence/IncidentLedger.cs
+@@ -25,6 +25,7 @@ public sealed record ManagedIncident(
+ 
+ public sealed class IncidentLedger
+ {
++    private static readonly SemaphoreSlim ProcessGate = new(1, 1);
+     private readonly JsonSerializerOptions _json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = false };
+     public string Path { get; }
+ 
+@@ -61,6 +62,10 @@ public sealed class IncidentLedger
+         string node = "LOCAL",
+         CancellationToken ct = default)
+     {
++        await ProcessGate.WaitAsync(ct).ConfigureAwait(false);
++        await using var processLock = await AcquireInterprocessLockAsync(ct).ConfigureAwait(false);
++        try
++        {
+         var existing = (await ReadAsync(ct)).ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
+         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+         var cooldown = TimeSpan.FromSeconds(Math.Max(30, settings.Thresholds.IncidentCooldownSeconds));
+@@ -115,22 +120,56 @@ public sealed class IncidentLedger
+ 
+         await AppendSnapshotAsync(existing.Values, ct);
+         return existing.Values.OrderByDescending(x => x.LastSeenAt).ToList();
++        }
++        finally { ProcessGate.Release(); }
+     }
+ 
+     public async Task AddNoteAsync(string id, string note, CancellationToken ct = default)
+     {
+-        var existing = (await ReadAsync(ct)).ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
+-        if (!existing.TryGetValue(id, out var item)) return;
+-        existing[id] = item with { TechnicianNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim() };
+-        await AppendSnapshotAsync(existing.Values, ct);
++        await ProcessGate.WaitAsync(ct).ConfigureAwait(false);
++        await using var processLock = await AcquireInterprocessLockAsync(ct).ConfigureAwait(false);
++        try
++        {
++            var existing = (await ReadAsync(ct)).ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
++            if (!existing.TryGetValue(id, out var item)) return;
++            existing[id] = item with { TechnicianNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim() };
++            await AppendSnapshotAsync(existing.Values, ct);
++        }
++        finally { ProcessGate.Release(); }
+     }
+ 
+     public async Task CloseAsync(string id, CancellationToken ct = default)
+     {
+-        var existing = (await ReadAsync(ct)).ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
+-        if (!existing.TryGetValue(id, out var item)) return;
+-        existing[id] = item with { State = ManagedIncidentState.Closed, ClosedAt = DateTimeOffset.Now };
+-        await AppendSnapshotAsync(existing.Values, ct);
++        await ProcessGate.WaitAsync(ct).ConfigureAwait(false);
++        await using var processLock = await AcquireInterprocessLockAsync(ct).ConfigureAwait(false);
++        try
++        {
++            var existing = (await ReadAsync(ct)).ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
++            if (!existing.TryGetValue(id, out var item)) return;
++            existing[id] = item with { State = ManagedIncidentState.Closed, ClosedAt = DateTimeOffset.Now };
++            await AppendSnapshotAsync(existing.Values, ct);
++        }
++        finally { ProcessGate.Release(); }
++    }
++
++    private async Task<FileStream> AcquireInterprocessLockAsync(CancellationToken ct)
++    {
++        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
++        var lockPath = Path + ".lock";
++        for (var attempt = 0; attempt < 100; attempt++)
++        {
++            ct.ThrowIfCancellationRequested();
++            try
++            {
++                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None,
++                    1, FileOptions.Asynchronous | FileOptions.DeleteOnClose);
++            }
++            catch (IOException) when (attempt < 99)
++            {
++                await Task.Delay(50, ct).ConfigureAwait(false);
++            }
++        }
++        throw new IOException("No fue posible adquirir el bloqueo interproceso del IncidentLedger.");
+     }
+ 
+     private async Task AppendSnapshotAsync(IEnumerable<ManagedIncident> items, CancellationToken ct)
+diff --git a/src/TDM.Persistence/ObservabilityStore.cs b/src/TDM.Persistence/ObservabilityStore.cs
+index b2bee6e..8eff034 100644
+--- a/src/TDM.Persistence/ObservabilityStore.cs
++++ b/src/TDM.Persistence/ObservabilityStore.cs
+@@ -356,7 +356,7 @@ public sealed class ObservabilityStore
+             .Select(e =>
+             {
+                 var evidenceId = EvidenceValue(e, "RecordId") ?? EvidenceValue(e, "ReportId") ?? e.Codigo;
+-                var timestamp = e.Timestamp ?? e.IngestedAt ?? report.Fin;
++                var timestamp = e.Timestamp!.Value;
+                 return new ObservabilityIncident(
+                     timestamp,
+                     e.Tipo,
+diff --git a/src/TDM.Persistence/ResourceTrendAnalyzer.cs b/src/TDM.Persistence/ResourceTrendAnalyzer.cs
+index a8d1a5a..061f510 100644
+--- a/src/TDM.Persistence/ResourceTrendAnalyzer.cs
++++ b/src/TDM.Persistence/ResourceTrendAnalyzer.cs
+@@ -123,7 +123,7 @@ public static partial class ResourceTrendAnalyzer
+         {
+             findings.Add(new DiagnosticFinding(
+                 "RESOURCE-TREND-CPU-SUSTAINED",
+-                "CPU / tendencia",
++                "CPU alta",
+                 DiagnosticSeverity.Advertencia,
+                 "TDM observó CPU elevada de forma sostenida en varias muestras consecutivas.",
+                 "La tendencia es preventiva y no se considera causa raíz sin errores/impacto temporal compatibles.",
+@@ -141,7 +141,7 @@ public static partial class ResourceTrendAnalyzer
+             {
+                 findings.Add(new DiagnosticFinding(
+                     "RESOURCE-TREND-MEMORY-DOWN",
+-                    "Memoria / tendencia",
++                    "Memoria libre",
+                     DiagnosticSeverity.Advertencia,
+                     "La memoria libre muestra una caída sostenida relevante entre las muestras recientes.",
+                     "TDM detectó una reducción de al menos 10 puntos porcentuales y el valor actual está en 20% o menos. Debe correlacionarse con procesos y errores antes de atribuir causalidad.",
+diff --git a/src/TDM.Reporting/SupportBundleSanitizer.cs b/src/TDM.Reporting/SupportBundleSanitizer.cs
+index 7faeee3..0cbaa9d 100644
+--- a/src/TDM.Reporting/SupportBundleSanitizer.cs
++++ b/src/TDM.Reporting/SupportBundleSanitizer.cs
+@@ -232,7 +232,11 @@ public static class SupportBundleSanitizer
+         var k = NormalizeKey(key);
+         return k is "usuario" or "user" or "cuenta" or "nombre de usuario" or "nombre completo" or "usuario afectado"
+                || k.Contains("targetuser", StringComparison.OrdinalIgnoreCase)
+-               || k.Contains("account name", StringComparison.OrdinalIgnoreCase);
++               || k.Contains("account name", StringComparison.OrdinalIgnoreCase)
++               || k.Contains("usuarios asignados", StringComparison.OrdinalIgnoreCase)
++               || k.Contains("grupos asignados", StringComparison.OrdinalIgnoreCase)
++               || k.Contains("assigned users", StringComparison.OrdinalIgnoreCase)
++               || k.Contains("assigned groups", StringComparison.OrdinalIgnoreCase);
+     }
+ 
+     private static bool IsDomainKey(string key)
+diff --git a/src/TDM.Service/TdmWorker.cs b/src/TDM.Service/TdmWorker.cs
+index 2e29781..ec9dc03 100644
+--- a/src/TDM.Service/TdmWorker.cs
++++ b/src/TDM.Service/TdmWorker.cs
+@@ -155,7 +155,7 @@ public sealed class TdmWorker : BackgroundService
+                 $"incident|{incident.Node}|{incident.Component}|{incident.Kind}",
+                 incident.LastSeenAt,
+                 incident.Severity,
+-                $"TDM · {incident.Component}",
++                AlertTitleFormatter.ForIncident(incident),
+                 incident.Summary,
+                 "IncidentLedger",
+                 incident.Id));
+@@ -167,7 +167,7 @@ public sealed class TdmWorker : BackgroundService
+                 $"finding|{f.Id}",
+                 report.PeriodoAnalizadoFin != default ? report.PeriodoAnalizadoFin : DateTimeOffset.Now,
+                 f.Severidad.ToString(),
+-                $"TDM · {f.Componente}",
++                AlertTitleFormatter.ForFinding(f),
+                 f.Resumen,
+                 "PreventiveFinding",
+                 f.Id))
+diff --git a/tests/TDM.ProductionTests/Program.cs b/tests/TDM.ProductionTests/Program.cs
+new file mode 100644
+index 0000000..3507c28
+--- /dev/null
++++ b/tests/TDM.ProductionTests/Program.cs
+@@ -0,0 +1,311 @@
++using TDM.Collectors.TSplus;
++using TDM.Core;
++using TDM.Correlation;
++using TDM.Models;
++using TDM.Notifications;
++using TDM.Persistence;
++using TDM.Reporting;
++
++var tests = new List<(string Name, Func<Task> Run)>
++{
++    ("UndatedFunctionalIncidentRejected", UndatedFunctionalIncidentRejected),
++    ("TimestampedFunctionalIncidentAccepted", TimestampedFunctionalIncidentAccepted),
++    ("TsplusUndatedLogKeepsEventTimeNull", TsplusUndatedLogKeepsEventTimeNull),
++    ("TsplusIsoTimestampParses", TsplusIsoTimestampParses),
++    ("AmbiguousTsplusDateUsesInvestigationWindow", AmbiguousTsplusDateUsesInvestigationWindow),
++    ("TsplusStackTraceIsContinuation", TsplusStackTraceIsContinuation),
++    ("AlertTitleRemovesTrendLabel", AlertTitleRemovesTrendLabel),
++    ("DispatcherDoesNotEmitRecovered", DispatcherDoesNotEmitRecovered),
++    ("EmailRecoveredNotificationsDisabled", EmailRecoveredNotificationsDisabled),
++    ("CollectorCursorStoreRoundTrip", CollectorCursorStoreRoundTrip),
++    ("IncidentLedgerSerializesConcurrentWriters", IncidentLedgerSerializesConcurrentWriters),
++    ("DiagnosticEngineKeepsUndatedAsNonCausalContext", DiagnosticEngineKeepsUndatedAsNonCausalContext),
++    ("IdentitySubstringDoesNotCorrelate", IdentitySubstringDoesNotCorrelate),
++    ("StaleApplicationConfigDoesNotBecomeHighCause", StaleApplicationConfigDoesNotBecomeHighCause),
++    ("SchannelWithoutSharedIdentityDoesNotCorrelate", SchannelWithoutSharedIdentityDoesNotCorrelate),
++    ("CrashIgnoresUnrelatedWindowsDistractors", CrashIgnoresUnrelatedWindowsDistractors),
++    ("AssignedUsersAreSanitized", AssignedUsersAreSanitized)
++};
++
++var failed = 0;
++foreach (var test in tests)
++{
++    try
++    {
++        await test.Run();
++        Console.WriteLine($"PASS {test.Name}");
++    }
++    catch (Exception ex)
++    {
++        failed++;
++        Console.Error.WriteLine($"FAIL {test.Name}: {ex.Message}");
++    }
++}
++Console.WriteLine($"ProductionTests: {tests.Count - failed}/{tests.Count} PASS");
++return failed == 0 ? 0 : 1;
++
++static Task UndatedFunctionalIncidentRejected()
++{
++    var e = new DiagnosticEvent(null, "TSplus Log", "Remote Access", DiagnosticLayer.Tsplus,
++        DiagnosticSeverity.Error, "APPLICATION_CRASH", "old error without timestamp", IngestedAt: DateTimeOffset.Now);
++    False(DiagnosticEventCatalog.IsFunctionalIncident(e), "IngestedAt convirtió evidencia sin fecha en incidente.");
++    return Task.CompletedTask;
++}
++
++static Task TimestampedFunctionalIncidentAccepted()
++{
++    var e = new DiagnosticEvent(DateTimeOffset.Now, "Application Error", "TSplus", DiagnosticLayer.Tsplus,
++        DiagnosticSeverity.Error, "APPLICATION_CRASH", "crash");
++    True(DiagnosticEventCatalog.IsFunctionalIncident(e), "Un crash fechado y funcional no fue aceptado.");
++    return Task.CompletedTask;
++}
++
++static Task TsplusUndatedLogKeepsEventTimeNull()
++{
++    var parsed = TsplusLogParser.ParseLine("Remote Access", "x.log", "ERROR failed to start application", 1,
++        Context(TimeSpan.FromHours(1)));
++    NotNull(parsed, "La línea ERROR no fue parseada.");
++    True(parsed!.Timestamp is null, "El parser inventó EventTime para una línea sin fecha.");
++    True(parsed.IngestedAt.HasValue, "Falta metadato IngestedAt.");
++    return Task.CompletedTask;
++}
++
++static Task TsplusIsoTimestampParses()
++{
++    var ts = TsplusLogParser.TryParseTimestamp("2026-09-06 18:10:11 ERROR failed");
++    True(ts.HasValue && ts.Value.Year == 2026 && ts.Value.Month == 9 && ts.Value.Day == 6, "Timestamp ISO no reconocido.");
++    return Task.CompletedTask;
++}
++
++
++static Task AmbiguousTsplusDateUsesInvestigationWindow()
++{
++    var local = new DateTime(2026, 4, 3, 12, 30, 0, DateTimeKind.Unspecified);
++    var end = new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local));
++    var context = new DiagnosticContext(Snapshot(), TimeSpan.FromHours(1), end);
++    var parsed = TsplusLogParser.ParseLine("Remote Access", "x.log", "03/04/2026 12:00:00 ERROR failed to start application", 1, context);
++    NotNull(parsed, "La fecha ambigua no se resolvió con la ventana de investigación.");
++    True(parsed!.Timestamp.HasValue && parsed.Timestamp.Value.Month == 4 && parsed.Timestamp.Value.Day == 3,
++        "La fecha dd/MM no fue seleccionada de forma inequívoca por la ventana de investigación.");
++    return Task.CompletedTask;
++}
++
++static Task TsplusStackTraceIsContinuation()
++{
++    True(TsplusLogParser.IsContinuationLine("   at Module.Type.Method()"), "Stack trace no reconocido como continuación.");
++    return Task.CompletedTask;
++}
++
++static Task AlertTitleRemovesTrendLabel()
++{
++    var finding = new DiagnosticFinding("RESOURCE-TREND-MEMORY-DOWN", "Memoria / tendencia", DiagnosticSeverity.Advertencia,
++        "La memoria libre muestra una caída sostenida.", "", [], ConfidenceLevel.Alta, Capa: DiagnosticLayer.Windows);
++    var title = AlertTitleFormatter.ForFinding(finding);
++    True(title.Contains("memoria libre en descenso", StringComparison.OrdinalIgnoreCase), "Título de memoria no es explícito.");
++    False(title.Contains("/ tendencia", StringComparison.OrdinalIgnoreCase), "El título conserva '/ tendencia'.");
++    return Task.CompletedTask;
++}
++
++static async Task DispatcherDoesNotEmitRecovered()
++{
++    var root = TempDir();
++    try
++    {
++        var sink = new MemorySink();
++        var dispatcher = new NotificationDispatcher([sink], root);
++        var signal = new AlertSignal("mem", DateTimeOffset.Now, "Advertencia", "TDM · Alerta de memoria", "Detalle", "test");
++        var opened = await dispatcher.DispatchAsync([signal], DateTimeOffset.Now);
++        Equal(1, opened.Count, "No se emitió apertura.");
++        var recovered = await dispatcher.DispatchAsync([], DateTimeOffset.Now.AddMinutes(1));
++        Equal(0, recovered.Count, "Se emitió una alerta Recovered.");
++        False(sink.Items.Any(x => x.Transition == NotificationTransition.Recovered), "Un sink recibió Recovered.");
++    }
++    finally { TryDelete(root); }
++}
++
++static Task EmailRecoveredNotificationsDisabled()
++{
++    False(EmailNotificationSettings.Default.NotifyRecovered, "NotifyRecovered sigue habilitado por defecto.");
++    return Task.CompletedTask;
++}
++
++static Task CollectorCursorStoreRoundTrip()
++{
++    var root = TempDir();
++    var prior = Environment.GetEnvironmentVariable("TDM_STATE_ROOT");
++    try
++    {
++        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", root);
++        var state = new CursorFixture(new Dictionary<string, long> { ["System"] = 123 }, DateTimeOffset.Now);
++        True(CollectorCursorStore.TrySave("production-test", state, out var saveError), "No se guardó cursor: " + saveError);
++        True(CollectorCursorStore.TryLoad<CursorFixture>("production-test", out var loaded, out var loadError), "No se leyó cursor: " + loadError);
++        Equal(123L, loaded!.Values["System"], "Cursor persistido incorrecto.");
++    }
++    finally
++    {
++        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", prior);
++        TryDelete(root);
++    }
++    return Task.CompletedTask;
++}
++
++static async Task IncidentLedgerSerializesConcurrentWriters()
++{
++    var root = TempDir();
++    try
++    {
++        var at = DateTimeOffset.Now;
++        var incident = new ObservabilityIncident(at, "APPLICATION_CRASH", "TSplus", "Error", "crash");
++        var a = new IncidentLedger(root);
++        var b = new IncidentLedger(root);
++        await Task.WhenAll(
++            a.ReconcileAsync([incident], at, SupportMonitoringSettings.Default),
++            b.ReconcileAsync([incident], at, SupportMonitoringSettings.Default));
++        var items = await a.ReadAsync();
++        Equal(1, items.Count, "Carrera del ledger creó registros duplicados/corruptos.");
++        True(items[0].Occurrences >= 2, "La segunda escritura concurrente no observó la primera.");
++    }
++    finally { TryDelete(root); }
++}
++
++static async Task DiagnosticEngineKeepsUndatedAsNonCausalContext()
++{
++    var undated = new DiagnosticEvent(null, "TSplus Log", "Remote Access", DiagnosticLayer.Tsplus,
++        DiagnosticSeverity.Error, "APPLICATION_CRASH", "undated", IngestedAt: DateTimeOffset.Now);
++    var engine = new DiagnosticEngine([new FixedCollector(undated)], TimeSpan.FromSeconds(2), 1000);
++    var report = await engine.RunAsync(Context(TimeSpan.FromHours(1)));
++    True(report.Eventos.Any(x => x.Mensaje == "undated" && x.Timestamp is null), "Se perdió evidencia no temporal.");
++    False(report.Eventos.Where(x => x.Mensaje == "undated").Any(DiagnosticEventCatalog.IsFunctionalIncident), "Evidencia no temporal se volvió causal.");
++}
++
++static Task IdentitySubstringDoesNotCorrelate()
++{
++    var now = DateTimeOffset.Now;
++    var failure = new DiagnosticEvent(now.AddMinutes(-2), "Security", "Windows NLA", DiagnosticLayer.Seguridad,
++        DiagnosticSeverity.Advertencia, "USER_NLA_PASSWORD_FAILURE", "credential failure",
++        Evidencia: [new EvidenceItem("Usuario", "ann")]);
++    var symptom = new DiagnosticEvent(now.AddMinutes(-1), "TSplus Log", "Remote Access", DiagnosticLayer.Tsplus,
++        DiagnosticSeverity.Error, "SESSION", "session failed",
++        Evidencia: [new EvidenceItem("Usuario", "joann")], Producto: TsplusProduct.RemoteAccess);
++    var report = Report([failure, symptom], now);
++    var causes = RootCauseCorrelator.Analyze(report);
++    False(causes.Any(x => x.Id.StartsWith("ROOT-WINDOWS-NLA-CREDENTIALS-", StringComparison.OrdinalIgnoreCase)), "ann coincidió incorrectamente con joann.");
++    return Task.CompletedTask;
++}
++
++static Task StaleApplicationConfigDoesNotBecomeHighCause()
++{
++    var now = DateTimeOffset.Now;
++    var issue = new DiagnosticFinding("TSPLUS-PUBLISHED-APP-TEST", "Accounting.exe", DiagnosticSeverity.Error,
++        "Ruta inválida", "", [new EvidenceItem("Aplicación", "Accounting.exe")], ConfidenceLevel.Alta, Capa: DiagnosticLayer.Tsplus);
++    var stale = new DiagnosticEvent(now.AddHours(-1), "TSplus Log", "Remote Access", DiagnosticLayer.Tsplus,
++        DiagnosticSeverity.Error, "APPLICATION_PUBLISHING", "Accounting.exe failed", Producto: TsplusProduct.RemoteAccess);
++    var report = Report([stale], now, [issue]);
++    var cause = RootCauseCorrelator.Analyze(report).FirstOrDefault(x => x.Id == "ROOT-TSPLUS-APPLICATION-CONFIG");
++    NotNull(cause, "No se conservó la anomalía como hipótesis.");
++    True(cause!.Confianza is ConfidenceLevel.Media or ConfidenceLevel.Baja or ConfidenceLevel.EvidenciaInsuficiente || cause.Puntaje < 90, "Un error histórico distante elevó configuración a causa alta.");
++    return Task.CompletedTask;
++}
++
++static Task SchannelWithoutSharedIdentityDoesNotCorrelate()
++{
++    var now = DateTimeOffset.Now;
++    var schannel = new DiagnosticEvent(now.AddMinutes(-2), "Schannel", "TLS", DiagnosticLayer.Rdp,
++        DiagnosticSeverity.Error, "SCHANNEL_EVENT", "TLS handshake failed for unrelated endpoint");
++    var web = new DiagnosticEvent(now.AddMinutes(-1), "TSplus Log", "HTML5", DiagnosticLayer.Tsplus,
++        DiagnosticSeverity.Error, "WEB", "HTTPS connection failed", Producto: TsplusProduct.RemoteAccess);
++    var causes = RootCauseCorrelator.Analyze(Report([schannel, web], now));
++    False(causes.Any(x => x.Id == "ROOT-TLS-SCHANNEL"), "Schannel se correlacionó sólo por proximidad temporal.");
++    return Task.CompletedTask;
++}
++
++
++static Task CrashIgnoresUnrelatedWindowsDistractors()
++{
++    var now = DateTimeOffset.Now;
++    var crash = new DiagnosticEvent(now, "Application Error", "TSplus.Application.exe", DiagnosticLayer.Tsplus,
++        DiagnosticSeverity.Error, "APPLICATION_CRASH", "TSplus.Application.exe crashed",
++        Evidencia: [new EvidenceItem("Aplicación", "TSplus.Application.exe")], Producto: TsplusProduct.RemoteAccess);
++    var schannel = new DiagnosticEvent(now.AddMinutes(-2), "Schannel", "TLS", DiagnosticLayer.Rdp,
++        DiagnosticSeverity.Error, "SCHANNEL_EVENT", "Handshake failed for unrelated.example:443");
++    var disk = new DiagnosticEvent(now.AddMinutes(-3), "Disk", "Disk 9", DiagnosticLayer.Windows,
++        DiagnosticSeverity.Error, "WINDOWS_EVENT", "I/O error on unrelated volume Z:");
++    var security = new DiagnosticEvent(now.AddMinutes(-4), "Third-party security", "EDR", DiagnosticLayer.Seguridad,
++        DiagnosticSeverity.Advertencia, "THIRD_PARTY_SECURITY_INTERFERENCE_SIGNAL", "EDR activity on unrelated.exe");
++
++    var cause = RootCauseCorrelator.Analyze(Report([security, disk, schannel, crash], now))
++        .FirstOrDefault(x => x.Id == "ROOT-PROCESS-CRASH");
++    NotNull(cause, "No se generó candidato del crash confirmado.");
++    var strong = cause!.Evidencia.FirstOrDefault(x => x.Clave == "Antecedentes Windows fuertes")?.Valor;
++    Equal("0", strong ?? "", "Se promovió evidencia Windows no relacionada como antecedente fuerte del crash.");
++    return Task.CompletedTask;
++}
++
++static Task AssignedUsersAreSanitized()
++{
++    var now = DateTimeOffset.Now;
++    var finding = new DiagnosticFinding("TEST", "App", DiagnosticSeverity.Advertencia, "test", "test",
++        [new EvidenceItem("Usuarios asignados", "DOMAIN\\jorge"), new EvidenceItem("Grupos asignados", "DOMAIN\\Admins")]);
++    var sanitized = SupportBundleSanitizer.Sanitize(Report([], now, [finding]));
++    var values = sanitized.Hallazgos[0].Evidencia.Select(x => x.Valor).ToList();
++    False(values.Any(x => x.Contains("jorge", StringComparison.OrdinalIgnoreCase) || x.Contains("Admins", StringComparison.OrdinalIgnoreCase)), "Identidades asignadas no fueron pseudonimizadas.");
++    return Task.CompletedTask;
++}
++
++static DiagnosticContext Context(TimeSpan lookback)
++    => new(Snapshot(), lookback);
++
++static SystemSnapshot Snapshot()
++    => new("TEST", "Windows Server", "2025", "test", "x64", TimeSpan.FromHours(1), DateTimeOffset.Now, true, @"C:\\Program Files (x86)\\TSplus", "19");
++
++static DiagnosticReport Report(IReadOnlyList<DiagnosticEvent> events, DateTimeOffset end, IReadOnlyList<DiagnosticFinding>? findings = null)
++    => new(Snapshot(), findings ?? [], events, end.AddMinutes(-1), end)
++    {
++        Lookback = TimeSpan.FromHours(4),
++        LookbackSolicitado = TimeSpan.FromHours(4),
++        PeriodoAnalizadoInicio = end.AddHours(-4),
++        PeriodoAnalizadoFin = end,
++        EvidenciaDisponibleLookback = TimeSpan.FromHours(4),
++        PeriodoEvidenciaInicio = end.AddHours(-4),
++        PeriodoEvidenciaFin = end
++    };
++
++static string TempDir()
++{
++    var path = Path.Combine(Path.GetTempPath(), "TDM-ProductionTests-" + Guid.NewGuid().ToString("N"));
++    Directory.CreateDirectory(path);
++    return path;
++}
++
++static void TryDelete(string path)
++{
++    try { if (Directory.Exists(path)) Directory.Delete(path, true); } catch { }
++}
++
++static void True(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
++static void False(bool value, string message) => True(!value, message);
++static void NotNull(object? value, string message) => True(value is not null, message);
++static void Equal<T>(T expected, T actual, string message) where T : notnull
++{
++    if (!EqualityComparer<T>.Default.Equals(expected, actual))
++        throw new InvalidOperationException($"{message} Esperado={expected}; actual={actual}");
++}
++
++sealed record CursorFixture(Dictionary<string, long> Values, DateTimeOffset SavedAt);
++
++sealed class MemorySink : INotificationSink
++{
++    public List<IncidentNotification> Items { get; } = [];
++    public Task SendAsync(IncidentNotification notification, CancellationToken ct = default)
++    {
++        Items.Add(notification);
++        return Task.CompletedTask;
++    }
++}
++
++sealed class FixedCollector(DiagnosticEvent value) : IReadOnlyCollector
++{
++    public string Nombre => "ProductionTestCollector";
++    public Task<CollectorResult> CollectAsync(DiagnosticContext context, CancellationToken cancellationToken = default)
++        => Task.FromResult(new CollectorResult([], [value]));
++}
+diff --git a/tests/TDM.ProductionTests/TDM.ProductionTests.csproj b/tests/TDM.ProductionTests/TDM.ProductionTests.csproj
+new file mode 100644
+index 0000000..dd184c6
+--- /dev/null
++++ b/tests/TDM.ProductionTests/TDM.ProductionTests.csproj
+@@ -0,0 +1,21 @@
++<Project Sdk="Microsoft.NET.Sdk">
++  <PropertyGroup>
++    <OutputType>Exe</OutputType>
++    <TargetFramework>net8.0-windows</TargetFramework>
++    <Nullable>enable</Nullable>
++    <ImplicitUsings>enable</ImplicitUsings>
++    <RootNamespace>TDM.ProductionTests</RootNamespace>
++    <AssemblyName>TDM.ProductionTests</AssemblyName>
++    <PackageId>TDM.Tests.Production</PackageId>
++    <IsPackable>false</IsPackable>
++  </PropertyGroup>
++  <ItemGroup>
++    <ProjectReference Include="..\..\src\TDM.Core\TDM.Core.csproj" />
++    <ProjectReference Include="..\..\src\TDM.Models\TDM.Models.csproj" />
++    <ProjectReference Include="..\..\src\TDM.Correlation\TDM.Correlation.csproj" />
++    <ProjectReference Include="..\..\src\TDM.Collectors.TSplus\TDM.Collectors.TSplus.csproj" />
++    <ProjectReference Include="..\..\src\TDM.Notifications\TDM.Notifications.csproj" />
++    <ProjectReference Include="..\..\src\TDM.Persistence\TDM.Persistence.csproj" />
++    <ProjectReference Include="..\..\src\TDM.Reporting\TDM.Reporting.csproj" />
++  </ItemGroup>
++</Project>

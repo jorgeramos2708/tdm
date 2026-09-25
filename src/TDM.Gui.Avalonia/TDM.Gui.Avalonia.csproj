@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>TDM.Gui.Avalonia</RootNamespace>
+    <TdmPortable Condition="'$(TdmPortable)' == ''">false</TdmPortable>
+    <AssemblyName Condition="'$(TdmPortable)' != 'true'">TDM.Application</AssemblyName>
+    <AssemblyName Condition="'$(TdmPortable)' == 'true'">TDM</AssemblyName>
+    <PackageId Condition="'$(TdmPortable)' != 'true'">TDM.Desktop.Application</PackageId>
+    <PackageId Condition="'$(TdmPortable)' == 'true'">TDM.Desktop.Portable</PackageId>
+    <DefineConstants Condition="'$(TdmPortable)' == 'true'">$(DefineConstants);TDM_PORTABLE</DefineConstants>
+    <IsPackable>false</IsPackable>
+    <!-- RC18.21.0 Avalonia preview: 11.1.3 is pinned for .NET 8 / Roslyn 4.11 compatibility. -->
+    <AvaloniaVersion>11.1.3</AvaloniaVersion>
+    <ApplicationIcon>Assets\tdm-logo.ico</ApplicationIcon>
+    <!-- Suppress IL3000 for single-file app Assembly.Location usage -->
+    <NoWarn>IL3000</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Desktop" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="System.Reactive" Version="6.0.0" />
+  </ItemGroup>
+
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\TDM.Application\TDM.Application.csproj" />
+    <ProjectReference Include="..\TDM.Core\TDM.Core.csproj" />
+    <ProjectReference Include="..\TDM.Collectors.Windows\TDM.Collectors.Windows.csproj" />
+    <ProjectReference Include="..\TDM.Models\TDM.Models.csproj" />
+    <ProjectReference Include="..\TDM.Notifications\TDM.Notifications.csproj" />
+    <ProjectReference Include="..\TDM.Persistence\TDM.Persistence.csproj" />
+    <ProjectReference Include="..\TDM.Reporting\TDM.Reporting.csproj" />
+  </ItemGroup>
+</Project>

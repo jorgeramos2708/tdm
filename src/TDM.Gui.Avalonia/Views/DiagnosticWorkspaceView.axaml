@@ -1,0 +1,147 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:TDM.Gui.Avalonia.Controls"
+             x:Class="TDM.Gui.Avalonia.Views.DiagnosticWorkspaceView">
+  <Grid RowDefinitions="Auto,Auto,*,Auto">
+    <TextBlock Grid.Row="0" Text="DIAGNÓSTICO E INVESTIGACIÓN" Classes="panel-title" />
+
+    <StackPanel Grid.Row="1" Spacing="12" Margin="0,12,0,12">
+      <Border Classes="metric-strip">
+      <Grid ColumnDefinitions="*,*,*,*,*">
+        <Border Classes="metric-cell">
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="HALLAZGOS" Classes="section-title" FontSize="10" />
+            <TextBlock Text="{Binding FindingCount}" FontSize="26" FontWeight="SemiBold" Foreground="#F5FAFF" />
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="1" Classes="metric-cell">
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="EVENTOS" Classes="section-title" FontSize="10" />
+            <TextBlock Text="{Binding EventCount}" FontSize="26" FontWeight="SemiBold" Foreground="#F5FAFF" />
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="2" Classes="metric-cell">
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="CRÍTICOS" FontSize="10" FontWeight="SemiBold" Foreground="#FF4D4F" />
+            <TextBlock Text="{Binding CriticalCount}" FontSize="26" FontWeight="SemiBold" Foreground="#FF4D4F" />
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="3" Classes="metric-cell">
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="ERRORES" FontSize="10" FontWeight="SemiBold" Foreground="#FF8A3D" />
+            <TextBlock Text="{Binding ErrorCount}" FontSize="26" FontWeight="SemiBold" Foreground="#FF8A3D" />
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="4" Classes="metric-cell" Padding="12,7"
+                IsVisible="{Binding IsBaselineIndicatorVisible}"
+                BorderBrush="{Binding BaselineIndicatorAccent}" BorderThickness="2"
+                Background="{Binding BaselineIndicatorBackground}">
+          <StackPanel VerticalAlignment="Center" Spacing="2">
+            <TextBlock Text="BASELINE" FontSize="10" FontWeight="SemiBold" Foreground="{Binding BaselineIndicatorAccent}" />
+            <TextBlock Text="{Binding BaselineIndicator}" FontSize="20" FontWeight="Bold" Foreground="{Binding BaselineIndicatorAccent}" />
+            <TextBlock Text="{Binding BaselineIndicatorDetail}" Classes="muted" FontSize="9" TextWrapping="Wrap" MaxHeight="32" />
+          </StackPanel>
+        </Border>
+      </Grid>
+      </Border>
+    </StackPanel>
+
+    <TabControl Grid.Row="2" HorizontalAlignment="Stretch">
+      <TabItem Header="Resumen técnico">
+        <Border Classes="workspace-section" Margin="0,10,0,0">
+          <controls:FormattedReportView ReportText="{Binding SummaryText}" MinHeight="390" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+        </Border>
+      </TabItem>
+      <TabItem Header="Causa raíz">
+        <StackPanel Spacing="8" Margin="0,10,0,0">
+          <Border Classes="workspace-section">
+            <controls:FormattedReportView ReportText="{Binding RootCauseText}" MinHeight="340" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+          </Border>
+          <Border Classes="toolbar">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <TextBlock Text="Veredicto del técnico sobre la causa principal:" Classes="muted" VerticalAlignment="Center" />
+              <TextBox Width="250" Text="{Binding FeedbackNote}" Watermark="Nota opcional (qué se validó)" />
+              <Button Classes="primary-action" Content="Confirmar causa" Command="{Binding ConfirmPrimaryCauseCommand}" />
+              <Button Classes="detail" Content="Descartar causa" Command="{Binding DiscardPrimaryCauseCommand}" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </TabItem>
+      <TabItem Header="Plan de acción">
+        <Border Classes="workspace-section" Margin="0,10,0,0">
+          <controls:FormattedReportView ReportText="{Binding ActionPlanText}" MinHeight="390" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+        </Border>
+      </TabItem>
+      <TabItem Header="Cobertura">
+        <Border Classes="workspace-section" Margin="0,10,0,0">
+          <controls:FormattedReportView ReportText="{Binding CoverageText}" MinHeight="390" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+        </Border>
+      </TabItem>
+      <TabItem Header="Patrones">
+        <Border Classes="workspace-section" Margin="0,10,0,0">
+          <controls:FormattedReportView ReportText="{Binding PatternsText}" MinHeight="390" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+        </Border>
+      </TabItem>
+      <TabItem Header="Resolución guiada">
+        <Border Classes="workspace-section" Margin="0,10,0,0">
+          <controls:FormattedReportView ReportText="{Binding GuidedResolutionText}" MinHeight="390" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+        </Border>
+      </TabItem>
+      <TabItem Header="Evidencia/Eventos">
+        <Grid RowDefinitions="Auto,*" Margin="0,10,0,0" HorizontalAlignment="Stretch">
+          <Border Grid.Row="0" Classes="toolbar">
+            <StackPanel Spacing="10">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <TextBlock Text="Severidad" Classes="muted" VerticalAlignment="Center" />
+                <ComboBox Width="150" ItemsSource="{Binding SeverityOptions}" SelectedItem="{Binding SelectedSeverity}" />
+                <TextBlock Text="Origen" Classes="muted" VerticalAlignment="Center" />
+                <ComboBox Width="150" ItemsSource="{Binding OriginOptions}" SelectedItem="{Binding SelectedOrigin}" />
+
+              </StackPanel>
+
+            </StackPanel>
+          </Border>
+
+          <Border Grid.Row="1" Classes="workspace-section" Margin="0,10,0,0" HorizontalAlignment="Stretch">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" MinHeight="390" MaxHeight="520">
+              <StackPanel Spacing="0">
+                <Border BorderBrush="#203347" BorderThickness="0,0,0,1" Padding="4,4,4,8">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Width="{Binding EventTimeWidth}" Text="Hora" FontWeight="SemiBold" Foreground="#F5FAFF" />
+                    <TextBlock Width="{Binding EventSeverityWidth}" Text="Severidad" FontWeight="SemiBold" Foreground="#F5FAFF" />
+                    <TextBlock Width="{Binding EventOriginWidth}" Text="Origen" FontWeight="SemiBold" Foreground="#F5FAFF" />
+                    <TextBlock Width="{Binding EventComponentWidth}" Text="Componente" FontWeight="SemiBold" Foreground="#F5FAFF" />
+                    <TextBlock Width="{Binding EventTypeWidth}" Text="Tipo" FontWeight="SemiBold" Foreground="#F5FAFF" />
+                    <TextBlock Width="{Binding EventMessageWidth}" Text="Mensaje" FontWeight="SemiBold" Foreground="#F5FAFF" />
+                  </StackPanel>
+                </Border>
+
+                <ItemsControl ItemsSource="{Binding Events}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border BorderBrush="#203347" BorderThickness="0,0,0,1" Padding="4,8">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <TextBlock Width="{Binding DataContext.EventTimeWidth, RelativeSource={RelativeSource AncestorType=UserControl}}" Text="{Binding Time}" Classes="muted" TextWrapping="Wrap" />
+                          <TextBlock Width="{Binding DataContext.EventSeverityWidth, RelativeSource={RelativeSource AncestorType=UserControl}}" Text="{Binding Severity}" Foreground="{Binding Accent}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                          <TextBlock Width="{Binding DataContext.EventOriginWidth, RelativeSource={RelativeSource AncestorType=UserControl}}" Text="{Binding Origin}" Foreground="#F5FAFF" TextWrapping="Wrap" />
+                          <TextBlock Width="{Binding DataContext.EventComponentWidth, RelativeSource={RelativeSource AncestorType=UserControl}}" Text="{Binding Component}" TextWrapping="Wrap" />
+                          <TextBlock Width="{Binding DataContext.EventTypeWidth, RelativeSource={RelativeSource AncestorType=UserControl}}" Text="{Binding Type}" Classes="muted" TextWrapping="Wrap" />
+                          <TextBlock Width="{Binding DataContext.EventMessageWidth, RelativeSource={RelativeSource AncestorType=UserControl}}" Text="{Binding Message}" TextWrapping="Wrap" />
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </ScrollViewer>
+          </Border>
+        </Grid>
+      </TabItem>
+    </TabControl>
+
+    <Border Grid.Row="3" IsVisible="{Binding HasExportStatus}" Margin="0,10,0,0" Padding="10,7"
+            Background="#0B1521" BorderBrush="#23354A" BorderThickness="1" CornerRadius="6">
+      <TextBlock Text="{Binding ExportStatus}" Foreground="#AFC4D8" FontSize="11" TextWrapping="Wrap" />
+    </Border>
+  </Grid>
+</UserControl>

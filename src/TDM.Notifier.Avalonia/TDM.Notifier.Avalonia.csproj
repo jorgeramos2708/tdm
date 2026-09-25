@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>TDM.Notifier.Avalonia</RootNamespace>
+    <AssemblyName>TDM.Notifier</AssemblyName>
+    <PackageId>TDM.Desktop.Notifier</PackageId>
+    <IsPackable>false</IsPackable>
+    <AvaloniaVersion>11.1.3</AvaloniaVersion>
+    <ApplicationIcon>..\TDM.Gui.Avalonia\Assets\tdm-logo.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Desktop" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="$(AvaloniaVersion)" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\TDM.Notifications\TDM.Notifications.csproj" />
+    <ProjectReference Include="..\TDM.Persistence\TDM.Persistence.csproj" />
+    <ProjectReference Include="..\TDM.Models\TDM.Models.csproj" />
+  </ItemGroup>
+</Project>

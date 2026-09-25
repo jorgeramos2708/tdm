@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyName>TDM.Application.Core</AssemblyName>
+    <PackageId>TDM.Application.Core</PackageId>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\TDM.Models\TDM.Models.csproj" />
+    <ProjectReference Include="..\TDM.Core\TDM.Core.csproj" />
+    <ProjectReference Include="..\TDM.Collectors.Windows\TDM.Collectors.Windows.csproj" />
+    <ProjectReference Include="..\TDM.Collectors.TSplus\TDM.Collectors.TSplus.csproj" />
+    <ProjectReference Include="..\TDM.Collectors.Rdp\TDM.Collectors.Rdp.csproj" />
+    <ProjectReference Include="..\TDM.Collectors.Network\TDM.Collectors.Network.csproj" />
+    <ProjectReference Include="..\TDM.Collectors.Security\TDM.Collectors.Security.csproj" />
+    <ProjectReference Include="..\TDM.Correlation\TDM.Correlation.csproj" />
+  </ItemGroup>
+</Project>

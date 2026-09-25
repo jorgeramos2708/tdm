@@ -1,0 +1,22 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="TDM.Gui.Avalonia.Views.PortableNotificationWindow"
+        Width="336" SizeToContent="Height" MaxHeight="190"
+        SystemDecorations="None" CanResize="False" ShowInTaskbar="False"
+        ShowActivated="False" Topmost="True" Background="Transparent">
+  <Border x:Name="Card" Margin="8" Padding="14" CornerRadius="12" BorderThickness="2" Background="#0B1521" BorderBrush="#39D0FF">
+    <Grid RowDefinitions="Auto,Auto,Auto">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock x:Name="TitleText" FontSize="14" FontWeight="SemiBold" Foreground="#F1F6FD" TextWrapping="Wrap" MaxHeight="42" />
+        <Button Grid.Column="1" Content="×" Width="30" Height="30" Margin="8,0,0,0" Click="Close_Click" />
+      </Grid>
+      <TextBlock x:Name="SummaryText" Grid.Row="1" Margin="0,8,0,0" FontSize="12" Foreground="#D9E4F0" TextWrapping="Wrap" MaxHeight="50" />
+      <Grid Grid.Row="2" Margin="0,8,0,0">
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+          <Button Content="Ver TDM" Click="OpenTdm_Click" />
+          <Button Content="Cerrar" Click="Close_Click" />
+        </StackPanel>
+      </Grid>
+    </Grid>
+  </Border>
+</Window>

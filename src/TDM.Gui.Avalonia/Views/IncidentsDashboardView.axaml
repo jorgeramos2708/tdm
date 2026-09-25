@@ -1,0 +1,54 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="TDM.Gui.Avalonia.Views.IncidentsDashboardView">
+  <StackPanel Spacing="12">
+    <TextBlock Text="INCIDENTES" FontSize="24" FontWeight="SemiBold" Foreground="#39D0FF" />
+    <Border Classes="metric-strip">
+      <Grid ColumnDefinitions="*,*,*,*">
+        <Border Grid.Column="0" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="TOTAL"/><TextBlock Text="{Binding Total}" FontSize="30"/></StackPanel></Border>
+        <Border Grid.Column="1" Classes="metric-cell"><StackPanel><TextBlock Text="CRÍTICOS" FontWeight="SemiBold" Foreground="#FF4D4F"/><TextBlock Text="{Binding Critical}" FontSize="30" Foreground="#FF4D4F"/></StackPanel></Border>
+        <Border Grid.Column="2" Classes="metric-cell"><StackPanel><TextBlock Text="ERROR" FontWeight="SemiBold" Foreground="#FF8A3D"/><TextBlock Text="{Binding Errors}" FontSize="30" Foreground="#FF8A3D"/></StackPanel></Border>
+        <Border Grid.Column="3" Classes="metric-cell" BorderThickness="0"><StackPanel><TextBlock Classes="section-title" Text="COMPONENTES"/><TextBlock Text="{Binding AffectedComponents}" FontSize="30" Foreground="#FFD166"/></StackPanel></Border>
+      </Grid>
+    </Border>
+    <Border Classes="workspace-section">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="section-title" Text="LÍNEA DE INCIDENTES"/>
+        <ItemsControl ItemsSource="{Binding Incidents}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Background="Transparent" BorderBrush="#1B3142" BorderThickness="0,0,0,1"
+                      CornerRadius="0" Padding="10,12" Margin="0">
+                <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="10,130,110,250,*">
+                  <Border Grid.Column="0" Width="7" Height="7" CornerRadius="4" Background="{Binding Accent}" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1" Spacing="2">
+                    <TextBlock Text="FECHA/HORA" Classes="muted" FontSize="10"/>
+                    <TextBlock Text="{Binding Time}"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="2" Spacing="2">
+                    <TextBlock Text="ESTADO" Classes="muted" FontSize="10"/>
+                    <TextBlock Text="{Binding Severity}" Foreground="{Binding Accent}" FontWeight="SemiBold"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="3" Spacing="2" Margin="8,0,12,0">
+                    <TextBlock Text="TIPO" Classes="muted" FontSize="10"/>
+                    <TextBlock Text="{Binding Kind}" TextWrapping="Wrap"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="4" Spacing="2">
+                    <TextBlock Text="COMPONENTE" Classes="muted" FontSize="10"/>
+                    <TextBlock Text="{Binding Component}" Foreground="#9EC9ED" TextWrapping="Wrap"/>
+                  </StackPanel>
+                  <Border Grid.Row="1" Grid.ColumnSpan="5" BorderBrush="#243B53" BorderThickness="0,1,0,0" Margin="10,10,0,0" Padding="0,8,0,0">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="DETALLE" Classes="muted" FontSize="10"/>
+                      <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" MaxHeight="54"/>
+                    </StackPanel>
+                  </Border>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

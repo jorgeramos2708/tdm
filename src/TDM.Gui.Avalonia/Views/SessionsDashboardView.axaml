@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="TDM.Gui.Avalonia.Views.SessionsDashboardView">
+  <StackPanel Spacing="12">
+    <TextBlock Text="SESIONES" FontSize="24" FontWeight="SemiBold" Foreground="#39D0FF" />
+    <Border Classes="metric-strip">
+      <Grid ColumnDefinitions="*,*,*,*,*">
+        <Border Grid.Column="0" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="ACTIVAS"/><TextBlock Text="{Binding ActiveValue}" FontSize="30" Foreground="#67E8A5"/></StackPanel></Border>
+        <Border Grid.Column="1" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="DESCONECTADAS"/><TextBlock Text="{Binding DisconnectedValue}" FontSize="30"/></StackPanel></Border>
+        <Border Grid.Column="2" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="COBERTURA"/><TextBlock Text="{Binding Coverage}" FontSize="18" TextWrapping="Wrap"/></StackPanel></Border>
+        <Border Grid.Column="3" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="FALLOS LOGON"/><TextBlock Text="{Binding LogonFailures}" FontSize="30" Foreground="#FF8A3D"/></StackPanel></Border>
+        <Border Grid.Column="4" Classes="metric-cell" BorderThickness="0"><StackPanel><TextBlock Classes="section-title" Text="FALLOS NLA"/><TextBlock Text="{Binding NlaFailures}" FontSize="30" Foreground="#FF8A3D"/></StackPanel></Border>
+      </Grid>
+    </Border>
+    <Border Classes="workspace-section">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="section-title" Text="INCIDENTES DE SESIÓN EN LA VENTANA"/>
+        <ItemsControl ItemsSource="{Binding SessionIncidents}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Grid ColumnDefinitions="80,110,170,*,2*" Margin="0,5">
+                <TextBlock Text="{Binding Time}" Classes="muted"/>
+                <TextBlock Grid.Column="1" Text="{Binding Severity}" Foreground="{Binding Accent}" FontWeight="SemiBold"/>
+                <TextBlock Grid.Column="2" Text="{Binding Kind}"/>
+                <TextBlock Grid.Column="3" Text="{Binding Component}" Classes="muted"/>
+                <TextBlock Grid.Column="4" Text="{Binding Summary}" TextWrapping="Wrap"/>
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

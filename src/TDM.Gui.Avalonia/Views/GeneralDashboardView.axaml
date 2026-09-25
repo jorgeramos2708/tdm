@@ -1,0 +1,24 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:TDM.Gui.Avalonia.Controls"
+             x:Class="TDM.Gui.Avalonia.Views.GeneralDashboardView">
+  <StackPanel Spacing="12">
+    <TextBlock Text="ESTADO GENERAL" Classes="panel-title" />
+    <Grid ColumnDefinitions="*,*,*,*,*,*">
+      <Border Grid.Column="0" Classes="card" Margin="0,0,8,0"><StackPanel><TextBlock Classes="section-title" Text="ESTADO TSPLUS"/><TextBlock Text="{Binding ModuleState}" Foreground="{Binding ModuleAccent}" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="{Binding ModuleDetail}" Classes="muted" TextWrapping="Wrap"/></StackPanel></Border>
+      <Border Grid.Column="1" Classes="card" Margin="0,0,8,0"><StackPanel><TextBlock Classes="section-title" Text="CPU"/><TextBlock Text="{Binding Cpu}" Foreground="{Binding CpuAccent}" FontSize="25" FontWeight="SemiBold"/></StackPanel></Border>
+      <Border Grid.Column="2" Classes="card" Margin="0,0,8,0"><StackPanel><TextBlock Classes="section-title" Text="MEMORIA LIBRE"/><TextBlock Text="{Binding MemoryFree}" Foreground="{Binding MemoryAccent}" FontSize="25" FontWeight="SemiBold"/></StackPanel></Border>
+      <Border Grid.Column="3" Classes="card" Margin="0,0,8,0"><StackPanel><TextBlock Classes="section-title" Text="ERROR / CRÍTICO"/><TextBlock Text="{Binding CriticalSignals}" FontSize="25" Foreground="#FF8A3D"/></StackPanel></Border>
+      <Border Grid.Column="4" Classes="card" Margin="0,0,8,0"><StackPanel><TextBlock Classes="section-title" Text="CRASH-LOOPS"/><TextBlock Text="{Binding CrashLoops}" FontSize="25" Foreground="#FFD166"/></StackPanel></Border>
+      <Border Grid.Column="5" Classes="card"><StackPanel><TextBlock Classes="section-title" Text="COBERTURA"/><TextBlock Text="{Binding Coverage}" FontSize="25" Foreground="#39D0FF"/></StackPanel></Border>
+    </Grid>
+    <Grid ColumnDefinitions="1.5*,1*">
+      <Border Grid.Column="0" Classes="card" Margin="0,0,12,0">
+        <StackPanel Spacing="8"><TextBlock Classes="section-title" Text="CPU Y MEMORIA UTILIZADA"/><controls:LineChart Height="280" SeriesA="{Binding CpuSeries}" SeriesB="{Binding MemoryUsedSeries}" Maximum="100" SeriesABrush="#39D0FF" SeriesBBrush="#A78BFA" SeriesALabel="CPU" SeriesBLabel="Memoria usada" ValueSuffix="%"/><StackPanel Orientation="Horizontal" Spacing="16"><TextBlock Text="CPU" Foreground="#39D0FF"/><TextBlock Text="Memoria usada" Foreground="#A78BFA"/></StackPanel></StackPanel>
+      </Border>
+      <Border Grid.Column="1" Classes="card">
+        <StackPanel Spacing="8"><TextBlock Classes="section-title" Text="SALUD MODULAR"/><ItemsControl ItemsSource="{Binding Modules}"><ItemsControl.ItemTemplate><DataTemplate><Grid ColumnDefinitions="*,Auto" Margin="0,5"><StackPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold"/><TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11" TextWrapping="Wrap"/></StackPanel><TextBlock Grid.Column="1" Text="{Binding Status}" Foreground="{Binding Accent}" FontWeight="SemiBold" Margin="10,0,0,0"/></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+      </Border>
+    </Grid>
+  </StackPanel>
+</UserControl>

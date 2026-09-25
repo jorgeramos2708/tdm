@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TDM.Models\TDM.Models.csproj" />
+    <ProjectReference Include="..\..\src\TDM.Reporting\TDM.Reporting.csproj" />
+    <ProjectReference Include="..\..\src\TDM.Correlation\TDM.Correlation.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

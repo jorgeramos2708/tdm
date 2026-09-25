@@ -1,0 +1,20 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="TDM.Gui.Avalonia.Views.CausalityDashboardView">
+  <StackPanel Spacing="12">
+    <TextBlock Text="CAUSALIDAD" Classes="panel-title" />
+    <Border Classes="metric-strip">
+      <Grid ColumnDefinitions="1.6*,*,*,*,*">
+        <Border Grid.Column="0" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="ORIGEN ACTUAL"/><TextBlock Text="{Binding CurrentOrigin}" Foreground="{Binding OriginAccent}" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="{Binding Originator}" Classes="muted" TextWrapping="Wrap"/></StackPanel></Border>
+        <Border Grid.Column="1" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="TSPLUS"/><TextBlock Text="{Binding TsplusCount}" FontSize="28" Foreground="#39D0FF"/></StackPanel></Border>
+        <Border Grid.Column="2" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="WINDOWS"/><TextBlock Text="{Binding WindowsCount}" FontSize="28" Foreground="#7DAEEB"/></StackPanel></Border>
+        <Border Grid.Column="3" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="EXTERNO"/><TextBlock Text="{Binding ExternalCount}" FontSize="28" Foreground="#FFD166"/></StackPanel></Border>
+        <Border Grid.Column="4" Classes="metric-cell" BorderThickness="0"><StackPanel><TextBlock Classes="section-title" Text="INDETERMINADO"/><TextBlock Text="{Binding IndeterminateCount}" FontSize="28" Foreground="#8FA3B8"/></StackPanel></Border>
+      </Grid>
+    </Border>
+    <Grid ColumnDefinitions="*,*">
+      <Border Grid.Column="0" Classes="workspace-slice" Margin="0,0,12,0"><StackPanel Spacing="8"><TextBlock Classes="section-title" Text="ORIGINADORES OBSERVADOS"/><ItemsControl ItemsSource="{Binding Originators}"><ItemsControl.ItemTemplate><DataTemplate><Grid ColumnDefinitions="70,120,*" Margin="0,5"><TextBlock Text="{Binding Count}" Foreground="{Binding Accent}" FontWeight="SemiBold"/><TextBlock Grid.Column="1" Text="{Binding Origin}" Foreground="{Binding Accent}"/><TextBlock Grid.Column="2" Text="{Binding Name}"/></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+      <Border Grid.Column="1" Classes="workspace-section"><StackPanel Spacing="8"><TextBlock Classes="section-title" Text="ÚLTIMO MOMENTO CAUSAL"/><TextBlock Text="{Binding LastCausalMoment}" TextWrapping="Wrap"/><TextBlock Text="La clasificación causal proviene de diagnósticos manuales almacenados en la ventana; el monitor no inventa una causa cuando no existe evidencia suficiente." Classes="muted" TextWrapping="Wrap"/></StackPanel></Border>
+    </Grid>
+  </StackPanel>
+</UserControl>

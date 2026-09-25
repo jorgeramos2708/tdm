@@ -1,0 +1,4 @@
+FIX93 R8 P1-P2 - COMPILEFIX R5
+
+Se corrige la resolucion explicita de TDM.Application.DiagnosticWorkflow en TDM.ProductionTests.
+Usar VALIDAR-FIX93.cmd y comprobar 0 advertencias / 0 errores antes de ejecutar el diagnostico de 1 hora.

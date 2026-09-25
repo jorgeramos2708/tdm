@@ -1,0 +1,45 @@
+# Build outputs
+bin/
+obj/
+dist/
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# NuGet
+packages/
+*.nupkg
+
+# Logs
+*.log
+logs/
+
+# Test results
+TestResults/
+
+# Portable publish output
+TDM-portable-win-x64/
+
+# Installer output
+TDM-Setup-x64.exe
+
+# Local state
+*.tmp
+*.temp
+
+# Rider
+.idea/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# OSX
+.DS_Store
