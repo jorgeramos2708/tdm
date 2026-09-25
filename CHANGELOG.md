@@ -48,6 +48,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Resumen y Patrones**: pies "… y N más" en hallazgos destacados (10) y patrones (20); Patrones añade componente semántico, tipo de excepción e incidentes relacionados.
 - **Marcadores coloreados**: `FormattedReportView` pinta las líneas que empiezan por `[CRÍTICO]`, `[ERROR]`, `[ADVERTENCIA]`, `[CRÍTICA]` o `[PRINCIPAL]` sin partir la línea en clave/valor.
 
+### Added — Dashboards: paneles de detalle, contadores explícitos y umbrales configurables
+
+- **Ver detalle (Sesiones)**: nuevo panel con activas/desconectadas, cobertura, fallos logon/NLA de la última muestra y hasta 10 sesiones con incidencia (hora, severidad, tipo, componente y resumen; "… y N más").
+- **Ver detalle (Incidentes)**: nuevo panel con totales (total, críticos, error, componentes afectados), desglose por tipo y hasta 15 elementos a revisar (críticos y errores primero) con "… y N más".
+- **Ver detalle (Servidores/Granja)**: nuevo panel con el reparto de nodos (en línea/degradados/sin datos) y el estado por nodo: salud, conectividad, CPU, sesiones, incidentes, antigüedad de la última muestra y desfase de reloj, marcando `[MUESTRA ANTIGUA]`, `[SIN DATOS]` o `[DESFASE DE RELOJ]` según `SupportThresholds` (`NodeStaleWarningSeconds`, `NodeOfflineSeconds`, `ClockDriftWarningSeconds`).
+- **Ver detalle (Salud TDM)**: nuevo panel con la telemetría del monitor (modo, frecuencia, muestras, diferidas, timeouts, bitácora JSONL, colector más lento), CPU/memoria de TDM con sus umbrales configurados, estado de recursos abiertos e hilos frente a `TdmHandlesWarning/Critical` y `TdmThreadsWarning/Critical` (Normal/Advertencia/Crítico) y la duración media/máxima en la ventana.
+- **Contadores "0 = sin datos" explícitos**: en Sesiones, los fallos logon/NLA muestran "No evaluado" cuando el colector de sesiones no aportó datos (en lugar de un "0" ambiguo); en Incidentes, todos los contadores muestran "No evaluado" cuando no hay muestras en la ventana.
+- **Granja con conteos particionados**: "En línea", "Degradados" y "Sin datos" forman ahora una partición disjunta (cada nodo se cuenta una sola vez); un nodo `EN LÍNEA` con salud `FALLA` pasa a Degradados en vez de contar como En línea.
+- **Último dato presente (Rendimiento)**: CPU, memoria, entrada y salida de red se toman de la última muestra que sí tiene cada valor (`LastOrDefault` con dato presente) en lugar de la última muestra, que puede ser una captura ligera sin esas métricas (mismo criterio para TSplus con `ModuleHealth` y para Sesiones con datos de sesión).
+- **Umbrales desde la configuración**: las gráficas de CPU/memoria de Rendimiento y Preventivo usan ahora `SupportThresholds.CpuWarning/CpuCritical` y `MemoryUsedWarning/MemoryUsedCritical` (antes 70/85 fijos en Rendimiento y 85/95 fijos en Preventivo, sin relación con la configuración).
+
 ### Sprint 2 — Inteligencia Causal y Simulación What-If
 
 #### S2.1 — Grafo Causal Temporal (`TemporalCausalGraph.cs`)

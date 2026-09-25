@@ -143,7 +143,7 @@
             <TextBlock Text="{Binding MemoryValue}" FontWeight="SemiBold"/>
           </StackPanel>
         </StackPanel>
-        <controls:LineChart Height="250" SeriesA="{Binding CpuSeries}" SeriesB="{Binding MemoryUsedSeries}" Maximum="100" WarningThreshold="85" CriticalThreshold="95" SeriesABrush="#39D0FF" SeriesBBrush="#A78BFA" SeriesALabel="CPU" SeriesBLabel="Memoria" ValueSuffix="%"/>
+        <controls:LineChart Height="250" SeriesA="{Binding CpuSeries}" SeriesB="{Binding MemoryUsedSeries}" Maximum="100" SeriesAWarningThreshold="{Binding CpuWarningThreshold}" SeriesACriticalThreshold="{Binding CpuCriticalThreshold}" SeriesBWarningThreshold="{Binding MemoryWarningThreshold}" SeriesBCriticalThreshold="{Binding MemoryCriticalThreshold}" SeriesABrush="#39D0FF" SeriesBBrush="#A78BFA" SeriesALabel="CPU" SeriesBLabel="Memoria" ValueSuffix="%"/>
       </StackPanel>
     </Border>
   </StackPanel>

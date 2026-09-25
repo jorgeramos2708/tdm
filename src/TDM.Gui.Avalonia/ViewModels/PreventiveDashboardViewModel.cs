@@ -36,6 +36,10 @@ public partial class PreventiveDashboardViewModel : ObservableObject
     [ObservableProperty] private IReadOnlyList<double> _memoryUsedSeries = Array.Empty<double>();
     [ObservableProperty] private string _cpuValue = "N/D";
     [ObservableProperty] private string _memoryValue = "N/D";
+    [ObservableProperty] private double? _cpuWarningThreshold;
+    [ObservableProperty] private double? _cpuCriticalThreshold;
+    [ObservableProperty] private double? _memoryWarningThreshold;
+    [ObservableProperty] private double? _memoryCriticalThreshold;
 
     public void Apply(IReadOnlyList<ObservabilitySample> samples)
         => Apply(samples, SupportMonitoringSettings.Default.Thresholds);
@@ -43,6 +47,10 @@ public partial class PreventiveDashboardViewModel : ObservableObject
     public void Apply(IReadOnlyList<ObservabilitySample> samples, SupportThresholds? thresholds)
     {
         thresholds ??= SupportMonitoringSettings.Default.Thresholds;
+        CpuWarningThreshold = thresholds.CpuWarning;
+        CpuCriticalThreshold = thresholds.CpuCritical;
+        MemoryWarningThreshold = thresholds.MemoryUsedWarning;
+        MemoryCriticalThreshold = thresholds.MemoryUsedCritical;
         if (samples.Count == 0) { Reset(); return; }
         var latest = samples[^1];
         var diagnosticLatest = samples.LastOrDefault(x => x.SampleKind.Equals("diagnostic", StringComparison.OrdinalIgnoreCase)) ?? latest;
@@ -557,6 +565,11 @@ public partial class PreventiveDashboardViewModel : ObservableObject
         Signals = StabilityRows = Actions = Array.Empty<SignalRow>();
         CpuSeries = MemoryUsedSeries = Array.Empty<double>();
         CpuValue = MemoryValue = "N/D";
+        var thresholds = SupportMonitoringSettings.Default.Thresholds;
+        CpuWarningThreshold = thresholds.CpuWarning;
+        CpuCriticalThreshold = thresholds.CpuCritical;
+        MemoryWarningThreshold = thresholds.MemoryUsedWarning;
+        MemoryCriticalThreshold = thresholds.MemoryUsedCritical;
     }
 
     private sealed record MetricPoint(DateTimeOffset Time, double Value);

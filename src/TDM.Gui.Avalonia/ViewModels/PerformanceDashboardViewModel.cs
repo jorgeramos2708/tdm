@@ -18,6 +18,10 @@ public partial class PerformanceDashboardViewModel : ObservableObject
     [ObservableProperty] private double _networkMaximum = 1d;
     [ObservableProperty] private double _networkWarning = 0.7d;
     [ObservableProperty] private double _networkCritical = 0.85d;
+    [ObservableProperty] private double? _cpuWarningThreshold;
+    [ObservableProperty] private double? _cpuCriticalThreshold;
+    [ObservableProperty] private double? _memoryWarningThreshold;
+    [ObservableProperty] private double? _memoryCriticalThreshold;
     [ObservableProperty] private IReadOnlyList<MetricRow> _topProcesses = Array.Empty<MetricRow>();
     [ObservableProperty] private IReadOnlyList<MetricRow> _disks = Array.Empty<MetricRow>();
 
@@ -33,14 +37,23 @@ public partial class PerformanceDashboardViewModel : ObservableObject
         var latest = samples[^1];
         var latestProcessSample = samples.LastOrDefault(s => s.ProcessRamMb.Count > 0) ?? latest;
         var latestDiskSample = samples.LastOrDefault(s => s.DiskFreePercent.Count > 0) ?? latest;
+        var thresholds = SupportMonitoringSettings.Default.Thresholds;
+        CpuWarningThreshold = thresholds.CpuWarning;
+        CpuCriticalThreshold = thresholds.CpuCritical;
+        MemoryWarningThreshold = thresholds.MemoryUsedWarning;
+        MemoryCriticalThreshold = thresholds.MemoryUsedCritical;
 
-        CpuValue = latest.CpuPercent.HasValue ? $"{latest.CpuPercent.Value:0.0}%" : "N/D";
-        MemoryValue = latest.MemoryFreePercent.HasValue ? $"{100d - latest.MemoryFreePercent.Value:0.0}% usada" : "N/D";
-        NetworkReceiveValue = latest.NetworkReceiveMbps.HasValue
-            ? $"↓ {latest.NetworkReceiveMbps.Value:0.00} Mbps"
+        var cpuSample = samples.LastOrDefault(s => s.CpuPercent.HasValue) ?? latest;
+        var memorySample = samples.LastOrDefault(s => s.MemoryFreePercent.HasValue) ?? latest;
+        var networkRxSample = samples.LastOrDefault(s => s.NetworkReceiveMbps.HasValue) ?? latest;
+        var networkTxSample = samples.LastOrDefault(s => s.NetworkSendMbps.HasValue) ?? latest;
+        CpuValue = cpuSample.CpuPercent.HasValue ? $"{cpuSample.CpuPercent.Value:0.0}%" : "N/D";
+        MemoryValue = memorySample.MemoryFreePercent.HasValue ? $"{100d - memorySample.MemoryFreePercent.Value:0.0}% usada" : "N/D";
+        NetworkReceiveValue = networkRxSample.NetworkReceiveMbps.HasValue
+            ? $"↓ {networkRxSample.NetworkReceiveMbps.Value:0.00} Mbps"
             : "↓ N/D Mbps";
-        NetworkSendValue = latest.NetworkSendMbps.HasValue
-            ? $"↑ {latest.NetworkSendMbps.Value:0.00} Mbps"
+        NetworkSendValue = networkTxSample.NetworkSendMbps.HasValue
+            ? $"↑ {networkTxSample.NetworkSendMbps.Value:0.00} Mbps"
             : "↑ N/D Mbps";
 
         var chartSamples = DashboardRules.ChartSamples(samples);
@@ -157,6 +170,11 @@ public partial class PerformanceDashboardViewModel : ObservableObject
         NetworkMaximum = 1d;
         NetworkWarning = 0.7d;
         NetworkCritical = 0.85d;
+        var thresholds = SupportMonitoringSettings.Default.Thresholds;
+        CpuWarningThreshold = thresholds.CpuWarning;
+        CpuCriticalThreshold = thresholds.CpuCritical;
+        MemoryWarningThreshold = thresholds.MemoryUsedWarning;
+        MemoryCriticalThreshold = thresholds.MemoryUsedCritical;
         TopProcesses = Array.Empty<MetricRow>();
         Disks = Array.Empty<MetricRow>();
     }

@@ -54,6 +54,8 @@
       </Grid>
     </Border>
 
+    <Button Classes="detail" Content="Ver detalle" Command="{Binding ShowHealthDetailCommand}" HorizontalAlignment="Left" />
+
     <Grid ColumnDefinitions="*,*">
       <Border Grid.Column="0" Classes="workspace-slice" Margin="0,0,12,0">
         <StackPanel Spacing="8">
@@ -96,6 +98,16 @@
         </Grid>
         <controls:LineChart Height="220" SeriesA="{Binding CpuSeries}" SeriesB="{Binding RamSeries}" PointLabels="{Binding TimeLabels}" Maximum="{Binding CpuMemoryMaximum}" SeriesAWarningThreshold="{Binding CpuWarningThreshold}" SeriesACriticalThreshold="{Binding CpuCriticalThreshold}" SeriesBWarningThreshold="{Binding MemoryWarningThreshold}" SeriesBCriticalThreshold="{Binding MemoryCriticalThreshold}" SeriesABrush="#39D0FF" SeriesBBrush="#A78BFA" SeriesALabel="CPU" SeriesBLabel="Memoria" SeriesAValueSuffix="%" SeriesBValueSuffix="%"/>
       </StackPanel>
+    </Border>
+
+    <Border Classes="workspace-section" IsVisible="{Binding IsDetailVisible}">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Spacing="8">
+          <TextBlock Text="{Binding DetailTitle}" Classes="section-title" FontSize="16" />
+          <TextBlock Text="{Binding DetailText}" TextWrapping="Wrap" />
+        </StackPanel>
+        <Button Grid.Column="1" Classes="detail" Content="Cerrar" Command="{Binding CloseDetailCommand}" VerticalAlignment="Top" Margin="12,0,0,0" />
+      </Grid>
     </Border>
   </StackPanel>
 </UserControl>

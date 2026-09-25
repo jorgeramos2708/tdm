@@ -1,4 +1,6 @@
+using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using TDM.Persistence;
 
 namespace TDM.Gui.Avalonia.ViewModels;
@@ -31,6 +33,10 @@ public partial class TdmHealthDashboardViewModel : ObservableObject
     [ObservableProperty] private double? _memoryWarningThreshold;
     [ObservableProperty] private double? _memoryCriticalThreshold;
     [ObservableProperty] private IReadOnlyList<string> _timeLabels = Array.Empty<string>();
+    [ObservableProperty] private string _detailTitle = "Salud de TDM";
+    [ObservableProperty] private string _detailText = "Selecciona Ver detalle para la telemetría completa del monitor.";
+    [ObservableProperty] private bool _isDetailVisible;
+    private string _healthFullDetail = "Sin datos de salud de TDM.";
 
     public void Apply(IReadOnlyList<ObservabilitySample> samples)
         => Apply(samples, SupportMonitoringSettings.Default.Thresholds);
@@ -76,7 +82,50 @@ public partial class TdmHealthDashboardViewModel : ObservableObject
         DurationMaximum = Math.Max(1000, samples.Max(x => x.DiagnosticDurationMs) * 1.15);
         CpuMemoryMaximum = 100;
         ProcessCountMaximum = Math.Max(50, samples.Max(x => Math.Max(x.TdmHandleCount, x.TdmThreadCount)) * 1.15);
+        _healthFullDetail = BuildHealthDetail(latest, samples, thresholds);
+        RefreshVisibleDetail();
     }
+
+    [RelayCommand] private void ShowHealthDetail() => ShowDetail("Salud de TDM", _healthFullDetail);
+    [RelayCommand] private void CloseDetail() => IsDetailVisible = false;
+
+    private void ShowDetail(string title, string text)
+    {
+        DetailTitle = title;
+        DetailText = text;
+        IsDetailVisible = true;
+    }
+
+    private void RefreshVisibleDetail()
+    {
+        if (IsDetailVisible && DetailTitle.Equals("Salud de TDM", StringComparison.Ordinal))
+            DetailText = _healthFullDetail;
+    }
+
+    private string BuildHealthDetail(ObservabilitySample latest, IReadOnlyList<ObservabilitySample> samples, SupportThresholds thresholds)
+    {
+        var builder = new StringBuilder();
+        builder.Append($"Modo de monitoreo: {MonitorMode} · Frecuencia: {Frequency} · Muestras: {Samples} · Diferidas: {Deferred} · Timeouts: {Timeouts}.");
+        builder.AppendLine();
+        builder.Append($"Bitácora (JSONL): {Jsonl} · Colector más lento: {SlowestCollector} ({SlowestCollectorMs}) · Duración de muestra: {DiagnosticDuration}.");
+        builder.AppendLine();
+        builder.Append($"CPU TDM: {Cpu} (advertencia ≥ {thresholds.TdmCpuWarning:0.0}%, crítico ≥ {thresholds.TdmCpuCritical:0.0}%)");
+        builder.Append($" · Memoria TDM: {Ram} (advertencia ≥ {thresholds.TdmMemoryWarningPercent:0.0}%, crítico ≥ {thresholds.TdmMemoryCriticalPercent:0.0}%).");
+        builder.AppendLine();
+        builder.Append($"Recursos abiertos: {Handles} (advertencia ≥ {thresholds.TdmHandlesWarning}, crítico ≥ {thresholds.TdmHandlesCritical})");
+        builder.Append($" — {StateLabel(latest.TdmHandleCount, thresholds.TdmHandlesWarning, thresholds.TdmHandlesCritical)}.");
+        builder.Append($" Hilos: {Threads} (advertencia ≥ {thresholds.TdmThreadsWarning}, crítico ≥ {thresholds.TdmThreadsCritical})");
+        builder.Append($" — {StateLabel(latest.TdmThreadCount, thresholds.TdmThreadsWarning, thresholds.TdmThreadsCritical)}.");
+        if (samples.Count > 0)
+        {
+            builder.AppendLine();
+            builder.Append($"Duración en la ventana: media {samples.Average(x => x.DiagnosticDurationMs):0} ms · máxima {samples.Max(x => x.DiagnosticDurationMs):0} ms.");
+        }
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string StateLabel(int value, int warning, int critical)
+        => value >= critical ? "Crítico" : value >= warning ? "Advertencia" : "Normal";
 
     private void Reset(SupportThresholds thresholds)
     {
@@ -94,6 +143,8 @@ public partial class TdmHealthDashboardViewModel : ObservableObject
         CpuCriticalThreshold = Math.Clamp(thresholds.TdmCpuCritical, 0d, 100d);
         MemoryWarningThreshold = Math.Clamp(thresholds.TdmMemoryWarningPercent, 0d, 100d);
         MemoryCriticalThreshold = Math.Clamp(thresholds.TdmMemoryCriticalPercent, 0d, 100d);
+        _healthFullDetail = "Sin datos de salud de TDM.";
+        RefreshVisibleDetail();
     }
 
     private static double? TdmMemoryPercent(double workingSetMb, double? totalPhysicalBytes)

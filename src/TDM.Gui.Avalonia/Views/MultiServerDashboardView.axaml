@@ -47,7 +47,17 @@
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
+        <Button Classes="detail" Content="Ver detalle" Command="{Binding ShowNodesDetailCommand}" HorizontalAlignment="Left" Margin="0,5,0,0" />
       </StackPanel>
+    </Border>
+    <Border Classes="workspace-section" IsVisible="{Binding IsDetailVisible}">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Spacing="8">
+          <TextBlock Text="{Binding DetailTitle}" Classes="section-title" FontSize="16" />
+          <TextBlock Text="{Binding DetailText}" TextWrapping="Wrap" />
+        </StackPanel>
+        <Button Grid.Column="1" Classes="detail" Content="Cerrar" Command="{Binding CloseDetailCommand}" VerticalAlignment="Top" Margin="12,0,0,0" />
+      </Grid>
     </Border>
   </StackPanel>
 </UserControl>

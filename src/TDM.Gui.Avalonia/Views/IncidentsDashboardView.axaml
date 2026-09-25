@@ -5,10 +5,10 @@
     <TextBlock Text="INCIDENTES" FontSize="24" FontWeight="SemiBold" Foreground="#39D0FF" />
     <Border Classes="metric-strip">
       <Grid ColumnDefinitions="*,*,*,*">
-        <Border Grid.Column="0" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="TOTAL"/><TextBlock Text="{Binding Total}" FontSize="30"/></StackPanel></Border>
-        <Border Grid.Column="1" Classes="metric-cell"><StackPanel><TextBlock Text="CRÍTICOS" FontWeight="SemiBold" Foreground="#FF4D4F"/><TextBlock Text="{Binding Critical}" FontSize="30" Foreground="#FF4D4F"/></StackPanel></Border>
-        <Border Grid.Column="2" Classes="metric-cell"><StackPanel><TextBlock Text="ERROR" FontWeight="SemiBold" Foreground="#FF8A3D"/><TextBlock Text="{Binding Errors}" FontSize="30" Foreground="#FF8A3D"/></StackPanel></Border>
-        <Border Grid.Column="3" Classes="metric-cell" BorderThickness="0"><StackPanel><TextBlock Classes="section-title" Text="COMPONENTES"/><TextBlock Text="{Binding AffectedComponents}" FontSize="30" Foreground="#FFD166"/></StackPanel></Border>
+        <Border Grid.Column="0" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="TOTAL"/><TextBlock Text="{Binding Total}" FontSize="30" TextWrapping="Wrap"/></StackPanel></Border>
+        <Border Grid.Column="1" Classes="metric-cell"><StackPanel><TextBlock Text="CRÍTICOS" FontWeight="SemiBold" Foreground="#FF4D4F"/><TextBlock Text="{Binding Critical}" FontSize="30" Foreground="#FF4D4F" TextWrapping="Wrap"/></StackPanel></Border>
+        <Border Grid.Column="2" Classes="metric-cell"><StackPanel><TextBlock Text="ERROR" FontWeight="SemiBold" Foreground="#FF8A3D"/><TextBlock Text="{Binding Errors}" FontSize="30" Foreground="#FF8A3D" TextWrapping="Wrap"/></StackPanel></Border>
+        <Border Grid.Column="3" Classes="metric-cell" BorderThickness="0"><StackPanel><TextBlock Classes="section-title" Text="COMPONENTES"/><TextBlock Text="{Binding AffectedComponents}" FontSize="30" Foreground="#FFD166" TextWrapping="Wrap"/></StackPanel></Border>
       </Grid>
     </Border>
     <Border Classes="workspace-section">
@@ -48,7 +48,17 @@
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
+        <Button Classes="detail" Content="Ver detalle" Command="{Binding ShowIncidentsDetailCommand}" HorizontalAlignment="Left" Margin="0,5,0,0" />
       </StackPanel>
+    </Border>
+    <Border Classes="workspace-section" IsVisible="{Binding IsDetailVisible}">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Spacing="8">
+          <TextBlock Text="{Binding DetailTitle}" Classes="section-title" FontSize="16" />
+          <TextBlock Text="{Binding DetailText}" TextWrapping="Wrap" />
+        </StackPanel>
+        <Button Grid.Column="1" Classes="detail" Content="Cerrar" Command="{Binding CloseDetailCommand}" VerticalAlignment="Top" Margin="12,0,0,0" />
+      </Grid>
     </Border>
   </StackPanel>
 </UserControl>

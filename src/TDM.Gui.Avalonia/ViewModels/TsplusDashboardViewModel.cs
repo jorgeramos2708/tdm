@@ -20,7 +20,7 @@ public partial class TsplusDashboardViewModel : ObservableObject
     public void Apply(IReadOnlyList<ObservabilitySample> samples)
     {
         if (samples.Count == 0) { Overall = "NO EVALUADO"; OverallDetail = "sin datos"; OverallAccent = DashboardPalette.Muted; Modules = Array.Empty<ModuleRow>(); return; }
-        var latest = samples[^1];
+        var latest = samples.LastOrDefault(x => x.ModuleHealth.Count > 0) ?? samples[^1];
         var overall = DashboardRules.OverallModuleHealth(latest.ModuleHealth);
         Overall = DashboardRules.CompactSlashes(overall.Label);
         OverallDetail = DashboardRules.CompactSlashes(overall.Detail);
