@@ -156,6 +156,13 @@ internal static class DashboardRules
         => incident.Kind.ToUpperInvariant() is "SESSION" or "USER_LOGON_FAILURE" or "USER_NLA_PASSWORD_FAILURE" or
             "WINDOWS_CREDENTIAL_VALIDATION_FAILURE" or "ACCOUNT_LOCKOUT" or "KERBEROS_PREAUTH_FAILURE" or "RDP_EVENT_INCREMENTAL";
 
+    public static bool HasSessionData(ObservabilitySample sample)
+        => !string.IsNullOrWhiteSpace(sample.SessionCoverage)
+           && !sample.SessionCoverage.Equals("No evaluado", StringComparison.OrdinalIgnoreCase);
+
+    public static ObservabilitySample? LastSessionSample(IReadOnlyList<ObservabilitySample> samples)
+        => samples.LastOrDefault(x => HasSessionData(x) || x.LogonFailures > 0 || x.NlaFailures > 0);
+
     public static string ShortPath(string path)
         => path.Length <= 62 ? path : $"…{path[^61..]}";
 

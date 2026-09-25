@@ -23,21 +23,26 @@ public partial class GeneralDashboardViewModel : ObservableObject
     {
         if (samples.Count == 0) { Reset(); return; }
         var latest = samples[^1];
-        var module = DashboardRules.OverallModuleHealth(latest.ModuleHealth);
+        var thresholds = SupportMonitoringSettings.Default.Thresholds;
+        var moduleSample = samples.LastOrDefault(x => x.ModuleHealth.Count > 0) ?? latest;
+        var cpuSample = samples.LastOrDefault(x => x.CpuPercent.HasValue) ?? latest;
+        var memorySample = samples.LastOrDefault(x => x.MemoryFreePercent.HasValue) ?? latest;
+        var scoreSample = samples.LastOrDefault(x => x.CoverageScore.HasValue) ?? latest;
+        var module = DashboardRules.OverallModuleHealth(moduleSample.ModuleHealth);
         ModuleState = module.Label;
         ModuleDetail = module.Detail;
         ModuleAccent = module.Brush;
-        Cpu = latest.CpuPercent.HasValue ? $"{latest.CpuPercent.Value:0.0}%" : "N/D";
-        CpuAccent = DashboardRules.MetricBrush(latest.CpuPercent, 85, 95);
-        MemoryFree = latest.MemoryFreePercent.HasValue ? $"{latest.MemoryFreePercent.Value:0.0}%" : "N/D";
-        MemoryAccent = DashboardRules.ReverseMetricBrush(latest.MemoryFreePercent, 20, 10);
-        CriticalSignals = (latest.CriticalFindings + latest.ErrorFindings).ToString();
-        CrashLoops = latest.CrashLoops.ToString();
-        Coverage = latest.CoverageScore.HasValue ? $"{latest.CoverageScore}%" : "N/D";
+        Cpu = cpuSample.CpuPercent.HasValue ? $"{cpuSample.CpuPercent.Value:0.0}%" : "N/D";
+        CpuAccent = DashboardRules.MetricBrush(cpuSample.CpuPercent, thresholds.CpuWarning, thresholds.CpuCritical);
+        MemoryFree = memorySample.MemoryFreePercent.HasValue ? $"{memorySample.MemoryFreePercent.Value:0.0}%" : "N/D";
+        MemoryAccent = DashboardRules.ReverseMetricBrush(memorySample.MemoryFreePercent, 100d - thresholds.MemoryUsedWarning, 100d - thresholds.MemoryUsedCritical);
+        CriticalSignals = (scoreSample.CriticalFindings + scoreSample.ErrorFindings).ToString();
+        CrashLoops = scoreSample.CrashLoops.ToString();
+        Coverage = scoreSample.CoverageScore.HasValue ? $"{scoreSample.CoverageScore}%" : "N/D";
         var chartSamples = DashboardRules.ChartSamples(samples);
         CpuSeries = DashboardRules.ContinuousSeries(chartSamples, x => x.CpuPercent);
         MemoryUsedSeries = DashboardRules.ContinuousSeries(chartSamples, x => x.MemoryFreePercent.HasValue ? 100d - x.MemoryFreePercent.Value : null);
-        Modules = latest.ModuleHealth
+        Modules = moduleSample.ModuleHealth
             .OrderByDescending(x => DashboardRules.HealthRank(x.Value))
             .ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
             .Select(x =>

@@ -59,6 +59,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Último dato presente (Rendimiento)**: CPU, memoria, entrada y salida de red se toman de la última muestra que sí tiene cada valor (`LastOrDefault` con dato presente) en lugar de la última muestra, que puede ser una captura ligera sin esas métricas (mismo criterio para TSplus con `ModuleHealth` y para Sesiones con datos de sesión).
 - **Umbrales desde la configuración**: las gráficas de CPU/memoria de Rendimiento y Preventivo usan ahora `SupportThresholds.CpuWarning/CpuCritical` y `MemoryUsedWarning/MemoryUsedCritical` (antes 70/85 fijos en Rendimiento y 85/95 fijos en Preventivo, sin relación con la configuración).
 
+### Changed — Último dato presente en General, Soporte y Salud TDM
+
+- **General**: CPU, memoria libre, salud de módulos, cobertura, hallazgos críticos/error y crash loops se toman de la última muestra que sí tiene cada dato (`LastOrDefault` con presencia) en lugar de la última muestra; una captura ligera al final de la ventana ya no deja "N/D" o "NO EVALUADO" injustos.
+- **General — acentos configurables**: el color de CPU y memoria usa `SupportThresholds.CpuWarning/CpuCritical` y `MemoryUsedWarning/MemoryUsedCritical` (antes 85/95 y 20/10 fijos), alineado con las gráficas.
+- **Soporte — tarjeta Sesiones**: los contadores provienen de la última muestra con datos de sesión; sin datos muestra "N/D", "Sin datos de sesiones" y "Cobertura: No evaluado" en lugar de un "0" ambiguo.
+- **Salud TDM**: modo/frecuencia/diferidas/timeouts (última muestra de monitoreo), CPU, memoria, recursos abiertos, hilos, bitácora JSONL, colector más lento y duración se toman de la última muestra presente de cada métrica.
+- **Helper compartido**: `DashboardRules.LastSessionSample` concentra el criterio de "muestra con datos de sesión" y lo usan Soporte y Sesiones.
+- **Gate de verificación**: la comprobación estática "Sesiones calcula el total observado" se actualiza a la nueva expresión (`sessionSample`), conservando la misma intención (activas + desconectadas).
+
 ### Sprint 2 — Inteligencia Causal y Simulación What-If
 
 #### S2.1 — Grafo Causal Temporal (`TemporalCausalGraph.cs`)

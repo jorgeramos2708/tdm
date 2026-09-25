@@ -34,9 +34,9 @@ public partial class SessionsDashboardViewModel : ObservableObject
         }
 
         var latest = samples[^1];
-        var sessionSample = samples.LastOrDefault(IsSessionSample);
+        var sessionSample = DashboardRules.LastSessionSample(samples);
         var sessionSource = sessionSample ?? latest;
-        var sessionsEvaluated = sessionSample != null || latest.LogonFailures > 0 || latest.NlaFailures > 0;
+        var sessionsEvaluated = sessionSample != null;
         ActiveValue = sessionSource.ActiveSessions.ToString();
         DisconnectedValue = sessionSource.DisconnectedSessions.ToString();
         Coverage = sessionsEvaluated ? sessionSource.SessionCoverage : "No evaluado";
@@ -94,10 +94,6 @@ public partial class SessionsDashboardViewModel : ObservableObject
             builder.Append($"… y {_sessionRows.Count - 10} incidencia(s) más en la ventana.");
         return builder.ToString().TrimEnd();
     }
-
-    private static bool IsSessionSample(ObservabilitySample sample)
-        => !string.IsNullOrWhiteSpace(sample.SessionCoverage)
-           && !sample.SessionCoverage.Equals("No evaluado", StringComparison.OrdinalIgnoreCase);
 
     private static IncidentRow ToRow(ObservabilityIncident incident)
         => new(

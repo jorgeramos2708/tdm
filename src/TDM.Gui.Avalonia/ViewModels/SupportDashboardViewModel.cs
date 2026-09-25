@@ -22,9 +22,9 @@ public partial class SupportDashboardViewModel : ObservableObject
     [ObservableProperty] private string _moduleExtra = string.Empty;
     [ObservableProperty] private IBrush _moduleAccent = DashboardPalette.Muted;
     [ObservableProperty] private IBrush _moduleHealthyAccent = DashboardPalette.Muted;
-    [ObservableProperty] private string _sessionValue = "0";
+    [ObservableProperty] private string _sessionValue = "N/D";
     [ObservableProperty] private string _sessionSummary = "Sin incidentes de sesión";
-    [ObservableProperty] private string _sessionCounts = "Activas: 0 · Desconectadas: 0";
+    [ObservableProperty] private string _sessionCounts = "Sin datos de sesiones";
     [ObservableProperty] private string _sessionCoverage = "Cobertura: No evaluado";
     [ObservableProperty] private IBrush _sessionAccent = DashboardPalette.Muted;
     [ObservableProperty] private IBrush _sessionIncidentAccent = DashboardPalette.Muted;
@@ -50,7 +50,6 @@ public partial class SupportDashboardViewModel : ObservableObject
             return;
         }
 
-        var latest = samples[^1];
         var incidents = DashboardRules.UniqueOperationalIncidents(samples);
         var serviceSample = samples.LastOrDefault(x => x.ServiceStates is { Count: > 0 });
         var dependencySample = samples.LastOrDefault(x => x.DependencyStates is { Count: > 0 });
@@ -147,15 +146,19 @@ public partial class SupportDashboardViewModel : ObservableObject
                       .Select(x => $"{DashboardRules.CompactModuleName(x.Key)}: {DashboardRules.NormalizeHealthDetail(x.Value)}"))}.");
 
         var sessionIncidents = incidents.Where(DashboardRules.IsSessionIncident).ToList();
-        SessionValue = (latest.ActiveSessions + latest.DisconnectedSessions).ToString();
+        var sessionSample = DashboardRules.LastSessionSample(samples);
+        var sessionsEvaluated = sessionSample != null;
+        SessionValue = sessionsEvaluated ? $"{sessionSample!.ActiveSessions + sessionSample.DisconnectedSessions}" : "N/D";
         SessionSummary = sessionIncidents.Count switch
         {
             0 => "Sin incidentes de sesión",
             1 => "1 incidente de sesión",
             _ => $"{sessionIncidents.Count} incidentes de sesión"
         };
-        SessionCounts = $"Activas: {latest.ActiveSessions} · Desconectadas: {latest.DisconnectedSessions}";
-        SessionCoverage = $"Cobertura: {latest.SessionCoverage}";
+        SessionCounts = sessionsEvaluated
+            ? $"Activas: {sessionSample!.ActiveSessions} · Desconectadas: {sessionSample.DisconnectedSessions}"
+            : "Sin datos de sesiones";
+        SessionCoverage = $"Cobertura: {(sessionsEvaluated ? sessionSample!.SessionCoverage : "No evaluado")}";
         SessionAccent = DashboardPalette.Cyan;
         SessionIncidentAccent = sessionIncidents.Count > 0 ? DashboardPalette.Error : DashboardPalette.Good;
 
@@ -277,9 +280,10 @@ public partial class SupportDashboardViewModel : ObservableObject
         _sessionIncidents = [];
         _sessionsFullDetail = "Sin datos de sesiones.";
         _incidentsFullDetail = "Sin incidentes en la ventana.";
-        SessionValue = IncidentValue = "0";
+        SessionValue = "N/D";
+        IncidentValue = "0";
         SessionSummary = "Sin incidentes de sesión";
-        SessionCounts = "Activas: 0 · Desconectadas: 0";
+        SessionCounts = "Sin datos de sesiones";
         SessionCoverage = "Cobertura: No evaluado";
         CriticalIncidents = ErrorIncidents = 0;
         IncidentSummary = "Sin incidentes en la ventana";

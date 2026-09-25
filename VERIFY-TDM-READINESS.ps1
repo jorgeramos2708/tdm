@@ -281,7 +281,7 @@ try {
         Require ($supportVm.Contains('affected / (double)total')) 'La dona operativa no representa únicamente fallas e incertidumbre como tramo afectado.'
         Require ($supportView.Contains('TrackBrush="{Binding ServiceHealthyAccent}"')) 'La dona operativa no conserva el tramo saludable en verde.'
         Require ($supportView.Contains('TrackBrush="{Binding ModuleHealthyAccent}"')) 'La dona modular no conserva el tramo saludable en verde.'
-        Require ($supportVm.Contains('latest.ActiveSessions + latest.DisconnectedSessions')) 'Sesiones no calcula el total observado.'
+        Require ($supportVm.Contains('ActiveSessions + sessionSample.DisconnectedSessions')) 'Sesiones no calcula el total observado.'
         Require ($supportView.Contains('Text="TOTAL OBSERVADAS"')) 'La tarjeta Sesiones no identifica su cifra principal.'
         Require ($supportView.Contains('Foreground="{Binding SessionIncidentAccent}"')) 'Sesiones no separa visualmente total e incidentes.'
         Require ($servicesVm.Contains('DashboardRules.TsplusOperationalStates')) 'Servicios/Dependencias no filtra el subgrafo relevante para TSplus.'

@@ -51,25 +51,32 @@ public partial class TdmHealthDashboardViewModel : ObservableObject
         }
 
         var latest = samples[^1];
-        MonitorMode = latest.MonitorMode;
-        Frequency = latest.MonitorIntervalSeconds > 0 ? $"{latest.MonitorIntervalSeconds} seg" : "N/D";
+        var monitorSample = samples.LastOrDefault(x => !x.MonitorMode.Equals("N/D", StringComparison.OrdinalIgnoreCase) || x.MonitorIntervalSeconds > 0) ?? latest;
+        var cpuSample = samples.LastOrDefault(x => x.TdmCpuPercent.HasValue) ?? latest;
+        var memorySample = samples.LastOrDefault(x => x.TdmWorkingSetMb > 0) ?? latest;
+        var resourceSample = samples.LastOrDefault(x => x.TdmHandleCount > 0 || x.TdmThreadCount > 0) ?? latest;
+        var bytesSample = samples.LastOrDefault(x => x.ObservabilityBytes > 0) ?? latest;
+        var collectorSample = samples.LastOrDefault(x => !x.SlowestCollector.Equals("N/D", StringComparison.Ordinal)) ?? latest;
+        var durationSample = samples.LastOrDefault(x => x.DiagnosticDurationMs > 0) ?? latest;
+        MonitorMode = monitorSample.MonitorMode;
+        Frequency = monitorSample.MonitorIntervalSeconds > 0 ? $"{monitorSample.MonitorIntervalSeconds} seg" : "N/D";
         Samples = samples.Count(x => x.SampleKind.Contains("monitor", StringComparison.OrdinalIgnoreCase)).ToString();
-        Deferred = latest.DeferredSamples.ToString();
-        Timeouts = latest.CollectorTimeouts.ToString();
-        Cpu = latest.TdmCpuPercent.HasValue ? $"{latest.TdmCpuPercent.Value:0.0}%" : "N/D";
+        Deferred = monitorSample.DeferredSamples.ToString();
+        Timeouts = monitorSample.CollectorTimeouts.ToString();
+        Cpu = cpuSample.TdmCpuPercent.HasValue ? $"{cpuSample.TdmCpuPercent.Value:0.0}%" : "N/D";
         var physicalMemoryBytes = samples.LastOrDefault(x => x.MemoryTotalBytes is > 0)?.MemoryTotalBytes;
-        var latestMemoryPercent = TdmMemoryPercent(latest.TdmWorkingSetMb, latest.MemoryTotalBytes ?? physicalMemoryBytes);
+        var latestMemoryPercent = TdmMemoryPercent(memorySample.TdmWorkingSetMb, memorySample.MemoryTotalBytes ?? physicalMemoryBytes);
         CpuWarningThreshold = Math.Clamp(thresholds.TdmCpuWarning, 0d, 100d);
         CpuCriticalThreshold = Math.Clamp(thresholds.TdmCpuCritical, 0d, 100d);
         MemoryWarningThreshold = Math.Clamp(thresholds.TdmMemoryWarningPercent, 0d, 100d);
         MemoryCriticalThreshold = Math.Clamp(thresholds.TdmMemoryCriticalPercent, 0d, 100d);
         Ram = latestMemoryPercent.HasValue ? $"{latestMemoryPercent.Value:0.0}%" : "N/D";
-        Handles = latest.TdmHandleCount.ToString();
-        Threads = latest.TdmThreadCount.ToString();
-        Jsonl = DashboardRules.FormatBytes(latest.ObservabilityBytes);
-        SlowestCollector = latest.SlowestCollector;
-        SlowestCollectorMs = $"{latest.SlowestCollectorMs:0} ms";
-        DiagnosticDuration = $"{latest.DiagnosticDurationMs:0} ms";
+        Handles = resourceSample.TdmHandleCount.ToString();
+        Threads = resourceSample.TdmThreadCount.ToString();
+        Jsonl = DashboardRules.FormatBytes(bytesSample.ObservabilityBytes);
+        SlowestCollector = collectorSample.SlowestCollector;
+        SlowestCollectorMs = $"{collectorSample.SlowestCollectorMs:0} ms";
+        DiagnosticDuration = $"{durationSample.DiagnosticDurationMs:0} ms";
 
         var chartSamples = DashboardRules.ChartSamples(samples);
         DurationSeries = chartSamples.Select(x => x.DiagnosticDurationMs).ToArray();
@@ -82,7 +89,7 @@ public partial class TdmHealthDashboardViewModel : ObservableObject
         DurationMaximum = Math.Max(1000, samples.Max(x => x.DiagnosticDurationMs) * 1.15);
         CpuMemoryMaximum = 100;
         ProcessCountMaximum = Math.Max(50, samples.Max(x => Math.Max(x.TdmHandleCount, x.TdmThreadCount)) * 1.15);
-        _healthFullDetail = BuildHealthDetail(latest, samples, thresholds);
+        _healthFullDetail = BuildHealthDetail(resourceSample, samples, thresholds);
         RefreshVisibleDetail();
     }
 
@@ -102,7 +109,7 @@ public partial class TdmHealthDashboardViewModel : ObservableObject
             DetailText = _healthFullDetail;
     }
 
-    private string BuildHealthDetail(ObservabilitySample latest, IReadOnlyList<ObservabilitySample> samples, SupportThresholds thresholds)
+    private string BuildHealthDetail(ObservabilitySample resourceSample, IReadOnlyList<ObservabilitySample> samples, SupportThresholds thresholds)
     {
         var builder = new StringBuilder();
         builder.Append($"Modo de monitoreo: {MonitorMode} · Frecuencia: {Frequency} · Muestras: {Samples} · Diferidas: {Deferred} · Timeouts: {Timeouts}.");
@@ -113,9 +120,9 @@ public partial class TdmHealthDashboardViewModel : ObservableObject
         builder.Append($" · Memoria TDM: {Ram} (advertencia ≥ {thresholds.TdmMemoryWarningPercent:0.0}%, crítico ≥ {thresholds.TdmMemoryCriticalPercent:0.0}%).");
         builder.AppendLine();
         builder.Append($"Recursos abiertos: {Handles} (advertencia ≥ {thresholds.TdmHandlesWarning}, crítico ≥ {thresholds.TdmHandlesCritical})");
-        builder.Append($" — {StateLabel(latest.TdmHandleCount, thresholds.TdmHandlesWarning, thresholds.TdmHandlesCritical)}.");
+        builder.Append($" — {StateLabel(resourceSample.TdmHandleCount, thresholds.TdmHandlesWarning, thresholds.TdmHandlesCritical)}.");
         builder.Append($" Hilos: {Threads} (advertencia ≥ {thresholds.TdmThreadsWarning}, crítico ≥ {thresholds.TdmThreadsCritical})");
-        builder.Append($" — {StateLabel(latest.TdmThreadCount, thresholds.TdmThreadsWarning, thresholds.TdmThreadsCritical)}.");
+        builder.Append($" — {StateLabel(resourceSample.TdmThreadCount, thresholds.TdmThreadsWarning, thresholds.TdmThreadsCritical)}.");
         if (samples.Count > 0)
         {
             builder.AppendLine();
