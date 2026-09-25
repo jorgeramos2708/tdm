@@ -136,7 +136,6 @@
       <StackPanel Orientation="Horizontal" Spacing="20">
         <TextBlock Text="{Binding FilteredCount, StringFormat='Mostrando {0} de {1} entradas'}" 
                    Foreground="#AFC4D8" FontSize="11"/>
-        <TextBlock Text="Arrastre para seleccionar · Ctrl+C para copiar" Classes="muted" FontSize="10"/>
       </StackPanel>
     </Border>
   </Grid>
