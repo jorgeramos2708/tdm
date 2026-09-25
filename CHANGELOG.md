@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0-rc18.21.0-FIX93] - 2026-09-24
 
+### Fixed — Pestaña Logs (correcciones de interfaz reportadas en pruebas)
+
+- **Filtros "Nivel" y "Sistema"**: ambos ComboBox enlazaban `SelectedItem` directamente con `ComboBoxItem` en XML, por lo que al seleccionar cualquier opción se producía un error de binding al escribir el valor en `LogLevel?`/`LogSourceSystem?`. Ahora se enlazan a opciones tipadas (`LogFilterOption`) mediante `ItemsSource` + `ItemTemplate`, eliminando el mensaje de error.
+- **Logs en tiempo real**: `DiagnosticExecutionService` instanciaba su propio `LogService`, así que los ciclos del diagnóstico (cada 5 s en "Tiempo real") nunca llegaban al observable al que se suscribe la pestaña Logs. Ahora usa la instancia compartida `App.LogService` y la lista avanza durante la ejecución.
+- **Selección inicial de filtros**: ambos filtros arrancan en "Todos" y "Limpiar filtros" restaura "Todos" en lugar de dejar el ComboBox vacío.
+
 ### Sprint 2 — Inteligencia Causal y Simulación What-If
 
 #### S2.1 — Grafo Causal Temporal (`TemporalCausalGraph.cs`)

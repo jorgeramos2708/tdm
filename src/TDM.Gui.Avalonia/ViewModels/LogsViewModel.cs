@@ -84,6 +84,13 @@ public sealed partial class LogEntryViewModel : ObservableObject
 }
 
 /// <summary>
+/// Opción de filtro para los ComboBox de Logs. El ComboBox debe seleccionar el
+/// objeto de opción completo (no un ComboBoxItem) para que el binding TwoWay
+/// funcione sin error de tipo.
+/// </summary>
+public sealed record LogFilterOption(string Label, object? Value, IBrush Brush);
+
+/// <summary>
 /// ViewModel para la pestaña de Logs con filtrado, búsqueda y coloreo dual.
 /// </summary>
 public sealed partial class LogsViewModel : ObservableObject, IDisposable
@@ -94,24 +101,31 @@ public sealed partial class LogsViewModel : ObservableObject, IDisposable
     private readonly ObservableCollection<LogEntryViewModel> _allLogs = [];
     private readonly ObservableCollection<LogEntryViewModel> _filteredLogs = [];
 
-    [ObservableProperty] private LogLevel? _selectedLevelFilter;
-    [ObservableProperty] private LogSourceSystem? _selectedSourceSystemFilter;
+    [ObservableProperty] private LogFilterOption? _selectedLevelFilter;
+    [ObservableProperty] private LogFilterOption? _selectedSourceSystemFilter;
     [ObservableProperty] private string _searchText = string.Empty;
     [ObservableProperty] private bool _autoScroll = true;
     [ObservableProperty] private int _totalCount;
     [ObservableProperty] private int _filteredCount;
     [ObservableProperty] private bool _isLoading;
 
-    public IReadOnlyList<LogLevel> LevelFilterOptions { get; } =
+    public IReadOnlyList<LogFilterOption> LevelFilterOptions { get; } =
     [
-        LogLevel.Critical, LogLevel.Error, LogLevel.Warning,
-        LogLevel.Information, LogLevel.Debug
+        new("Todos", null, DashboardPalette.Muted),
+        new("🔴 Crítico", LogLevel.Critical, DashboardPalette.Danger),
+        new("🟠 Error", LogLevel.Error, DashboardPalette.Error),
+        new("🟡 Advertencia", LogLevel.Warning, DashboardPalette.Warn),
+        new("⚪ Info", LogLevel.Information, DashboardPalette.Info),
+        new("⚫ Debug", LogLevel.Debug, DashboardPalette.Muted)
     ];
 
-    public IReadOnlyList<LogSourceSystem> SourceSystemFilterOptions { get; } =
+    public IReadOnlyList<LogFilterOption> SourceSystemFilterOptions { get; } =
     [
-        LogSourceSystem.TSplus, LogSourceSystem.Windows,
-        LogSourceSystem.Other, LogSourceSystem.Unknown
+        new("Todos", null, DashboardPalette.Muted),
+        new("🟦 TSplus", LogSourceSystem.TSplus, DashboardPalette.Cyan),
+        new("🟪 Windows", LogSourceSystem.Windows, DashboardPalette.Info),
+        new("🟣 Otros", LogSourceSystem.Other, DashboardPalette.Violet),
+        new("❓ Desconocido", LogSourceSystem.Unknown, DashboardPalette.Muted)
     ];
 
     public IReadOnlyList<LogEntryViewModel> FilteredLogs => _filteredLogs;
@@ -159,17 +173,21 @@ public sealed partial class LogsViewModel : ObservableObject, IDisposable
                 _allLogs.RemoveAt(_allLogs.Count - 1);
             }
         };
+
+        // Selección inicial "Todos" para que los ComboBox muestren una etiqueta
+        SelectedLevelFilter = LevelFilterOptions[0];
+        SelectedSourceSystemFilter = SourceSystemFilterOptions[0];
     }
 
     private void UpdateFiltered()
     {
         var query = _allLogs.AsEnumerable();
 
-        if (SelectedLevelFilter.HasValue)
-            query = query.Where(l => l.Level == SelectedLevelFilter.Value);
+        if (SelectedLevelFilter?.Value is LogLevel level)
+            query = query.Where(l => l.Level == level);
 
-        if (SelectedSourceSystemFilter.HasValue)
-            query = query.Where(l => l.SourceSystem == SelectedSourceSystemFilter.Value);
+        if (SelectedSourceSystemFilter?.Value is LogSourceSystem sourceSystem)
+            query = query.Where(l => l.SourceSystem == sourceSystem);
 
         if (!string.IsNullOrWhiteSpace(SearchText))
         {
@@ -201,8 +219,8 @@ public sealed partial class LogsViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ClearFilters()
     {
-        SelectedLevelFilter = null;
-        SelectedSourceSystemFilter = null;
+        SelectedLevelFilter = LevelFilterOptions[0];
+        SelectedSourceSystemFilter = SourceSystemFilterOptions[0];
         SearchText = string.Empty;
     }
 

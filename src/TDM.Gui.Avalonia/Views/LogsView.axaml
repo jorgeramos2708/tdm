@@ -12,25 +12,28 @@
         <!-- Filtro por Nivel (Severidad) -->
         <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
           <TextBlock Text="Nivel:" Classes="muted" VerticalAlignment="Center"/>
-          <ComboBox Width="130" SelectedItem="{Binding SelectedLevelFilter}">
-            <ComboBoxItem Content="Todos" Tag="{x:Null}"/>
-            <ComboBoxItem Content="🔴 Crítico" Tag="{x:Static core:LogLevel.Critical}" Foreground="{x:Static vm:DashboardPalette.Danger}"/>
-            <ComboBoxItem Content="🟠 Error" Tag="{x:Static core:LogLevel.Error}" Foreground="{x:Static vm:DashboardPalette.Error}"/>
-            <ComboBoxItem Content="🟡 Advertencia" Tag="{x:Static core:LogLevel.Warning}" Foreground="{x:Static vm:DashboardPalette.Warn}"/>
-            <ComboBoxItem Content="⚪ Info" Tag="{x:Static core:LogLevel.Information}" Foreground="{x:Static vm:DashboardPalette.Info}"/>
-            <ComboBoxItem Content="⚫ Debug" Tag="{x:Static core:LogLevel.Debug}" Foreground="{x:Static vm:DashboardPalette.Muted}"/>
+          <ComboBox Width="130"
+                    ItemsSource="{Binding LevelFilterOptions}"
+                    SelectedItem="{Binding SelectedLevelFilter}">
+            <ComboBox.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding Label}" Foreground="{Binding Brush}"/>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
           </ComboBox>
         </StackPanel>
 
         <!-- Filtro por Sistema Origen -->
         <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
           <TextBlock Text="Sistema:" Classes="muted" VerticalAlignment="Center"/>
-          <ComboBox Width="150" SelectedItem="{Binding SelectedSourceSystemFilter}">
-            <ComboBoxItem Content="Todos" Tag="{x:Null}"/>
-            <ComboBoxItem Content="🟦 TSplus" Tag="{x:Static core:LogSourceSystem.TSplus}" Foreground="{x:Static vm:DashboardPalette.Cyan}"/>
-            <ComboBoxItem Content="🟪 Windows" Tag="{x:Static core:LogSourceSystem.Windows}" Foreground="{x:Static vm:DashboardPalette.Info}"/>
-            <ComboBoxItem Content="🟣 Otros" Tag="{x:Static core:LogSourceSystem.Other}" Foreground="{x:Static vm:DashboardPalette.Violet}"/>
-            <ComboBoxItem Content="❓ Desconocido" Tag="{x:Static core:LogSourceSystem.Unknown}" Foreground="{x:Static vm:DashboardPalette.Muted}"/>
+          <ComboBox Width="150"
+                    ItemsSource="{Binding SourceSystemFilterOptions}"
+                    SelectedItem="{Binding SelectedSourceSystemFilter}">
+            <ComboBox.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding Label}" Foreground="{Binding Brush}"/>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
           </ComboBox>
         </StackPanel>
 

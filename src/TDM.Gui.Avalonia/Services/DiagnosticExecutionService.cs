@@ -15,7 +15,19 @@ public sealed class DiagnosticExecutionService
 {
     private const string ToolVersion = "1.0.0-rc.18.21.0";
     private readonly CollectorCircuitBreaker _circuitBreaker = new();
-    private readonly LogService _logService = new();
+    // Debe ser la instancia compartida (App.LogService): con una instancia privada
+    // los ciclos del diagnóstico nunca llegaban a la pestaña Logs de la GUI.
+    private readonly LogService _logService;
+
+    public DiagnosticExecutionService()
+        : this(App.LogService)
+    {
+    }
+
+    public DiagnosticExecutionService(LogService? logService)
+    {
+        _logService = logService ?? new LogService();
+    }
 
     public IReadOnlyList<string> LookbackOptions { get; } =
     [
