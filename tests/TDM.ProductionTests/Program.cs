@@ -15,6 +15,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("StoppedTsplusServiceStateIsFunctionalIncident", StoppedTsplusServiceStateIsFunctionalIncident),
     ("StoppedWebPortalIsImpactNotCause", StoppedWebPortalIsImpactNotCause),
     ("RankingConflictEvidenceUsesFinalScores", RankingConflictEvidenceUsesFinalScores),
+    ("DuplicateCandidateIdsRankIndependently", DuplicateCandidateIdsRankIndependently),
     ("TsplusUndatedLogKeepsEventTimeNull", TsplusUndatedLogKeepsEventTimeNull),
     ("TsplusIsoTimestampParses", TsplusIsoTimestampParses),
     ("AmbiguousTsplusDateUsesInvestigationWindow", AmbiguousTsplusDateUsesInvestigationWindow),
@@ -25,6 +26,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("CollectorCursorStoreRoundTrip", CollectorCursorStoreRoundTrip),
     ("DiagnosticFeedbackRoundTrip", DiagnosticFeedbackRoundTrip),
     ("IncidentLedgerSerializesConcurrentWriters", IncidentLedgerSerializesConcurrentWriters),
+    ("LedgerKeepsIdentityClassifiedIncidents", LedgerKeepsIdentityClassifiedIncidents),
     ("DiagnosticEngineKeepsUndatedAsNonCausalContext", DiagnosticEngineKeepsUndatedAsNonCausalContext),
     ("IdentitySubstringDoesNotCorrelate", IdentitySubstringDoesNotCorrelate),
     ("StaleApplicationConfigDoesNotBecomeHighCause", StaleApplicationConfigDoesNotBecomeHighCause),
@@ -36,6 +38,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("WmiDoesNotRaiseCausalSignal", WmiDoesNotRaiseCausalSignal),
     ("ServiceStateDoesNotRaiseCausalSignal", ServiceStateDoesNotRaiseCausalSignal),
     ("ConcurrentIncidentsAreClusteredSeparately", ConcurrentIncidentsAreClusteredSeparately),
+    ("SpanishUserEvidenceSplitsIdentityClusters", SpanishUserEvidenceSplitsIdentityClusters),
     ("ObservabilityClusterIsNotFunctionalCause", ObservabilityClusterIsNotFunctionalCause),
     ("WmiIsNotPersistedAsOperationalIncident", WmiIsNotPersistedAsOperationalIncident),
     ("EventLogCollectorsHandleEventLogException", EventLogCollectorsHandleEventLogException),
@@ -98,6 +101,19 @@ static Task ConcurrentIncidentsAreClusteredSeparately()
     var report = Report([web, ad], now);
     var clusters = IncidentClusterAnalyzer.Analyze(report);
     True(clusters.Count == 2, "Web/HTML5 y AD fueron mezclados en un solo incidente.");
+    return Task.CompletedTask;
+}
+
+static Task SpanishUserEvidenceSplitsIdentityClusters()
+{
+    var now = DateTimeOffset.Now;
+    var alice = new DiagnosticEvent(now, "Netlogon", "Active Directory", DiagnosticLayer.Windows, DiagnosticSeverity.Error,
+        "WINDOWS_AD_DOMAIN_CONNECTIVITY_FAILURE", "Secure channel failed", Evidencia: [new EvidenceItem("Usuario", "alice")]);
+    var bob = new DiagnosticEvent(now.AddSeconds(20), "Netlogon", "Active Directory", DiagnosticLayer.Windows, DiagnosticSeverity.Error,
+        "WINDOWS_AD_DOMAIN_CONNECTIVITY_FAILURE", "Secure channel failed", Evidencia: [new EvidenceItem("Usuario", "bob")]);
+    var report = Report([alice, bob], now);
+    var clusters = IncidentClusterAnalyzer.Analyze(report);
+    True(clusters.Count == 2, "Dos identidades con evidencia 'Usuario' distinta se agruparon en un solo clúster.");
     return Task.CompletedTask;
 }
 
@@ -188,6 +204,25 @@ static Task RankingConflictEvidenceUsesFinalScores()
     var ranking = top.Evidencia.FirstOrDefault(e => e.Clave == "Estado de ranking")?.Valor;
     True(string.Equals(evidence, "No", StringComparison.OrdinalIgnoreCase), "El reporte conserva 'conflicto fuerte' según el estado previo al calibrado.");
     True(ranking?.Contains("EMPATE_TECNICO", StringComparison.OrdinalIgnoreCase) == true, "El ranking no marca empate técnico cuando la brecha es menor a 5 puntos.");
+    return Task.CompletedTask;
+}
+
+static Task DuplicateCandidateIdsRankIndependently()
+{
+    var now = DateTimeOffset.Now;
+    var strong = new RootCauseCandidate(1, "ROOT-PROCESS-CRASH", "tsplus.exe", DiagnosticLayer.Tsplus, 90, ConfidenceLevel.Alta, "Crash A", "explicación", [], Producto: TsplusProduct.RemoteAccess, HoraIncidente: now.AddMinutes(-5), OrigenClasificado: "TSPLUS");
+    var weak = new RootCauseCandidate(2, "ROOT-PROCESS-CRASH", "webportal", DiagnosticLayer.Tsplus, 70, ConfidenceLevel.Media, "Crash B", "explicación", [], Producto: TsplusProduct.RemoteAccess, HoraIncidente: now.AddMinutes(-4), OrigenClasificado: "TSPLUS");
+    var calibrated = DiagnosticPrecisionAnalyzer.Calibrate(Report([], now), [strong, weak]);
+    Equal(2, calibrated.Count, "El calibrador descartó candidatos duplicados.");
+    string Evidence(RootCauseCandidate c, string key) => c.Evidencia.FirstOrDefault(e => e.Clave == key)?.Valor ?? "N/D";
+    var top = calibrated.First(c => c.Posicion == 1);
+    var second = calibrated.First(c => c.Posicion == 2);
+    Equal("0 puntos", Evidence(top, "Diferencia contra mejor candidato causal"), "El candidato top no reporta brecha cero.");
+    True(top.Puntaje > second.Puntaje, "El orden esperado del ranking se invirtió.");
+    Equal($"{top.Puntaje - second.Puntaje} puntos", Evidence(second, "Diferencia contra mejor candidato causal"), "Dos candidatos con el mismo Id compartieron la brecha del ranking.");
+    Equal("CANDIDATO_PRINCIPAL", Evidence(top, "Estado de ranking"), "El candidato top perdió su estado de principal.");
+    Equal("CANDIDATO_SECUNDARIO", Evidence(second, "Estado de ranking"), "El segundo candidato con el mismo Id heredó el estado de principal.");
+    True(calibrated.Count(c => Evidence(c, "Estado de ranking") == "CANDIDATO_PRINCIPAL") == 1, "Más de un candidato se declaró principal.");
     return Task.CompletedTask;
 }
 
@@ -295,6 +330,34 @@ static async Task IncidentLedgerSerializesConcurrentWriters()
         var items = await a.ReadAsync();
         Equal(1, items.Count, "Carrera del ledger creó registros duplicados/corruptos.");
         True(items[0].Occurrences >= 2, "La segunda escritura concurrente no observó la primera.");
+    }
+    finally { TryDelete(root); }
+}
+
+static async Task LedgerKeepsIdentityClassifiedIncidents()
+{
+    var root = TempDir();
+    try
+    {
+        var at = DateTimeOffset.Now;
+        var ledger = new IncidentLedger(root);
+        var identity = new ObservabilityIncident(at, "ACCOUNT_LOCKOUT", "RDP/Auth", "Error",
+            "Bloqueo de cuenta correlacionado con sesión", Product: nameof(TsplusProduct.Ninguno),
+            Classification: "IdentityCorrelated");
+        var written = await ledger.ReconcileAsync([identity], at, SupportMonitoringSettings.Default);
+        Equal(1, written.Count, "El incidente de identidad clasificado no entró al ledger.");
+        True(written[0].Classification == "IdentityCorrelated", "El ledger no conservó la clasificación de identidad.");
+
+        await ledger.AddNoteAsync(written[0].Id, "revisar cuentas");
+        var afterNote = await ledger.ReadAsync();
+        Equal(1, afterNote.Count, "AddNoteAsync borró el incidente de identidad del archivo.");
+        True(afterNote[0].TechnicianNote == "revisar cuentas", "La nota técnica no se persistió.");
+        True(afterNote[0].Classification == "IdentityCorrelated", "La clasificación de identidad se perdió al reescribir.");
+
+        await ledger.CloseAsync(afterNote[0].Id);
+        var afterClose = await ledger.ReadAsync();
+        Equal(1, afterClose.Count, "CloseAsync borró el incidente de identidad del archivo.");
+        True(afterClose[0].State == ManagedIncidentState.Closed, "El incidente de identidad no se cerró.");
     }
     finally { TryDelete(root); }
 }

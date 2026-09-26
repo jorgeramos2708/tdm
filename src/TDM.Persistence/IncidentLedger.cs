@@ -21,7 +21,9 @@ public sealed record ManagedIncident(
     string? Originator,
     int Occurrences,
     string? TechnicianNote = null,
-    string Node = "LOCAL");
+    string Node = "LOCAL",
+    string? Classification = null,
+    string? Product = null);
 
 public sealed class IncidentLedger
 {
@@ -35,7 +37,13 @@ public sealed class IncidentLedger
         Path = System.IO.Path.Combine(root, "incidents", "incident-ledger.jsonl");
     }
 
-    public async Task<IReadOnlyList<ManagedIncident>> ReadAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<ManagedIncident>> ReadAsync(CancellationToken ct = default)
+        => ReadCoreAsync(operationalOnly: true, ct);
+
+    public Task<IReadOnlyList<ManagedIncident>> ReadRawAsync(CancellationToken ct = default)
+        => ReadCoreAsync(operationalOnly: false, ct);
+
+    private async Task<IReadOnlyList<ManagedIncident>> ReadCoreAsync(bool operationalOnly, CancellationToken ct)
     {
         if (!File.Exists(Path)) return [];
         var items = new Dictionary<string, ManagedIncident>(StringComparer.OrdinalIgnoreCase);
@@ -48,7 +56,7 @@ public sealed class IncidentLedger
             try
             {
                 var item = JsonSerializer.Deserialize<ManagedIncident>(line, _json);
-                if (item is not null && IsOperationalManagedIncident(item)) items[item.Id] = item;
+                if (item is not null && (!operationalOnly || IsOperationalManagedIncident(item))) items[item.Id] = item;
             }
             catch (JsonException) { }
         }
@@ -66,7 +74,7 @@ public sealed class IncidentLedger
         await using var processLock = await AcquireInterprocessLockAsync(ct).ConfigureAwait(false);
         try
         {
-        var existing = (await ReadAsync(ct)).ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
+        var existing = (await ReadRawAsync(ct)).ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var cooldown = TimeSpan.FromSeconds(Math.Max(30, settings.Thresholds.IncidentCooldownSeconds));
         // IncidentRecoveryConfirmSamples = muestras consecutivas (~60s c/u) sin el incidente para confirmar recuperación.
@@ -110,7 +118,7 @@ foreach (var item in ObservabilityIncidentPolicy.Normalize(observed).OrderBy(x =
                 {
                     candidate = new ManagedIncident(id, item.Timestamp, item.Timestamp, null, null,
                         ManagedIncidentState.Active, item.Severity, item.Component, item.Kind, item.Summary,
-                        null, null, 1, null, node);
+                        null, null, 1, null, node, item.Classification, item.Product);
                 }
                 else
                 {
@@ -120,6 +128,8 @@ foreach (var item in ObservabilityIncidentPolicy.Normalize(observed).OrderBy(x =
                         State = candidate.Occurrences >= 1 ? ManagedIncidentState.Persistent : ManagedIncidentState.Active,
                         Severity = MaxSeverity(candidate.Severity, item.Severity),
                         Summary = item.Summary,
+                        Classification = item.Classification ?? candidate.Classification,
+                        Product = item.Product ?? candidate.Product,
                         Occurrences = candidate.Occurrences + 1
                     };
                 }
@@ -140,7 +150,7 @@ foreach (var item in ObservabilityIncidentPolicy.Normalize(observed).OrderBy(x =
         }
 
         await AppendSnapshotAsync(existing.Values, ct);
-        return existing.Values.OrderByDescending(x => x.LastSeenAt).ToList();
+        return existing.Values.Where(IsOperationalManagedIncident).OrderByDescending(x => x.LastSeenAt).ToList();
         }
         finally { ProcessGate.Release(); }
     }
@@ -151,7 +161,7 @@ foreach (var item in ObservabilityIncidentPolicy.Normalize(observed).OrderBy(x =
         await using var processLock = await AcquireInterprocessLockAsync(ct).ConfigureAwait(false);
         try
         {
-            var existing = (await ReadAsync(ct)).ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
+            var existing = (await ReadRawAsync(ct)).ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
             if (!existing.TryGetValue(id, out var item)) return;
             existing[id] = item with { TechnicianNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim() };
             await AppendSnapshotAsync(existing.Values, ct);
@@ -165,7 +175,7 @@ foreach (var item in ObservabilityIncidentPolicy.Normalize(observed).OrderBy(x =
         await using var processLock = await AcquireInterprocessLockAsync(ct).ConfigureAwait(false);
         try
         {
-            var existing = (await ReadAsync(ct)).ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
+            var existing = (await ReadRawAsync(ct)).ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
             if (!existing.TryGetValue(id, out var item)) return;
             existing[id] = item with { State = ManagedIncidentState.Closed, ClosedAt = DateTimeOffset.Now };
             await AppendSnapshotAsync(existing.Values, ct);
@@ -219,7 +229,8 @@ foreach (var item in ObservabilityIncidentPolicy.Normalize(observed).OrderBy(x =
 
     private static bool IsOperationalManagedIncident(ManagedIncident item)
         => ObservabilityIncidentPolicy.IsOperationalIncident(
-            item.Kind, item.Component, item.Severity, item.Summary);
+            item.Kind, item.Component, item.Severity, item.Summary,
+            product: item.Product, classification: item.Classification);
 
     private static string Key(string node, string component, string kind) => $"{node}|{component}|{kind}".ToUpperInvariant();
     private static string StableId(string key, DateTimeOffset timestamp)

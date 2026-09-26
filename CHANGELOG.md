@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0-rc18.21.0-FIX93] - 2026-09-24
 
+### Fixed — Fase A de la auditoría senior (4 hallazgos P0)
+
+- **Ledger de incidentes: identidad persistida y sin borrados por reescritura**: `ManagedIncident` ahora conserva `Classification` y `Product` (antes se creaba con `null` y el filtro de `ReadAsync` rechazaba los incidentes de identidad, por lo que `ReconcileAsync`/`AddNoteAsync`/`CloseAsync` los eliminaban del JSONL en la siguiente reescritura). Los rewrites leen ahora con `ReadRawAsync` (todas las filas JSONL válidas) y sólo la lectura pública aplica el filtro de incidentes operativos, ahora pasando clasificación y producto; `ReconcileAsync` devuelve además sólo lo operativo para no exponer filas legadas.
+- **Clústeres de identidad con evidencia en español**: `IncidentClusterAnalyzer.IdentityKey` normalizaba la clave consultada pero no la clave almacenada en la evidencia, así que `Usuario`/`Equipo`/`Servicio` de los collectors nunca se encontraban y señales con usuarios distintos caían en el mismo clúster. Ahora normaliza ambos lados con `EvidenceKeyNormalizer`.
+- **Umbrales de disco aplicados en Rendimiento**: `MainWindowViewModel` llamaba `Performance.ApplyLiveResources(...)` y `Performance.Apply(...)` sin umbrales (siempre los valores por defecto). Ahora pasa `Administration.CurrentThresholds`, igual que Preventivo y Salud TDM; `ApplyLiveResources` quedó como único método público con umbral opcional.
+- **Ranking con candidatos de Id duplicado**: `DiagnosticPrecisionAnalyzer.Calibrate` buscaba la posición por `Id`, así que dos crashes (`ROOT-PROCESS-CRASH`) o una variante `ROOT-SCM-SERVICE-FAILURE-{servicio}` heredaban la brecha y el estado del primero ("0 puntos" y `CANDIDATO_PRINCIPAL` para ambos). El rank ahora se resuelve por instancia, la evidencia primaria independiente de SCM acepta el Id con sufijo (evidencia "Crash posterior cercano") y el marcador `[PRINCIPAL]` de la pestaña Diagnóstico sólo se pinta en la instancia real de la causa principal (`Posicion` + `Id`).
+- **Tests de regresión**: `LedgerKeepsIdentityClassifiedIncidents`, `SpanishUserEvidenceSplitsIdentityClusters`, `DuplicateCandidateIdsRankIndependently` (ProductionTests, 50/50) y `RootCause_PrincipalMarkerOnlyOnPrimaryInstance` (Parity, 31/31).
+
 ### Fixed — Pestaña Logs (correcciones de interfaz reportadas en pruebas)
 
 - **Filtros "Nivel" y "Sistema"**: ambos ComboBox enlazaban `SelectedItem` directamente con `ComboBoxItem` en XML, por lo que al seleccionar cualquier opción se producía un error de binding al escribir el valor en `LogLevel?`/`LogSourceSystem?`. Ahora se enlazan a opciones tipadas (`LogFilterOption`) mediante `ItemsSource` + `ItemTemplate`, eliminando el mensaje de error.

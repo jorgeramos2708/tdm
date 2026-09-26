@@ -614,6 +614,29 @@ internal static class Program
                 "Los acentos de disco no siguen los umbrales configurados.");
         });
 
+        Run("RootCause_PrincipalMarkerOnlyOnPrimaryInstance", () =>
+        {
+            var strong = new RootCauseCandidate(1, "ROOT-PROCESS-CRASH", "tsplus.exe", DiagnosticLayer.Tsplus,
+                90, ConfidenceLevel.Alta, "Crash A", "explicación", [], Producto: TsplusProduct.RemoteAccess,
+                HoraIncidente: now.AddMinutes(-3), OrigenClasificado: "TSPLUS");
+            var twin = new RootCauseCandidate(2, "ROOT-PROCESS-CRASH", "webportal", DiagnosticLayer.Tsplus,
+                70, ConfidenceLevel.Media, "Crash B", "explicación", [], Producto: TsplusProduct.RemoteAccess,
+                HoraIncidente: now.AddMinutes(-1), OrigenClasificado: "TSPLUS");
+            var snapshot = new SystemSnapshot(
+                "EQUIPO-PRUEBA", "Windows", "11", "22631", "x64", TimeSpan.FromHours(4), now,
+                TsplusDetectado: true, TsplusRuta: null, TsplusVersion: "prueba");
+            var report = new DiagnosticReport(snapshot, [], [], now.AddSeconds(-1), now)
+            {
+                CausasRaiz = [strong, twin],
+                CausaRaizPrincipal = strong
+            };
+            var text = DiagnosticWorkspaceViewModel.BuildRootCause(report);
+            var markers = text.Split("[PRINCIPAL] Posición:").Length - 1;
+            Equal(1, markers);
+            True(text.Contains("[PRINCIPAL] Causa principal:", StringComparison.Ordinal),
+                "El encabezado de la causa principal desapareció.");
+        });
+
         Run("EmptySample_Reset", () =>
         {
             var support = new SupportDashboardViewModel(); support.Apply(Array.Empty<ObservabilitySample>()); Equal("N/D", support.ServiceValue);

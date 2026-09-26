@@ -695,7 +695,7 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
     private static string? EventEvidence(DiagnosticEvent e, string key)
         => e.Evidencia?.FirstOrDefault(x => x.Clave.Equals(key, StringComparison.OrdinalIgnoreCase))?.Valor;
 
-    private static string BuildRootCause(DiagnosticReport report)
+    public static string BuildRootCause(DiagnosticReport report)
     {
         if (report.CausasRaiz.Count == 0)
             return "No existe evidencia suficiente para proponer una causa raíz con el criterio actual.";
@@ -717,7 +717,11 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
         var shown = report.CausasRaiz.Take(8).ToList();
         foreach (var cause in shown)
         {
-            var marker = primary is not null && cause.Id == primary.Id ? "[PRINCIPAL] " : string.Empty;
+            var marker = primary is not null
+                         && cause.Posicion == primary.Posicion
+                         && cause.Id.Equals(primary.Id, StringComparison.OrdinalIgnoreCase)
+                ? "[PRINCIPAL] "
+                : string.Empty;
             sb.AppendLine($"{marker}Posición: {cause.Posicion} | Componente: {cause.Componente} | Puntaje: {cause.Puntaje} | Confianza: {cause.Confianza} | Origen: {cause.OrigenClasificado} | Capa: {cause.Capa} | Rol: {cause.RolCausal}");
             if (cause.HoraIncidente.HasValue)
                 sb.AppendLine($"Hora del incidente: {cause.HoraIncidente.Value.ToLocalTime():dd/MM HH:mm:ss}");

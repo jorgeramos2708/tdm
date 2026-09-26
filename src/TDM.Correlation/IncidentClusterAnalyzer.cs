@@ -183,9 +183,12 @@ public static class IncidentClusterAnalyzer
     {
         string? Value(string key)
         {
-            // P1-01: normaliza la clave antes de buscar
-            var normalizedKey = EvidenceKeyNormalizer.TryGetValue(key, out var nk) ? nk : key;
-            return e.Evidencia?.FirstOrDefault(x => x.Clave.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))?.Valor;
+            var lookup = EvidenceKeyNormalizer.TryGetValue(key, out var nk) ? nk : key;
+            return e.Evidencia?.FirstOrDefault(x =>
+            {
+                var stored = EvidenceKeyNormalizer.TryGetValue(x.Clave, out var sk) ? sk : x.Clave;
+                return stored.Equals(lookup, StringComparison.OrdinalIgnoreCase);
+            })?.Valor;
         }
         var parts = new[]
         {

@@ -100,7 +100,7 @@ public static class DiagnosticPrecisionAnalyzer
             .Select((x, index) =>
             {
                 var evidence = x.Evidencia.ToList();
-                var sameCauseRank = causalRanking.FindIndex(c => c.Id.Equals(x.Id, StringComparison.OrdinalIgnoreCase));
+                var sameCauseRank = causalRanking.FindIndex(c => ReferenceEquals(c, x));
                 var gap = sameCauseRank < 0 || sameCauseRank == 0 ? 0 : causalRanking[0].Puntaje - x.Puntaje;
                 var rankState = sameCauseRank == 0 && !uniqueMargin
                     ? "EMPATE_TECNICO / HIPÓTESIS_COMPETITIVAS"
@@ -292,8 +292,9 @@ public static class DiagnosticPrecisionAnalyzer
                 || (hasShellGap && EvidenceValue(candidate, "Anomalía Winlogon/Userinit").Equals("Sí", StringComparison.OrdinalIgnoreCase));
         }
 
-        if (candidate.Id == "ROOT-SCM-SERVICE-FAILURE")
-            return EvidenceValue(candidate, "Crash posterior del mismo producto").Equals("Sí", StringComparison.OrdinalIgnoreCase);
+        if (candidate.Id.StartsWith("ROOT-SCM-SERVICE-FAILURE", StringComparison.OrdinalIgnoreCase))
+            return EvidenceValue(candidate, "Crash posterior del mismo producto").Equals("Sí", StringComparison.OrdinalIgnoreCase)
+                || EvidenceValue(candidate, "Crash posterior cercano").Equals("Sí", StringComparison.OrdinalIgnoreCase);
 
         if (candidate.Id.StartsWith("ROOT-SERVICE-DEPENDENCY-", StringComparison.OrdinalIgnoreCase))
             return !EvidenceValue(candidate, "Falla SCM del mismo servicio/dependencia").Equals("No observada", StringComparison.OrdinalIgnoreCase);

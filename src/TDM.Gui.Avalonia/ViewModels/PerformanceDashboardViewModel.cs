@@ -104,11 +104,9 @@ public partial class PerformanceDashboardViewModel : ObservableObject
             Disks = disks;
     }
 
-    public void ApplyLiveResources(LightweightProcessDiskSnapshot? liveResources)
-        => ApplyLiveResources(liveResources, SupportMonitoringSettings.Default.Thresholds);
-
-    private void ApplyLiveResources(LightweightProcessDiskSnapshot? liveResources, SupportThresholds thresholds)
+    public void ApplyLiveResources(LightweightProcessDiskSnapshot? liveResources, SupportThresholds? thresholds = null)
     {
+        thresholds ??= SupportMonitoringSettings.Default.Thresholds;
         if (liveResources is { Processes.Count: > 0 })
         {
             TopProcesses = liveResources.Processes

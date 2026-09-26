@@ -106,13 +106,13 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             // Las tarjetas de procesos/discos no dependen del diagnóstico ni del store de telemetría.
             // Se refrescan primero para mantener su ciclo de 5 s incluso si la lectura histórica falla.
             var liveResources = await _liveResources.ReadAsync(_lifetime.Token);
-            Performance.ApplyLiveResources(liveResources);
+            Performance.ApplyLiveResources(liveResources, Administration.CurrentThresholds);
 
             var result = await _telemetry.ReadAsync(SelectedPeriod, _lifetime.Token);
             Support.Apply(result.Samples);
             MultiServer.Apply(result.CoordinatorName, result.FederationStatuses);
             General.Apply(result.Samples);
-            Performance.Apply(result.Samples, liveResources);
+            Performance.Apply(result.Samples, liveResources, Administration.CurrentThresholds);
             Tsplus.Apply(result.Samples);
             Services.Apply(result.Samples);
             Sessions.Apply(result.Samples);
