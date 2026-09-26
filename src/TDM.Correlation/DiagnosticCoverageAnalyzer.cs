@@ -163,7 +163,8 @@ public static class DiagnosticCoverageAnalyzer
 
     private static void AddTsplusLogs(DiagnosticReport report, List<CoverageSourceAssessment> sources, List<string> limitations)
     {
-        var e = report.Eventos.LastOrDefault(x => x.Tipo == "TSPLUS_LOG_COVERAGE");
+        var e = report.Eventos.LastOrDefault(x => x.Tipo == "TSPLUS_INCREMENTAL_LOG_COVERAGE")
+                 ?? report.Eventos.LastOrDefault(x => x.Tipo == "TSPLUS_LOG_COVERAGE");
         if (e is null)
         {
             sources.Add(new("Logs TSplus Remote Access", "No disponible", "No se generó el estado de cobertura de logs Remote Access.", true));
@@ -172,8 +173,19 @@ public static class DiagnosticCoverageAnalyzer
         }
         static int IntEvidence(DiagnosticEvent ev, string key)
             => int.TryParse(ev.Evidencia?.FirstOrDefault(x => x.Clave.Equals(key, StringComparison.OrdinalIgnoreCase))?.Valor, out var value) ? value : 0;
-        var available = IntEvidence(e, "Fuentes Remote Access disponibles");
-        var total = IntEvidence(e, "Fuentes Remote Access conocidas/detectadas");
+        int available;
+        int total;
+        if (e.Tipo.Equals("TSPLUS_INCREMENTAL_LOG_COVERAGE", StringComparison.OrdinalIgnoreCase))
+        {
+            var candidates = IntEvidence(e, "Fuentes candidatas");
+            available = Math.Max(0, candidates - IntEvidence(e, "Fuentes no evaluadas"));
+            total = candidates;
+        }
+        else
+        {
+            available = IntEvidence(e, "Fuentes Remote Access disponibles");
+            total = IntEvidence(e, "Fuentes Remote Access conocidas/detectadas");
+        }
         var declared = e.Evidencia?.FirstOrDefault(x => x.Clave.Equals("Cobertura", StringComparison.OrdinalIgnoreCase))?.Valor ?? "Parcial";
         var readFailures = report.Eventos.Count(x => x.Tipo is "LOG_ACCESS_DENIED" or "LOG_READ_ERROR" or "TSPLUS_INCREMENTAL_SOURCE_UNAVAILABLE");
         var discoveryPartial = declared.Contains("Parcial", StringComparison.OrdinalIgnoreCase) || declared.Contains("No evalu", StringComparison.OrdinalIgnoreCase);

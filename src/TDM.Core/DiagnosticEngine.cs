@@ -293,7 +293,7 @@ public sealed class DiagnosticEngine
                 if (!string.IsNullOrWhiteSpace(reportId) && !werIds.Add(reportId)) continue;
             }
 
-            var key = EventIdentity(e);
+            var key = DiagnosticEventIdentity.Resolve(e);
             if (key is not null && duplicateIndex.TryGetValue(key, out var existingIndex))
             {
                 var existing = output[existingIndex];
@@ -307,33 +307,6 @@ public sealed class DiagnosticEngine
         return output;
     }
 
-    private static string? EventIdentity(DiagnosticEvent e)
-    {
-        // La deduplicación temporal exige EventTime real. Evidencia sin fecha no se
-        // colapsa ni se vuelve causal mediante IngestedAt.
-        var effective = e.Timestamp;
-        if (!effective.HasValue || IsSnapshotType(e.Tipo)) return null;
-
-        // Preferir identificadores nativos evita colapsar eventos legítimos que ocurren
-        // en el mismo segundo con el mismo mensaje. La heurística temporal queda sólo
-        // como fallback para fuentes que no exponen RecordId/ReportId.
-        var reportId = EvidenceValue(e, "Report ID", "ReportId");
-        if (!string.IsNullOrWhiteSpace(reportId) && !reportId.Equals("N/D", StringComparison.OrdinalIgnoreCase))
-            return $"WER|{reportId}";
-
-        var recordId = EvidenceValue(e, "RecordId", "Record ID", "EventRecordId");
-        if (!string.IsNullOrWhiteSpace(recordId) && !recordId.Equals("N/D", StringComparison.OrdinalIgnoreCase))
-        {
-            var channel = EvidenceValue(e, "Log", "Canal", "Channel") ?? string.Empty;
-            return $"EVT|{channel}|{e.Fuente}|{e.Codigo}|{recordId}";
-        }
-
-        var ts = effective.Value.ToUniversalTime();
-        var rounded = new DateTimeOffset(ts.Year, ts.Month, ts.Day, ts.Hour, ts.Minute, ts.Second, TimeSpan.Zero);
-        var message = NormalizeMessage(e.Mensaje);
-        return $"FALLBACK|{rounded:O}|{e.Fuente}|{e.Codigo}|{message}";
-    }
-
     private static DateTimeOffset OrderingTime(DiagnosticEvent e)
         => e.Timestamp ?? e.IngestedAt ?? DateTimeOffset.MinValue;
 
@@ -342,9 +315,6 @@ public sealed class DiagnosticEngine
            && (e.IngestedAt.HasValue || e.Tipo == "UNDATED_LOG_EVIDENCE")
            && !DiagnosticEventCatalog.IsFunctionalIncident(e);
 
-    private static string? EvidenceValue(DiagnosticEvent e, params string[] keys)
-        => EvidenceReader.Value(e, keys);
-
     private static int Specificity(DiagnosticEvent e)
     {
         var score = e.Evidencia?.Count ?? 0;
@@ -352,28 +322,5 @@ public sealed class DiagnosticEngine
         if (e.Tipo is not "WINDOWS_EVENT" and not "WINDOWS_FORENSIC_EVENT") score += 10;
         if (e.Tipo is "APPLICATION_CRASH" or "DOTNET_UNHANDLED_EXCEPTION" or "SERVICE_TERMINATION" or "SERVICE_START_FAILURE") score += 8;
         return score;
-    }
-
-    private static bool IsSnapshotType(string type) => DiagnosticEventCatalog.IsSnapshot(type);
-
-    private static string NormalizeMessage(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
-        var sb = new System.Text.StringBuilder(value.Length);
-        var previousWhitespace = false;
-        foreach (var ch in value)
-        {
-            if (char.IsWhiteSpace(ch))
-            {
-                if (!previousWhitespace) sb.Append(' ');
-                previousWhitespace = true;
-            }
-            else
-            {
-                sb.Append(char.ToUpperInvariant(ch));
-                previousWhitespace = false;
-            }
-        }
-        return sb.ToString().Trim();
     }
 }

@@ -9,6 +9,11 @@ namespace TDM.Core;
 /// </summary>
 public static class ContinuousDiagnosticMerger
 {
+    public static bool ShouldContinue(DiagnosticReport? baseline, TimeSpan lookback, DateTimeOffset now)
+        => baseline is not null
+           && baseline.PeriodoAnalizadoInicio != default
+           && baseline.PeriodoAnalizadoInicio <= now - lookback;
+
     public static DiagnosticReport Merge(
         DiagnosticReport baseline,
         DiagnosticReport incremental,
@@ -37,12 +42,13 @@ public static class ContinuousDiagnosticMerger
             .TakeLast(12_000)
             .ToList();
 
-        // Hallazgos fechados salen de la ventana móvil. Los hallazgos que representan
-        // estado actual se reemplazan por la muestra nueva; si la condición se recuperó,
-        // desaparecen en lugar de quedar pegados al diagnóstico continuo.
+        // Sólo se arrastran hallazgos de las fuentes sustituidas por collectors
+        // incrementales (Event Log y logs TSplus): no se regeneran cada ciclo.
+        // Los hallazgos de estado actual se recalculan en la muestra nueva y no
+        // deben sobrevivir si la condición ya se recuperó.
         var findings = baseline.Hallazgos
             .Where(f => DiagnosticTimeWindow.IsFindingInside(f, start, end))
-            .Where(f => !IsCurrentStateFinding(f))
+            .Where(IsContinuousFinding)
             .Concat(incremental.Hallazgos)
             .GroupBy(FindingIdentity, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.Last())
@@ -50,9 +56,8 @@ public static class ContinuousDiagnosticMerger
             .Take(4_000)
             .ToList();
 
-        return baseline with
+        return incremental with
         {
-            Sistema = incremental.Sistema,
             Hallazgos = findings,
             Eventos = events,
             Fin = end,
@@ -97,31 +102,28 @@ public static class ContinuousDiagnosticMerger
         return string.Join("|", parts);
     }
 
-    private static bool IsCurrentStateFinding(DiagnosticFinding f)
-        => f.Id.StartsWith("SVC-", StringComparison.OrdinalIgnoreCase)
-           || f.Id.StartsWith("MONITOR-RDP-", StringComparison.OrdinalIgnoreCase)
-           || f.Id.StartsWith("RESOURCE-TREND-", StringComparison.OrdinalIgnoreCase);
+    private static bool IsContinuousFinding(DiagnosticFinding f)
+        => (f.Id.StartsWith("EVT-", StringComparison.OrdinalIgnoreCase)
+            && !f.Id.EndsWith("-ACCESS", StringComparison.OrdinalIgnoreCase)
+            && !f.Id.EndsWith("-READ", StringComparison.OrdinalIgnoreCase))
+           || f.Id.StartsWith("LIVE-EVT-", StringComparison.OrdinalIgnoreCase)
+           || f.Id.StartsWith("TSLOG-", StringComparison.OrdinalIgnoreCase)
+           || f.Id.StartsWith("LIVE-TSLOG-", StringComparison.OrdinalIgnoreCase);
 
     private static string FindingIdentity(DiagnosticFinding f)
         => $"{f.Id}|{f.Componente}|{f.Capa}";
 
     private static string EventIdentity(DiagnosticEvent e)
     {
-        var nativeId = EvidenceValue(e, "RecordId")
-                       ?? EvidenceValue(e, "EventRecordId")
-                       ?? EvidenceValue(e, "ReportId");
-        if (!string.IsNullOrWhiteSpace(nativeId))
-            return $"native|{e.Fuente}|{e.Tipo}|{nativeId}";
+        var resolved = DiagnosticEventIdentity.Resolve(e);
+        if (resolved is not null) return resolved;
 
         if (IsCurrentStateEvent(e))
             return $"state|{e.Tipo}|{e.Componente}|{e.Producto}|{CurrentStateSubIdentity(e)}";
 
         var timestamp = e.Timestamp?.ToUniversalTime().Ticks.ToString() ?? "sin-fecha";
-        return $"event|{timestamp}|{e.Fuente}|{e.Tipo}|{e.Codigo}|{e.Componente}|{e.Archivo}|{e.Linea}|{e.Mensaje}";
+        return $"event|{timestamp}|{e.Fuente}|{e.Tipo}|{e.Codigo}|{e.Componente}|{e.Archivo}|{e.Mensaje}";
     }
-
-    private static string? EvidenceValue(DiagnosticEvent e, string key)
-        => EvidenceReader.Value(e, key);
 
     private static DateTimeOffset ResolveEnd(DiagnosticReport report)
     {

@@ -14,7 +14,12 @@ public sealed record BaselineSaveResult(bool Success, string Message);
 public sealed class DiagnosticExecutionService
 {
     private const string ToolVersion = "1.0.0-rc.18.21.0";
+    private const int ContinuousSampleIntervalSeconds = 5;
     private readonly CollectorCircuitBreaker _circuitBreaker = new();
+    private readonly IncrementalWindowsEventCollector _windowsIncremental = new();
+    private readonly IncrementalTsplusLogCollector _tsplusIncremental = new();
+    private DiagnosticReport? _continuousBaseline;
+    private int _continuousSamples;
     // Debe ser la instancia compartida (App.LogService): con una instancia privada
     // los ciclos del diagnóstico nunca llegaban a la pestaña Logs de la GUI.
     private readonly LogService _logService;
@@ -72,11 +77,36 @@ public async Task<DiagnosticReport> RunAsync(string period, CancellationToken ct
     };
 
     var context = new DiagnosticContext(snapshot, lookback, TsplusProfile: tsplusProfile, Options: options);
-    var engine = new DiagnosticEngine(CollectorCatalog.CreateFull(), DiagnosticExecutionPolicy.ForLookback(lookback), _circuitBreaker);
+    var continuous = ContinuousDiagnosticMerger.ShouldContinue(_continuousBaseline, lookback, DateTimeOffset.Now);
+    if (!continuous)
+    {
+        _windowsIncremental.Prime();
+        _tsplusIncremental.Prime(snapshot.TsplusRuta);
+        _continuousSamples = 0;
+    }
+    var collectors = continuous
+        ? CollectorCatalog.CreateContinuous(_windowsIncremental, _tsplusIncremental)
+        : CollectorCatalog.CreateFull();
+    var engine = new DiagnosticEngine(collectors, DiagnosticExecutionPolicy.ForLookback(lookback), _circuitBreaker);
 
     _logService.Write(LogLevel.Information, "DIAGNOSTIC", "Engine", "Ejecutando motor de diagnóstico");
     var report = await engine.RunAsync(context, ct).ConfigureAwait(false);
     _logService.Write(LogLevel.Information, "DIAGNOSTIC", "Engine", $"Diagnóstico completado: {report.Hallazgos.Count} hallazgos, {report.Eventos.Count} eventos");
+
+    if (continuous && _continuousBaseline is not null)
+    {
+        report = ContinuousDiagnosticMerger.Merge(_continuousBaseline, report, lookback);
+        _logService.Write(LogLevel.Information, "DIAGNOSTIC", "Engine", $"Fusión continua aplicada: ventana {lookback.TotalMinutes} min, {report.Eventos.Count} eventos consolidados");
+    }
+    _continuousSamples++;
+    report = report with
+    {
+        DiagnosticoContinuo = continuous,
+        UltimaActualizacionContinua = continuous ? DateTimeOffset.Now : null,
+        IntervaloContinuoSegundos = ContinuousSampleIntervalSeconds,
+        MuestrasContinuas = _continuousSamples
+    };
+    _continuousBaseline = report;
 
     // FIX42: el journal histórico se incorpora ANTES de correlacionar causas. De esta forma
     // un cambio de servicio/configuración/archivo observado por TDM puede correlacionarse

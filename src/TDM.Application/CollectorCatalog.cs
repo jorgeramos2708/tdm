@@ -13,7 +13,16 @@ namespace TDM.Application;
 /// </summary>
 public static class CollectorCatalog
 {
-    public static IReadOnlyList<IReadOnlyCollector> CreateFull() =>
+    public static IReadOnlyList<IReadOnlyCollector> CreateFull() => Build(null, null);
+
+    public static IReadOnlyList<IReadOnlyCollector> CreateContinuous(IReadOnlyCollector windowsEvents, IReadOnlyCollector tsplusLogs)
+    {
+        ArgumentNullException.ThrowIfNull(windowsEvents);
+        ArgumentNullException.ThrowIfNull(tsplusLogs);
+        return Build(windowsEvents, tsplusLogs);
+    }
+
+    private static IReadOnlyList<IReadOnlyCollector> Build(IReadOnlyCollector? windowsEvents, IReadOnlyCollector? tsplusLogs) =>
     [
         // Primero: estado funcional y evidencia causal primaria de Windows/TSplus.
         // Así una ventana de 72 h no pierde las fuentes críticas si se agota el presupuesto global.
@@ -31,7 +40,7 @@ public static class CollectorCatalog
         new RdpEventCollector(),
         new WindowsLogonHealthCollector(),
         new UserSessionProfileCollector(),
-        new WindowsEventCollector(),
+        windowsEvents ?? new WindowsEventCollector(),
         new WindowsPushEventCollector(),
         new RdpEtwCollector(),
         new WindowsLogIntegrityCollector(),
@@ -39,7 +48,7 @@ public static class CollectorCatalog
         new WindowsChangeEventCollector(),
         new CrashEventCollector(),
         new DependencyLoadEventCollector(),
-        new TsplusLogCollector(),
+        tsplusLogs ?? new TsplusLogCollector(),
         new TwoFactorHealthCollector(),
         new AdvancedSecurityModuleHealthCollector(),
         new TsplusDeepInstallationCollector(),

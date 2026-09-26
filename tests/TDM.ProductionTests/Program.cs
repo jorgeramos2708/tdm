@@ -70,7 +70,12 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("FlappingThresholdHonorsConfiguredOptions", FlappingThresholdHonorsConfiguredOptions),
     ("EwmaAnomaliesSurfaceAsReportFindings", EwmaAnomaliesSurfaceAsReportFindings),
     ("WindowsEventCollectorHonorsMaxEventsOption", WindowsEventCollectorHonorsMaxEventsOption),
-    ("TestsRunUnderPinnedInvariantCulture", TestsRunUnderPinnedInvariantCulture)
+    ("TestsRunUnderPinnedInvariantCulture", TestsRunUnderPinnedInvariantCulture),
+    ("ContinuousMergerKeepsWindowStateAndAnchoredEvents", ContinuousMergerKeepsWindowStateAndAnchoredEvents),
+    ("ContinuousRunReplansSeedWhenWindowGrows", ContinuousRunReplansSeedWhenWindowGrows),
+    ("ContinuousCatalogSwapsHeavySourcesForIncremental", ContinuousCatalogSwapsHeavySourcesForIncremental),
+    ("TsplusCoverageAcceptsIncrementalSource", TsplusCoverageAcceptsIncrementalSource),
+    ("GuiRealtimeWiresIncrementalContinuousDiagnostics", GuiRealtimeWiresIncrementalContinuousDiagnostics)
 };
 
 var failed = 0;
@@ -880,6 +885,188 @@ static Task TestsRunUnderPinnedInvariantCulture()
         "La cultura por defecto de los hilos no quedó fijada a InvariantCulture.");
     True(ReferenceEquals(Thread.CurrentThread.CurrentCulture, CultureInfo.InvariantCulture),
         "El hilo principal no corre con InvariantCulture.");
+    return Task.CompletedTask;
+}
+
+static Task ContinuousMergerKeepsWindowStateAndAnchoredEvents()
+{
+    var now = DateTimeOffset.Now;
+    var staleEvent = new DiagnosticEvent(now.AddMinutes(-30), "Service Control Manager", "svcA", DiagnosticLayer.Windows,
+        DiagnosticSeverity.Error, "SERVICE_START_FAILURE", "fallo de arranque", "7000",
+        Evidencia: [new EvidenceItem("Log", "System"), new EvidenceItem("RecordId", "111")]);
+    var keptEvent = new DiagnosticEvent(now.AddMinutes(-5), "Service Control Manager", "svcA", DiagnosticLayer.Windows,
+        DiagnosticSeverity.Error, "SERVICE_START_FAILURE", "fallo de arranque", "7000",
+        Evidencia: [new EvidenceItem("Log", "System"), new EvidenceItem("RecordId", "222")]);
+    var stateDown = new DiagnosticEvent(now.AddMinutes(-4), "Service Control Manager", "TermService", DiagnosticLayer.Windows,
+        DiagnosticSeverity.Critico, "SERVICE_STATE", "Stopped", "stopped",
+        Evidencia: [new EvidenceItem("Servicio", "TermService"), new EvidenceItem("Estado", "Stopped")]);
+    var carriedFinding = new DiagnosticFinding("EVT-System-222", "Service Control Manager", DiagnosticSeverity.Error,
+        "Evento relevante detectado: ID 7034", "fallo de arranque",
+        [new EvidenceItem("Fecha", now.AddMinutes(-5).ToString("O"))], ConfidenceLevel.Media, Capa: DiagnosticLayer.Windows);
+    var accessFinding = new DiagnosticFinding("EVT-System-ACCESS", "Event Log", DiagnosticSeverity.Advertencia,
+        "No fue posible leer el registro System.", "sin acceso",
+        [new EvidenceItem("Log", "System"), new EvidenceItem("Fecha", now.AddMinutes(-5).ToString("O"))],
+        ConfidenceLevel.Alta, Capa: DiagnosticLayer.Windows);
+    var stateFinding = new DiagnosticFinding("SVC-TERMSERVICE-DOWN", "TermService", DiagnosticSeverity.Critico,
+        "Servicio detenido", "estado", [], ConfidenceLevel.Alta, Capa: DiagnosticLayer.Windows);
+    var tslogFinding = new DiagnosticFinding("TSLOG-APPSVC-ERROR", "AppSvc", DiagnosticSeverity.Error,
+        "Errores en log", "detalle",
+        [new EvidenceItem("Último registro", now.AddMinutes(-3).ToString("O"))], ConfidenceLevel.Media, Capa: DiagnosticLayer.Tsplus);
+
+    var baseline = new DiagnosticReport(Snapshot(), [carriedFinding, accessFinding, stateFinding, tslogFinding],
+        [staleEvent, keptEvent, stateDown], now.AddMinutes(-10), now.AddMinutes(-1))
+    {
+        PeriodoAnalizadoInicio = now.AddMinutes(-16),
+        PeriodoAnalizadoFin = now.AddMinutes(-1)
+    };
+
+    var incomingSameRecord = new DiagnosticEvent(now.AddMinutes(-5), "Service Control Manager", "svcA", DiagnosticLayer.Windows,
+        DiagnosticSeverity.Error, "WINDOWS_EVENT", "fallo de arranque", "7000",
+        Evidencia: [new EvidenceItem("Log", "System"), new EvidenceItem("RecordId", "222")]);
+    var newEvent = new DiagnosticEvent(now.AddMinutes(-1), "Service Control Manager", "svcB", DiagnosticLayer.Windows,
+        DiagnosticSeverity.Error, "SERVICE_START_FAILURE", "fallo de arranque", "7000",
+        Evidencia: [new EvidenceItem("Log", "System"), new EvidenceItem("RecordId", "333")]);
+    var stateUp = new DiagnosticEvent(now, "Service Control Manager", "TermService", DiagnosticLayer.Windows,
+        DiagnosticSeverity.Informativo, "SERVICE_STATE", "Running", "running",
+        Evidencia: [new EvidenceItem("Servicio", "TermService"), new EvidenceItem("Estado", "Running")]);
+    var liveFinding = new DiagnosticFinding("LIVE-EVT-System-999", "Service Control Manager", DiagnosticSeverity.Error,
+        "Nueva evidencia durante el diagnóstico continuo", "detalle",
+        [new EvidenceItem("Fecha", now.ToString("O"))], ConfidenceLevel.Media, Capa: DiagnosticLayer.Windows);
+
+    var incremental = new DiagnosticReport(Snapshot(), [liveFinding], [incomingSameRecord, newEvent, stateUp],
+        now.AddMinutes(-1), now)
+    {
+        PeriodoAnalizadoInicio = now.AddMinutes(-15),
+        PeriodoAnalizadoFin = now
+    };
+
+    var merged = ContinuousDiagnosticMerger.Merge(baseline, incremental, TimeSpan.FromMinutes(15));
+
+    Equal(now.AddMinutes(-15), merged.PeriodoAnalizadoInicio,
+        "La ventana móvil no se ancló al final de la muestra incremental.");
+    Equal(1, merged.Eventos.Count(e => EvidenceReader.Value(e, "RecordId") == "222"),
+        "El evento repetido por RecordId entre muestra completa e incremental no colapsó a uno solo.");
+    True(merged.Eventos.Any(e => e.Tipo == "WINDOWS_EVENT" && EvidenceReader.Value(e, "RecordId") == "222"),
+        "La muestra incremental no prevaleció sobre la lectura completa del mismo registro.");
+    False(merged.Eventos.Any(e => EvidenceReader.Value(e, "RecordId") == "111"),
+        "Un evento fuera de la ventana móvil sobrevivió a la fusión.");
+    True(merged.Eventos.Any(e => EvidenceReader.Value(e, "RecordId") == "333"),
+        "El evento nuevo de la muestra incremental se perdió.");
+    var states = merged.Eventos.Where(e => e.Tipo == "SERVICE_STATE" && e.Componente == "TermService").ToList();
+    True(states.Count == 1 && states[0].Mensaje == "Running",
+        "El estado recuperado no reemplazó al estado detenido anterior.");
+    True(merged.Hallazgos.Any(f => f.Id == "EVT-System-222"),
+        "El hallazgo anclado a la ventana dejó de arrastrarse.");
+    True(merged.Hallazgos.Any(f => f.Id == "TSLOG-APPSVC-ERROR"),
+        "El hallazgo de logs TSplus del catálogo completo dejó de arrastrarse.");
+    True(merged.Hallazgos.Any(f => f.Id == "LIVE-EVT-System-999"),
+        "El hallazgo nuevo de la muestra incremental se perdió.");
+    False(merged.Hallazgos.Any(f => f.Id == "EVT-System-ACCESS"),
+        "El hallazgo de acceso al canal se arrastró aunque la fuente ya no corre en modo continuo.");
+    False(merged.Hallazgos.Any(f => f.Id == "SVC-TERMSERVICE-DOWN"),
+        "Un hallazgo de estado sobrevivió a la recuperación del servicio.");
+    return Task.CompletedTask;
+}
+
+static Task ContinuousRunReplansSeedWhenWindowGrows()
+{
+    var now = DateTimeOffset.Now;
+    False(ContinuousDiagnosticMerger.ShouldContinue(null, TimeSpan.FromMinutes(15), now),
+        "Sin línea base el ciclo debe re-sembrar con el catálogo completo.");
+    var baseline = new DiagnosticReport(Snapshot(), [], [], now.AddMinutes(-10), now.AddMinutes(-1))
+    {
+        PeriodoAnalizadoInicio = now.AddMinutes(-16)
+    };
+    True(ContinuousDiagnosticMerger.ShouldContinue(baseline, TimeSpan.FromMinutes(15), now),
+        "Con la misma ventana el ciclo debe continuar en modo incremental.");
+    True(ContinuousDiagnosticMerger.ShouldContinue(baseline, TimeSpan.FromMinutes(5), now),
+        "Reducir la ventana no debe obligar a re-sembrar.");
+    False(ContinuousDiagnosticMerger.ShouldContinue(baseline, TimeSpan.FromHours(4), now),
+        "Ampliar la ventana debe re-sembrar el catálogo completo.");
+    var noWindow = new DiagnosticReport(Snapshot(), [], [], now.AddMinutes(-10), now.AddMinutes(-1));
+    False(ContinuousDiagnosticMerger.ShouldContinue(noWindow, TimeSpan.FromMinutes(15), now),
+        "Un reporte sin ventana analizada no puede continuar en modo continuo.");
+    return Task.CompletedTask;
+}
+
+static Task ContinuousCatalogSwapsHeavySourcesForIncremental()
+{
+    var full = CollectorCatalog.CreateFull();
+    var windows = new IncrementalWindowsEventCollector();
+    var tsplus = new IncrementalTsplusLogCollector();
+    var continuous = CollectorCatalog.CreateContinuous(windows, tsplus);
+    Equal(full.Count, continuous.Count, "El catálogo continuo debe mantener la misma cantidad de fuentes.");
+    True(continuous.Any(c => ReferenceEquals(c, windows)), "El collector incremental de Event Viewer no entró al catálogo.");
+    True(continuous.Any(c => ReferenceEquals(c, tsplus)), "El collector incremental de logs TSplus no entró al catálogo.");
+    False(continuous.Any(c => c is WindowsEventCollector), "El collector completo de Event Viewer sigue presente en modo continuo.");
+    False(continuous.Any(c => c is TsplusLogCollector), "El collector completo de logs TSplus sigue presente en modo continuo.");
+    True(continuous.Any(c => c is WindowsServiceCollector), "El estado de servicios desapareció del catálogo continuo.");
+    True(full.Any(c => c is WindowsEventCollector), "El catálogo puntual perdió el collector completo de Event Viewer.");
+    True(full.Any(c => c is TsplusLogCollector), "El catálogo puntual perdió el collector completo de logs TSplus.");
+    return Task.CompletedTask;
+}
+
+static Task TsplusCoverageAcceptsIncrementalSource()
+{
+    var now = DateTimeOffset.Now;
+    var fullCoverage = new DiagnosticEvent(now, "TDM", "Cobertura TSplus", DiagnosticLayer.Tsplus,
+        DiagnosticSeverity.Informativo, "TSPLUS_LOG_COVERAGE", "Cobertura de logs actualizada",
+        Evidencia:
+        [
+            new EvidenceItem("Cobertura", "Disponible"),
+            new EvidenceItem("Fuentes Remote Access disponibles", "3"),
+            new EvidenceItem("Fuentes Remote Access conocidas/detectadas", "3")
+        ]);
+    var assessmentFull = DiagnosticCoverageAnalyzer.Analyze(Report([fullCoverage], now));
+    Equal("Disponible", assessmentFull.Fuentes.Single(x => x.Fuente == "Logs TSplus Remote Access").Estado,
+        "La cobertura completa de logs dejó de alimentar la fuente base.");
+
+    var incrementalCoverage = new DiagnosticEvent(now.AddSeconds(1), "TDM", "Cobertura TSplus", DiagnosticLayer.Tsplus,
+        DiagnosticSeverity.Informativo, "TSPLUS_INCREMENTAL_LOG_COVERAGE", "Cobertura incremental actualizada",
+        Evidencia:
+        [
+            new EvidenceItem("Cobertura", "Disponible"),
+            new EvidenceItem("Fuentes candidatas", "5"),
+            new EvidenceItem("Fuentes no evaluadas", "0")
+        ]);
+    var assessmentIncremental = DiagnosticCoverageAnalyzer.Analyze(Report([incrementalCoverage], now));
+    Equal("Disponible", assessmentIncremental.Fuentes.Single(x => x.Fuente == "Logs TSplus Remote Access").Estado,
+        "La cobertura incremental no alimenta la fuente base de logs TSplus.");
+
+    var partialCoverage = incrementalCoverage with
+    {
+        Evidencia =
+        [
+            new EvidenceItem("Cobertura", "Disponible"),
+            new EvidenceItem("Fuentes candidatas", "5"),
+            new EvidenceItem("Fuentes no evaluadas", "2")
+        ]
+    };
+    var assessmentPartial = DiagnosticCoverageAnalyzer.Analyze(Report([partialCoverage], now));
+    Equal("Parcial", assessmentPartial.Fuentes.Single(x => x.Fuente == "Logs TSplus Remote Access").Estado,
+        "Dos fuentes candidatas sin evaluar no dejaron la cobertura parcial.");
+
+    var assessmentNone = DiagnosticCoverageAnalyzer.Analyze(Report([], now));
+    Equal("No disponible", assessmentNone.Fuentes.Single(x => x.Fuente == "Logs TSplus Remote Access").Estado,
+        "Sin ningún estado de cobertura la fuente base debe seguir marcada No disponible.");
+    return Task.CompletedTask;
+}
+
+static Task GuiRealtimeWiresIncrementalContinuousDiagnostics()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del cableado continuo no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "Services", "DiagnosticExecutionService.cs"));
+    True(text.Contains("CollectorCatalog.CreateContinuous(", StringComparison.Ordinal),
+        "El diagnóstico en tiempo real no sustituye las fuentes pesadas por collectors incrementales.");
+    True(text.Contains("ContinuousDiagnosticMerger.Merge(", StringComparison.Ordinal),
+        "El diagnóstico en tiempo real no fusiona la línea base con la muestra incremental.");
+    True(text.Contains("_windowsIncremental.Prime()", StringComparison.Ordinal),
+        "El cursor de Event Viewer no se posiciona al inicio de la siembra.");
+    True(text.Contains("_tsplusIncremental.Prime(", StringComparison.Ordinal),
+        "El cursor de logs TSplus no se posiciona al inicio de la siembra.");
+    True(text.Contains("DiagnosticoContinuo", StringComparison.Ordinal),
+        "El reporte no declara el modo continuo para exportación y cobertura.");
     return Task.CompletedTask;
 }
 
