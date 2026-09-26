@@ -1,3 +1,4 @@
+using System.Globalization;
 using TDM.Application;
 using TDM.Collectors.TSplus;
 using TDM.Collectors.Windows;
@@ -7,6 +8,11 @@ using TDM.Models;
 using TDM.Notifications;
 using TDM.Persistence;
 using TDM.Reporting;
+
+CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
+CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
+Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
+Thread.CurrentThread.CurrentUICulture = CultureInfo.InvariantCulture;
 
 var tests = new List<(string Name, Func<Task> Run)>
 {
@@ -59,7 +65,12 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("ChannelCoverageFormatsRange", ChannelCoverageFormatsRange),
     ("CauseStabilityCalmWhenStable", CauseStabilityCalmWhenStable),
     ("CauseStabilityFlagsFlapping", CauseStabilityFlagsFlapping),
-    ("CauseStabilityIgnoresEmpty", CauseStabilityIgnoresEmpty)
+    ("CauseStabilityIgnoresEmpty", CauseStabilityIgnoresEmpty),
+    ("CauseDrivenImpactUsesWordBoundaries", CauseDrivenImpactUsesWordBoundaries),
+    ("FlappingThresholdHonorsConfiguredOptions", FlappingThresholdHonorsConfiguredOptions),
+    ("EwmaAnomaliesSurfaceAsReportFindings", EwmaAnomaliesSurfaceAsReportFindings),
+    ("WindowsEventCollectorHonorsMaxEventsOption", WindowsEventCollectorHonorsMaxEventsOption),
+    ("TestsRunUnderPinnedInvariantCulture", TestsRunUnderPinnedInvariantCulture)
 };
 
 var failed = 0;
@@ -785,6 +796,90 @@ static Task EventLogCollectorsHandleEventLogException()
         offenders.Add(Path.GetRelativePath(root!, file));
     }
     True(offenders.Count == 0, "Collectors con EventLogQuery sin catch EventLogException: " + string.Join(", ", offenders));
+    return Task.CompletedTask;
+}
+
+static Task CauseDrivenImpactUsesWordBoundaries()
+{
+    var now = DateTimeOffset.Now;
+    RootCauseCandidate Cause(string resumen, string explicacion) =>
+        new(1, "ROOT-TEST", "svc", DiagnosticLayer.Tsplus, 85, ConfidenceLevel.Alta, resumen, explicacion, [],
+            Producto: TsplusProduct.Ninguno, HoraIncidente: now, OrigenClasificado: "TSPLUS");
+
+    var port8080 = FunctionalImpactAnalyzer.Analyze(
+        Report([], now) with { CausaRaizPrincipal = Cause("Servicio escuchando en el puerto 8080", "El socket 8080 permanece abierto") });
+    False(port8080.Impactos.Any(i => i.Funcion == "Acceso Web / HTML5"),
+        "El puerto 8080 activó el impacto Web/HTML5 por coincidencia de subcadena.");
+
+    var powershell = FunctionalImpactAnalyzer.Analyze(
+        Report([], now) with { CausaRaizPrincipal = Cause("Fallo en PowerShell del sistema", "PowerShell no inicia sesión") });
+    False(powershell.Impactos.Any(i => i.Funcion == "Inicio de escritorio/shell"),
+        "PowerShell activó el impacto de shell de escritorio por subcadena.");
+
+    var port80 = FunctionalImpactAnalyzer.Analyze(
+        Report([], now) with { CausaRaizPrincipal = Cause("Servicio escuchando en el puerto 80", "El puerto 80 dejó de aceptar") });
+    True(port80.Impactos.Any(i => i.Funcion == "Acceso Web / HTML5"),
+        "El puerto 80 dejó de activar el impacto Web/HTML5 con límites de palabra.");
+
+    var shell = FunctionalImpactAnalyzer.Analyze(
+        Report([], now) with { CausaRaizPrincipal = Cause("Fallo de shell en el inicio de sesión", "El shell de escritorio no carga") });
+    True(shell.Impactos.Any(i => i.Funcion == "Inicio de escritorio/shell"),
+        "Un shell literal dejó de activar el impacto de escritorio.");
+    return Task.CompletedTask;
+}
+
+static Task FlappingThresholdHonorsConfiguredOptions()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del umbral de flapping no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Service", "TdmWorker.cs"));
+    True(text.Contains("options?.CauseStabilityFlappingThreshold ?? 2", StringComparison.Ordinal),
+        "El análisis de estabilidad de causa no lee el umbral configurado.");
+    True(!text.Contains("policy.CauseStabilityFlappingThreshold", StringComparison.Ordinal),
+        "El análisis de estabilidad sigue usando el valor fijo de la política.");
+    return Task.CompletedTask;
+}
+
+static Task EwmaAnomaliesSurfaceAsReportFindings()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de anomalías EWMA no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "Services", "IntegratedMonitoringService.cs"));
+    True(!text.Contains("new AnomalyDetectionService()", StringComparison.Ordinal),
+        "El monitor sigue instanciando AnomalyDetectionService sin usarla.");
+    True(!text.Contains("Debug.WriteLine", StringComparison.Ordinal),
+        "Las anomalías EWMA siguen yendo a Debug.WriteLine en vez del reporte.");
+    True(text.Contains("report with { Hallazgos", StringComparison.Ordinal),
+        "Las anomalías EWMA no se agregan a los hallazgos del reporte.");
+    True(text.Contains("EWMA-", StringComparison.Ordinal),
+        "Falta el identificador EWMA en los hallazgos de anomalía.");
+    return Task.CompletedTask;
+}
+
+static Task WindowsEventCollectorHonorsMaxEventsOption()
+{
+    Equal(250, WindowsEventCollector.ResolveRelevantLimit(TimeSpan.FromHours(2), null),
+        "Sin MaxEvents el límite por ventana cambió.");
+    Equal(100, WindowsEventCollector.ResolveRelevantLimit(TimeSpan.FromHours(2), 100),
+        "MaxEvents no acotó el límite por ventana.");
+    Equal(300, WindowsEventCollector.ResolveRelevantLimit(TimeSpan.FromHours(8), 300),
+        "MaxEvents no prevaleció sobre el límite por ventana.");
+    Equal(2_500, WindowsEventCollector.ResolveRelevantLimit(TimeSpan.FromHours(48), null),
+        "Ventana de 48 h perdió el límite máximo.");
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de MaxEvents no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsEventCollector.cs"));
+    True(text.Contains("context.Options?.MaxEvents", StringComparison.Ordinal),
+        "El collector de eventos Windows ignora DiagnosticOptions.MaxEvents.");
+    return Task.CompletedTask;
+}
+
+static Task TestsRunUnderPinnedInvariantCulture()
+{
+    True(ReferenceEquals(CultureInfo.DefaultThreadCurrentCulture, CultureInfo.InvariantCulture),
+        "La cultura por defecto de los hilos no quedó fijada a InvariantCulture.");
+    True(ReferenceEquals(Thread.CurrentThread.CurrentCulture, CultureInfo.InvariantCulture),
+        "El hilo principal no corre con InvariantCulture.");
     return Task.CompletedTask;
 }
 

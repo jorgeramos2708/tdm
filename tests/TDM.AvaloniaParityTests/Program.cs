@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using TDM.Collectors.Windows;
 using TDM.Gui.Avalonia.Services;
@@ -15,6 +16,11 @@ internal static class Program
 
     private static int Main()
     {
+        CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
+        CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
+        Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
+        Thread.CurrentThread.CurrentUICulture = CultureInfo.InvariantCulture;
+
         var now = DateTimeOffset.Now;
         var sessionIncident = new ObservabilityIncident(
             now.AddSeconds(-20), "ACCOUNT_LOCKOUT", "RDP/Auth", "Error", "Bloqueo correlacionado con sesión",
@@ -462,6 +468,22 @@ internal static class Program
             True(vm.Signals.Any(x => x.Name.Contains("CPU", StringComparison.OrdinalIgnoreCase)), "La muestra en tiempo real de CPU no se usó en Preventivo.");
         });
 
+        Run("Preventive_DiskActionHonorsThresholds", () =>
+        {
+            var diskSample = new ObservabilitySample
+            {
+                Timestamp = now,
+                SampleKind = "diagnostic",
+                CpuPercent = 40,
+                MemoryFreePercent = 60,
+                DiskFreePercent = new Dictionary<string, double> { ["C:"] = 16 }
+            };
+            var vm = new PreventiveDashboardViewModel();
+            vm.Apply(new[] { diskSample }, new SupportThresholds { DiskFreeWarningPercent = 20, DiskFreeCriticalPercent = 12 });
+            True(vm.Actions.Any(x => x.Name.Contains("Liberar o ampliar almacenamiento", StringComparison.OrdinalIgnoreCase)),
+                "La acción preventiva de disco ignoró el umbral configurado.");
+        });
+
 
 
         Run("TdmHealth_Parity", () =>
@@ -642,6 +664,14 @@ internal static class Program
             var support = new SupportDashboardViewModel(); support.Apply(Array.Empty<ObservabilitySample>()); Equal("N/D", support.ServiceValue);
             var perf = new PerformanceDashboardViewModel(); perf.Apply(Array.Empty<ObservabilitySample>()); Equal("N/D", perf.CpuValue);
             var sessions = new SessionsDashboardViewModel(); sessions.Apply(Array.Empty<ObservabilitySample>()); Equal("0", sessions.ActiveValue);
+        });
+
+        Run("CultureIsPinnedForDeterministicFormatting", () =>
+        {
+            True(ReferenceEquals(CultureInfo.DefaultThreadCurrentCulture, CultureInfo.InvariantCulture),
+                "La cultura por defecto de los hilos no quedó fijada a InvariantCulture.");
+            True(ReferenceEquals(Thread.CurrentThread.CurrentCulture, CultureInfo.InvariantCulture),
+                "El hilo principal no corre con InvariantCulture.");
         });
 
         Console.WriteLine();

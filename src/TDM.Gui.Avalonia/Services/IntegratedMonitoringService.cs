@@ -28,6 +28,7 @@ public sealed class IntegratedMonitoringService : IDisposable
     private static readonly TimeSpan ForensicStateInterval = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan IntegrityStateInterval = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan PortableNotificationInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan AnomalyAlertCooldown = TimeSpan.FromMinutes(5);
 
     private readonly string _writeRoot = LocalStateStore.DefaultRootPath;
     private readonly ObservabilityStore _store;
@@ -35,6 +36,7 @@ public sealed class IntegratedMonitoringService : IDisposable
     private readonly NotificationDispatcher? _portableNotificationDispatcher;
     private readonly SupportMonitoringSettingsStore? _portableSettingsStore;
     private readonly EwmaAnomalyDetector _systemDetector = EwmaDetectorFactory.CreateForSystemMetrics();
+    private readonly Dictionary<string, DateTimeOffset> _anomalyCooldown = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _captureGate = new(1, 1);
     private readonly SemaphoreSlim _forensicGate = new(1, 1);
@@ -232,15 +234,17 @@ public sealed class IntegratedMonitoringService : IDisposable
             };
 
             // Run anomaly detection on the report's metrics
-            var anomalyDetector = new AnomalyDetectionService();
             var resources = report.Eventos.LastOrDefault(e => e.Tipo.Equals("SYSTEM_RESOURCE_STATE", StringComparison.OrdinalIgnoreCase));
             var cpu = resources?.Evidencia?.FirstOrDefault(e => e.Clave.Equals("CpuPercent"))?.Valor;
             var memory = resources?.Evidencia?.FirstOrDefault(e => e.Clave.Equals("MemoryFreePercent"))?.Valor;
 
+            var anomalyFindings = new List<DiagnosticFinding>();
             if (double.TryParse(cpu, out var cpuVal))
-                CheckAndAddAnomaly(_systemDetector, "system.cpu", cpuVal, "CPU del sistema", DateTimeOffset.Now);
+                AddAnomalyFinding(anomalyFindings, "system.cpu", cpuVal, "CPU del sistema", DateTimeOffset.Now);
             if (double.TryParse(memory, out var memVal))
-                CheckAndAddAnomaly(_systemDetector, "system.memory", memVal, "Memoria libre %", DateTimeOffset.Now);
+                AddAnomalyFinding(anomalyFindings, "system.memory", memVal, "Memoria libre %", DateTimeOffset.Now);
+            if (anomalyFindings.Count > 0)
+                report = report with { Hallazgos = [.. report.Hallazgos, .. anomalyFindings] };
 
             var sample = await _store.RecordAsync(report, "avalonia-monitor", runtime, ct).ConfigureAwait(false);
             await EmitPortableNotificationsIfDueAsync(report, sample, ct).ConfigureAwait(false);
@@ -481,17 +485,34 @@ public sealed class IntegratedMonitoringService : IDisposable
         }
     }
 
-    private void CheckAndAddAnomaly(EwmaAnomalyDetector detector, string metricKey, double value, string metricName, DateTimeOffset timestamp)
+    private void AddAnomalyFinding(List<DiagnosticFinding> findings, string metricKey, double value, string metricName, DateTimeOffset timestamp)
     {
-        var result = detector.Process(metricKey, value, timestamp);
-        if (result == null) return;
+        var result = _systemDetector.Process(metricKey, value, timestamp);
+        if (result is null) return;
+
+        var lastAlert = _anomalyCooldown.GetValueOrDefault(metricKey, DateTimeOffset.MinValue);
+        if (timestamp - lastAlert < AnomalyAlertCooldown) return;
+        _anomalyCooldown[metricKey] = timestamp;
 
         var directionText = result.Direction == AnomalyDirection.High ? "ALTO" : "BAJO";
-        var severity = result.Severity == AnomalySeverity.Critical ? "CRÍTICO" : "ADVERTENCIA";
-
-        // Log anomaly as event (could be persisted to store in future)
-        var msg = $"Anomalía detectada en {metricName}: valor {result.ObservedValue:F2} vs esperado {result.ExpectedValue:F2} (Z={result.ZScore:F1}, {directionText})";
-        System.Diagnostics.Debug.WriteLine($"[ANOMALY] [{severity}] {msg} | Métrica: {metricKey} | Z={result.ZScore:F1} | Muestras: {result.SampleCount}");
+        var severity = result.Severity == AnomalySeverity.Critical ? DiagnosticSeverity.Critico : DiagnosticSeverity.Advertencia;
+        findings.Add(new DiagnosticFinding(
+            $"EWMA-{metricKey}-{timestamp:yyyyMMddHHmmss}",
+            "Detección de anomalías (EWMA)",
+            severity,
+            $"Anomalía estadística en {metricName}",
+            $"Valor {result.ObservedValue:F2} vs esperado {result.ExpectedValue:F2} (Z={result.ZScore:F1}, {directionText})",
+            [
+                new EvidenceItem("Métrica", metricName),
+                new EvidenceItem("Clave", metricKey),
+                new EvidenceItem("Valor observado", result.ObservedValue.ToString("F2")),
+                new EvidenceItem("Valor esperado (EWMA)", result.ExpectedValue.ToString("F2")),
+                new EvidenceItem("Z-Score", result.ZScore.ToString("F2")),
+                new EvidenceItem("Dirección", directionText),
+                new EvidenceItem("Muestras", result.SampleCount.ToString())
+            ],
+            ConfidenceLevel.Media,
+            Capa: DiagnosticLayer.Windows));
     }
 
     public void Dispose()

@@ -15,14 +15,22 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
         var coverage = new List<EvidenceItem>();
         var window = DiagnosticWindow.Resolve(context);
         var timeClause = DiagnosticWindow.EventLogTimeClause(context);
-        var relevantLimit = ResolveLimit(context.Lookback);
-        var scanLimit = Math.Max(relevantLimit * 8, 2_000);
+        var maxEvents = context.Options?.MaxEvents;
+        var remainingEvents = maxEvents ?? int.MaxValue;
         var xpath = $"*[System[(Level=1 or Level=2) and {timeClause}]]";
 
         coverage.Add(new EvidenceItem("Ventana solicitada", $"{window.Start:O} → {window.End:O}"));
 
         foreach (var log in new[] { "System", "Application", "Security" })
         {
+            if (remainingEvents <= 0)
+            {
+                coverage.Add(new EvidenceItem(log, "Parcial; límite global de eventos alcanzado"));
+                continue;
+            }
+
+            var relevantLimit = Math.Min(ResolveRelevantLimit(context.Lookback, maxEvents), remainingEvents);
+            var scanLimit = Math.Max(relevantLimit * 8, 2_000);
             try
             {
                 var q = new EventLogQuery(log, PathType.LogName, xpath)
@@ -106,6 +114,7 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
                             $"Evento relevante detectado: ID {ev.Id}", message,
                             evidence, ConfidenceLevel.Media, Capa: layer));
                         relevant++;
+                        remainingEvents--;
 
                         if (relevant >= relevantLimit || scanned >= scanLimit)
                         {
@@ -164,14 +173,18 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
         return Task.FromResult(new CollectorResult(findings, events));
     }
 
-    private static int ResolveLimit(TimeSpan lookback)
-        => lookback.TotalHours switch
+    public static int ResolveRelevantLimit(TimeSpan lookback, int? maxEvents)
+    {
+        var lookbackLimit = lookback.TotalHours switch
         {
             <= 4 => 250,
             <= 12 => 500,
             <= 24 => 1_000,
             _ => 2_500
         };
+        if (maxEvents is int cap && cap > 0) return Math.Min(lookbackLimit, cap);
+        return lookbackLimit;
+    }
 
     private static bool IsRelevant(string provider, int id)
     {

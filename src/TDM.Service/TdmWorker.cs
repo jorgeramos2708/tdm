@@ -267,8 +267,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
                             causeHistory.Add(report.CausaRaizPrincipal?.Id ?? "");
                             while (causeHistory.Count > 12) causeHistory.RemoveAt(0);
                             CollectorCursorStore.TrySave("primary-cause-history", causeHistory, out _);
-                            var policy = DiagnosticExecutionPolicy.ForLookback(NormalInterval);
-                            var unstable = CauseStabilityAnalyzer.Analyze(causeHistory, maxDistinct: policy.CauseStabilityFlappingThreshold);
+                            var unstable = CauseStabilityAnalyzer.Analyze(causeHistory, maxDistinct: options?.CauseStabilityFlappingThreshold ?? 2);
                             if (unstable is not null)
                                 report = report with { Hallazgos = [.. report.Hallazgos, unstable] };
                         }

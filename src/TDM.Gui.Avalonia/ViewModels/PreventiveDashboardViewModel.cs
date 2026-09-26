@@ -123,7 +123,7 @@ public partial class PreventiveDashboardViewModel : ObservableObject
             .ToList();
 
         Signals = BuildSignals(samples, scoringLatest, transitions, forecasts, currentServiceIssues, currentDependencyIssues, serviceInstability, dependencyInstability, thresholds);
-        Actions = BuildActions(scoringLatest, forecasts, currentServiceIssues, currentDependencyIssues, serviceInstability, dependencyInstability);
+        Actions = BuildActions(scoringLatest, forecasts, currentServiceIssues, currentDependencyIssues, serviceInstability, dependencyInstability, thresholds);
     }
 
     private void ApplyRiskCard(int score, int serviceIssues, int dependencyIssues, int forecastCount, bool hasEvidence)
@@ -288,7 +288,7 @@ public partial class PreventiveDashboardViewModel : ObservableObject
         if (latest.TcpEphemeralUsagePercent >= 70)
             signals.Add(new SignalRow("Presión de puertos efímeros", $"Uso {latest.TcpEphemeralUsagePercent:0.0}% · TIME_WAIT {latest.TcpTimeWait}", latest.TcpEphemeralUsagePercent >= 85 ? DashboardPalette.Error : DashboardPalette.Warn));
 
-        var diskSignalFloor = Math.Max(15d, thresholds.DiskFreeWarningPercent);
+        var diskSignalFloor = DiskActionFloor(thresholds);
         foreach (var disk in latest.DiskFreePercent.Where(x => x.Value <= diskSignalFloor).OrderBy(x => x.Value).Take(3))
             signals.Add(new SignalRow($"Disco {disk.Key}", $"{disk.Value:0.0}% libre",
                 disk.Value <= thresholds.DiskFreeCriticalPercent ? DashboardPalette.Danger
@@ -305,13 +305,16 @@ public partial class PreventiveDashboardViewModel : ObservableObject
             .ToList();
     }
 
+    private static double DiskActionFloor(SupportThresholds thresholds) => Math.Max(15d, thresholds.DiskFreeWarningPercent);
+
     private static IReadOnlyList<SignalRow> BuildActions(
         ObservabilitySample latest,
         IReadOnlyList<ResourceForecast> forecasts,
         IReadOnlyList<SignalRow> currentServiceIssues,
         IReadOnlyList<SignalRow> currentDependencyIssues,
         IReadOnlyList<SignalRow> serviceInstability,
-        IReadOnlyList<SignalRow> dependencyInstability)
+        IReadOnlyList<SignalRow> dependencyInstability,
+        SupportThresholds thresholds)
     {
         var actions = new List<SignalRow>();
 
@@ -325,7 +328,7 @@ public partial class PreventiveDashboardViewModel : ObservableObject
             actions.Add(new SignalRow("Reducir presión de CPU", "Identificar procesos dominantes y validar si la carga sostenida corresponde a sesiones, TSplus o procesos externos.", DashboardPalette.Warn));
         if (forecasts.Any(x => x.Name.Contains("Memoria", StringComparison.OrdinalIgnoreCase)))
             actions.Add(new SignalRow("Contener presión de memoria", "Revisar procesos con crecimiento de RAM y disponibilidad antes de que el servidor entre en paginación severa.", DashboardPalette.Warn));
-        if (forecasts.Any(x => x.Name.Contains("Disco", StringComparison.OrdinalIgnoreCase)) || latest.DiskFreePercent.Any(x => x.Value <= 15))
+        if (forecasts.Any(x => x.Name.Contains("Disco", StringComparison.OrdinalIgnoreCase)) || latest.DiskFreePercent.Any(x => x.Value <= DiskActionFloor(thresholds)))
             actions.Add(new SignalRow("Liberar o ampliar almacenamiento", "Priorizar discos de Windows/TSplus con poco espacio y revisar crecimiento de logs, perfiles y temporales.", DashboardPalette.Warn));
         if (latest.TcpEphemeralUsagePercent >= 70)
             actions.Add(new SignalRow("Reducir presión de conexiones", "Revisar TIME_WAIT, aplicaciones con conexiones cortas y servicios que agotan puertos efímeros.", DashboardPalette.Warn));

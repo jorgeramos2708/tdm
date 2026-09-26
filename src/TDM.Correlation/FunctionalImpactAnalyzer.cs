@@ -83,6 +83,20 @@ public static class FunctionalImpactAnalyzer
         return new FunctionalImpactAssessment(overall, summary, normalized);
     }
 
+    private static bool ContainsToken(string text, string token)
+    {
+        var index = 0;
+        while (true)
+        {
+            var found = text.IndexOf(token, index, StringComparison.OrdinalIgnoreCase);
+            if (found < 0) return false;
+            var before = found == 0 ? '\0' : text[found - 1];
+            var after = found + token.Length >= text.Length ? '\0' : text[found + token.Length];
+            if (!char.IsLetterOrDigit(before) && !char.IsLetterOrDigit(after)) return true;
+            index = found + 1;
+        }
+    }
+
     private static void AddCauseDrivenImpact(DiagnosticReport report, RootCauseCandidate cause, List<FunctionalImpactItem> items)
     {
         var text = $"{cause.Componente} {cause.Resumen} {cause.Explicacion} " +
@@ -93,7 +107,7 @@ public static class FunctionalImpactAnalyzer
             items.Add(new FunctionalImpactItem(function, module, state, summary, cause.Confianza, evidence));
         }
 
-        if (cause.Producto == TsplusProduct.ServerMonitoring || text.Contains("Server Monitoring", StringComparison.OrdinalIgnoreCase))
+        if (cause.Producto == TsplusProduct.ServerMonitoring || ContainsToken(text, "Server Monitoring"))
         {
             Add("Monitoreo y reportes TSplus", "TSplus Server Monitoring",
                 cause.Confianza is ConfidenceLevel.Confirmada or ConfidenceLevel.Alta or ConfidenceLevel.Media ? FunctionalImpactState.Degradado : FunctionalImpactState.Indeterminado,
@@ -103,7 +117,7 @@ public static class FunctionalImpactAnalyzer
             return;
         }
 
-        if (cause.Producto == TsplusProduct.AdvancedSecurity || text.Contains("Advanced Security", StringComparison.OrdinalIgnoreCase))
+        if (cause.Producto == TsplusProduct.AdvancedSecurity || ContainsToken(text, "Advanced Security"))
         {
             Add("Protecciones de Advanced Security", "TSplus Advanced Security",
                 cause.Confianza is ConfidenceLevel.Confirmada or ConfidenceLevel.Alta ? FunctionalImpactState.Degradado : FunctionalImpactState.Indeterminado,
@@ -112,15 +126,15 @@ public static class FunctionalImpactAnalyzer
             return;
         }
 
-        if (cause.Producto == TsplusProduct.RemoteSupport || text.Contains("Remote Support", StringComparison.OrdinalIgnoreCase))
+        if (cause.Producto == TsplusProduct.RemoteSupport || ContainsToken(text, "Remote Support"))
         {
             Add("Soporte remoto", "TSplus Remote Support", FunctionalImpactState.Degradado,
                 "El incidente se limita al componente de Remote Support observado.", new EvidenceItem("Candidato", cause.Componente));
             return;
         }
 
-        if (text.Contains("NLA", StringComparison.OrdinalIgnoreCase) || text.Contains("CredSSP", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("contraseña", StringComparison.OrdinalIgnoreCase) || text.Contains("password", StringComparison.OrdinalIgnoreCase))
+        if (ContainsToken(text, "NLA") || ContainsToken(text, "CredSSP") ||
+            ContainsToken(text, "contraseña") || ContainsToken(text, "password"))
         {
             Add("Nuevos inicios de sesión", "Remote Access / autenticación",
                 FunctionalImpactState.Interrumpido,
@@ -128,8 +142,8 @@ public static class FunctionalImpactAnalyzer
                 new EvidenceItem("Originador", cause.OrigenClasificado));
         }
 
-        if (text.Contains("shell", StringComparison.OrdinalIgnoreCase) || text.Contains("pantalla negra", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("Winlogon", StringComparison.OrdinalIgnoreCase) || text.Contains("User Profile", StringComparison.OrdinalIgnoreCase))
+        if (ContainsToken(text, "shell") || ContainsToken(text, "pantalla negra") ||
+            ContainsToken(text, "Winlogon") || ContainsToken(text, "User Profile"))
         {
             Add("Inicio de escritorio/shell", "Sesiones / perfiles / logon",
                 FunctionalImpactState.Interrumpido,
@@ -137,8 +151,8 @@ public static class FunctionalImpactAnalyzer
                 new EvidenceItem("Candidato", cause.Componente));
         }
 
-        if (text.Contains("Web", StringComparison.OrdinalIgnoreCase) || text.Contains("HTML5", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("443", StringComparison.OrdinalIgnoreCase) || text.Contains("80", StringComparison.OrdinalIgnoreCase))
+        if (ContainsToken(text, "Web") || ContainsToken(text, "HTML5") ||
+            ContainsToken(text, "443") || ContainsToken(text, "80"))
         {
             Add("Acceso Web / HTML5", "Web / HTML5 / Web Portal",
                 cause.Confianza is ConfidenceLevel.Confirmada or ConfidenceLevel.Alta ? FunctionalImpactState.Interrumpido : FunctionalImpactState.Degradado,
@@ -146,8 +160,8 @@ public static class FunctionalImpactAnalyzer
                 new EvidenceItem("Candidato", cause.Componente));
         }
 
-        if (text.Contains("AppControl", StringComparison.OrdinalIgnoreCase) || text.Contains("RemoteApp", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("startup.config", StringComparison.OrdinalIgnoreCase) || text.Contains("aplicación publicada", StringComparison.OrdinalIgnoreCase))
+        if (ContainsToken(text, "AppControl") || ContainsToken(text, "RemoteApp") ||
+            ContainsToken(text, "startup.config") || ContainsToken(text, "aplicación publicada"))
         {
             Add("Aplicaciones publicadas / RemoteApp", "Publicación de aplicaciones",
                 cause.Confianza is ConfidenceLevel.Confirmada or ConfidenceLevel.Alta ? FunctionalImpactState.Interrumpido : FunctionalImpactState.Degradado,
@@ -155,8 +169,8 @@ public static class FunctionalImpactAnalyzer
                 new EvidenceItem("Candidato", cause.Componente));
         }
 
-        if (text.Contains("TermService", StringComparison.OrdinalIgnoreCase) || text.Contains("RDP", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("listener", StringComparison.OrdinalIgnoreCase))
+        if (ContainsToken(text, "TermService") || ContainsToken(text, "RDP") ||
+            ContainsToken(text, "listener"))
         {
             // R8: preferir el RDP_STATE dentro de la ventana analizada; un snapshot viejo
             // (p. ej. arrastrado por fusión continua) no debe describir el impacto actual.
@@ -178,8 +192,8 @@ public static class FunctionalImpactAnalyzer
                 new EvidenceItem("Sonda TCP local (RDP)", tcpRdp ?? "N/D"));
         }
 
-        if (text.Contains("Spooler", StringComparison.OrdinalIgnoreCase) || text.Contains("Printer", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("novaPDF", StringComparison.OrdinalIgnoreCase))
+        if (ContainsToken(text, "Spooler") || ContainsToken(text, "Printer") ||
+            ContainsToken(text, "novaPDF"))
         {
             Add("Impresión remota", "Universal / Virtual Printer",
                 FunctionalImpactState.Degradado,
@@ -187,8 +201,8 @@ public static class FunctionalImpactAnalyzer
                 new EvidenceItem("Candidato", cause.Componente));
         }
 
-        if (text.Contains("Farm", StringComparison.OrdinalIgnoreCase) || text.Contains("Gateway", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("Load Balancing", StringComparison.OrdinalIgnoreCase) || text.Contains("Reverse Proxy", StringComparison.OrdinalIgnoreCase))
+        if (ContainsToken(text, "Farm") || ContainsToken(text, "Gateway") ||
+            ContainsToken(text, "Load Balancing") || ContainsToken(text, "Reverse Proxy"))
         {
             Add("Distribución de conexiones en granja", "Farm / Gateway / Load Balancing / Reverse Proxy",
                 FunctionalImpactState.Degradado,
