@@ -16,8 +16,8 @@ de corrección aplicadas sobre el árbol de trabajo de este repositorio.
 |---|---|---|---|
 | Fase A | 4 hallazgos P0 | ✅ completada | `7fa346d` |
 | Fase B | 6 hallazgos P1 (pipeline y reglas) | ✅ completada | `59b4a62` |
-| Fase 1 | Colectores incrementales en la GUI | ✅ completada | — |
-| Fase 2 | Paridad export ↔ GUI | ⬜ pendiente | — |
+| Fase 1 | Colectores incrementales en la GUI | ✅ completada | `7a5db5d` |
+| Fase 2 | Paridad export ↔ GUI | ✅ completada | — |
 | Fase 3 | Brechas de privacidad | ⬜ pendiente | — |
 | — | Simulación de remediación sobre grafo inventado | ❌ descartada | — |
 
@@ -157,12 +157,62 @@ que ventana, UI y contadores no pierdan datos. Dejar el resto de colectores (sna
 - El catálogo continuo comparte cursores con TDM.Service si el servicio está vivo (misma clave y
   misma semántica de lectura, pensada originalmente para ambos consumidores).
 
-## Fase 2 — Paridad export ↔ GUI (pendiente)
+## Fase 2 — Paridad export ↔ GUI (completada)
 
-El HTML/JSON exportado puede divergir de las pestañas de la GUI: mismos datos, distinta lógica de
-formato/filtrado (buscadores, límites "… y N más", secciones, coloreado de marcadores). A mapear:
-`ReportExport`/`FormattedReportView` vs cada ViewModel de pestaña. Pendiente de levantar el detalle
-concreto con file:line en la fase.
+**Hallazgo.** El HTML/JSON exportado divergía de las pestañas de la GUI: mismos datos, distinta lógica
+de formato/filtrado. 26 divergencias (D1-D26) levantadas con file:line contra el árbol de trabajo.
+
+**Implementación.**
+
+1. `ReportExporter.cs`: sección de causas con marcador `[PRINCIPAL]` en el candidato de
+   `CausaRaizPrincipal`, aviso "Sin causa principal declarada…" y pies de truncado para candidatos
+   (más de 8) y evidencia (más de 24); anclas `cau-N`/`fnd-N` intactas. Resolución guiada reordenada
+   por acción+severidad con `InvestigationGuidanceBuilder.RequiresAction`, línea de conteos
+   "Resoluciones | Requieren acción | Mostrando", grupos "Requiere acción (N):"/"Sin acción requerida:",
+   marcadores `[CRÍTICO]/[ERROR]/[ADVERTENCIA]`, fila "Síntoma", comprobaciones y tarjetas Take(12)
+   con pie de truncado; tabla resumen con columna Severidad. Patrones sin filtro `Incidentes > 1`
+   (título "Patrones de falla", 11 columnas, Take(20) + pie, estado vacío en paridad con la GUI).
+   Cobertura con línea de conteos (Parciales = todos los estados Parcial/No consultado) y tabla
+   ordenada por críticas. Pies "Mostrando X de N … El JSON conserva la colección completa" en cuentas
+   (100), sesiones (60), autenticación (80), perfiles (50), aplicaciones publicadas (100), artefactos
+   (60), anomalías internas (60) e incidentes (20). JSON con `JsonStringEnumConverter`. Detalle de
+   evidencia con fallback `Timestamp ?? IngestedAt`.
+2. `DiagnosticNarrativeBuilder.cs`: fechas con `ToLocalTime()` (antes UTC) y pies de colección en
+   incidentes (12), crash-loops (8), patrones (12), cuentas (60), sesiones (30), perfiles (30),
+   inventario (12) y anomalías internas (40).
+3. `SupportBundleSanitizer.cs`: `Pseudonym` idempotente — un valor con formato `{prefijo}-XXXXXXXX`
+   ya pseudonimizado se devuelve tal cual (antes se re-hasheaba, y el re-sanitizado del reporte
+   previo en `ReportExporter` producía una tarjeta diff espuria).
+4. `DiagnosticExecutionService.cs`: lector del reporte previo con `JsonStringEnumConverter`
+   (compatible con JSON legible y numérico).
+5. `InvestigationGuidanceBuilder.cs`: `RequiresAction` público, compartido por export y GUI.
+6. `DiagnosticWorkspaceViewModel.cs`: `BuildSummary` cae a `Inicio − Lookback` con ventana vacía
+   (sin `01/01/0001`); `BuildCoverage` con conteos y "Bloqueos duros" = críticas bloqueadas reales;
+   `BuildPatterns` con Producto, singletons y mismo estado vacío; delegación a `RequiresAction`
+   compartido; estado de exportación "paquete sanitizado; revise antes de compartir";
+   `BuildSummary/BuildCoverage/BuildPatterns/ApplyReport/ExportReportAsync` públicos para paridad.
+7. Tests: 8 nuevos en ProductionTests (`ExportRootCauseMarkersAndFooters`,
+   `ExportGuidedResolutionOrderAndDetails`, `ExportPatternsShowSingletonsAndFullColumns`,
+   `ExportCoverageCountsAndCriticalFirst`, `ExportJsonUsesStringEnumsAndRoundTrips`,
+   `SanitizerIdempotentAvoidsSpuriousDiff`, `NarrativeUsesLocalTimeForWindows`,
+   `EvidenceDetailsFallBackToIngestedAt`) → 68/68; 4 nuevos en ParityTests
+   (`Gui_CoverageCountsMatchExport`, `Gui_SummaryWindowWithoutYearZero`, `Gui_PatternsMatchExport`,
+   `Gui_ExportStatusDeclaresSanitizedPackage`) → 37/37; gates VERIF Y 7/7 y publish portable
+   (138 771 655 bytes).
+
+**Residuales documentados (aceptados en esta fase).**
+
+- D13: la GUI no tiene pestaña de hallazgos (el export es más rico: Take(200) + 2 pies).
+- D14/D15/D20/D21/D22: textos de estado vacío contextualmente distintos en secciones concretas del
+  export vs GUI (sólo se igualaron patrones/impactos principales; el resto es vocabulario propio).
+- Las fechas de la GUI siguen sin año (`dd/MM`), el export con año (`dd/MM/yyyy`).
+- Extractos narrativos de apoyo (hallazgos relacionados 16, causas comunes 5) y extractos visuales
+  de tarjetas rápidas: sólo en export por diseño.
+- El modelo de precisión conserva `FuentesBloqueadas` (agregado histórico); "Bloqueos duros" de la
+  GUI y la línea de cobertura del export ahora calculan el conteo propio de críticas bloqueadas.
+- Marcador `[CRÍTICA]` (GUI) vs columna "Crítica" (export): distinta presentación, mismo dato.
+- `LocalStateStore` persiste el reporte crudo (sólo local, nunca en el paquete sanitizado).
+- Ficheros `.bak`/`fix_exporter.cs` sueltos en el repo: no compilados, fuera de alcance.
 
 ## Fase 3 — Brechas de privacidad (pendiente)
 

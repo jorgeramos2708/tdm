@@ -20,11 +20,11 @@ public static class DiagnosticNarrativeBuilder
         var evidenceLookback = report.EvidenciaDisponibleLookback <= TimeSpan.Zero ? report.Lookback : report.EvidenciaDisponibleLookback;
         var evidenceStart = report.PeriodoEvidenciaInicio == default ? periodoInicio : report.PeriodoEvidenciaInicio;
         var evidenceEnd = report.PeriodoEvidenciaFin == default ? periodoFin : report.PeriodoEvidenciaFin;
-        sb.AppendLine($"Evidencia disponible: últimas {FormatLookback(evidenceLookback)} ({evidenceStart:dd/MM/yyyy HH:mm:ss} - {evidenceEnd:dd/MM/yyyy HH:mm:ss})");
+        sb.AppendLine($"Evidencia disponible: últimas {FormatLookback(evidenceLookback)} ({evidenceStart.ToLocalTime():dd/MM/yyyy HH:mm:ss} - {evidenceEnd.ToLocalTime():dd/MM/yyyy HH:mm:ss})");
         sb.AppendLine($"Vista actual: últimos {FormatLookback(report.Lookback)}");
-        sb.AppendLine($"Periodo visible: {periodoInicio:dd/MM/yyyy HH:mm:ss} - {periodoFin:dd/MM/yyyy HH:mm:ss}");
+        sb.AppendLine($"Periodo visible: {periodoInicio.ToLocalTime():dd/MM/yyyy HH:mm:ss} - {periodoFin.ToLocalTime():dd/MM/yyyy HH:mm:ss}");
         sb.AppendLine("Modo de vista: FILTRO EN MEMORIA — cambiar el periodo no vuelve a consultar Windows ni TSplus.");
-        sb.AppendLine($"Ejecución TDM: {report.Inicio:dd/MM/yyyy HH:mm:ss} - {report.Fin:dd/MM/yyyy HH:mm:ss} (duración {(report.Fin - report.Inicio).TotalSeconds:F1} s)");
+        sb.AppendLine($"Ejecución TDM: {report.Inicio.ToLocalTime():dd/MM/yyyy HH:mm:ss} - {report.Fin.ToLocalTime():dd/MM/yyyy HH:mm:ss} (duración {(report.Fin - report.Inicio).TotalSeconds:F1} s)");
         sb.AppendLine($"Hallazgos: {report.Hallazgos.Count} | Observaciones: {report.Eventos.Count} | Incidentes agrupados: {report.Incidentes.Count} | Candidatos: {report.CausasRaiz.Count} | Patrones: {report.PatronesFalla.Count}");
         if (report.RendimientoDiagnostico is { } perf)
             sb.AppendLine($"Rendimiento TDM: {perf.DuracionTotalMs / 1000d:F1} s | collectors={perf.CollectorsEjecutados} | timeouts={perf.CollectorsConTimeout} | errores controlados={perf.CollectorsConError} | más lento={perf.CollectorMasLento} ({perf.CollectorMasLentoMs:F0} ms)");
@@ -54,8 +54,11 @@ public static class DiagnosticNarrativeBuilder
         {
             sb.AppendLine("INCIDENTES AGRUPADOS");
             sb.AppendLine("-------------------");
-            foreach (var incident in report.Incidentes.Take(12))
+            var shownNarrativeIncidents = report.Incidentes.Take(12).ToList();
+            foreach (var incident in shownNarrativeIncidents)
                 sb.AppendLine($"  - {incident.Id} | {incident.Dominio} | {incident.Estado} | señales={incident.Senales} | {incident.Resumen}");
+            if (report.Incidentes.Count > shownNarrativeIncidents.Count)
+                sb.AppendLine($"  … y {report.Incidentes.Count - shownNarrativeIncidents.Count} incidente(s) más sin mostrar (colección completa en JSON).");
             sb.AppendLine();
         }
 
@@ -164,11 +167,11 @@ public static class DiagnosticNarrativeBuilder
         }
         sb.AppendLine();
 
-        var crashIncidents = report.CausasRaiz
+        var crashIncidentsAll = report.CausasRaiz
             .Where(c => c.Id == "ROOT-PROCESS-CRASH" && c.HoraIncidente.HasValue)
             .OrderByDescending(c => c.HoraIncidente)
-            .Take(8)
             .ToList();
+        var crashIncidents = crashIncidentsAll.Take(8).ToList();
         if (crashIncidents.Count > 0)
         {
             sb.AppendLine("1B. INCIDENTES DETECTADOS / AGRUPACIÓN TEMPORAL");
@@ -186,6 +189,8 @@ public static class DiagnosticNarrativeBuilder
                 sb.AppendLine($"    Origen={incident.OrigenClasificado}; componente funcional={semantic}; estado={InvestigationGuidanceBuilder.State(incident)}; recurrencia={recurrence}.");
                 sb.AppendLine($"    Origen técnico sustentado: {origin}");
             }
+            if (crashIncidentsAll.Count > crashIncidents.Count)
+                sb.AppendLine($"  … y {crashIncidentsAll.Count - crashIncidents.Count} incidente(s) más sin mostrar (colección completa en JSON).");
             sb.AppendLine("Los incidentes se agrupan por aplicación y proximidad temporal. TDM no fusiona productos distintos salvo que exista una dependencia o antecedente común demostrable.");
             sb.AppendLine();
         }
@@ -194,13 +199,16 @@ public static class DiagnosticNarrativeBuilder
         {
             sb.AppendLine("1C. PATRONES DE FALLA EN LA VENTANA");
             sb.AppendLine("-----------------------------------");
-            foreach (var pattern in report.PatronesFalla.Take(12))
+            var shownNarrativePatterns = report.PatronesFalla.Take(12).ToList();
+            foreach (var pattern in shownNarrativePatterns)
             {
                 var recurrence = pattern.Incidentes > 1 ? "RECURRENTE" : "AISLADO";
                 sb.AppendLine($"  - {recurrence} | {ProductName(pattern.Producto)} | {pattern.ComponenteSemantico}");
                 sb.AppendLine($"    Incidentes={pattern.Incidentes}; excepción={pattern.TipoExcepcion}; origen={pattern.OrigenClasificado}; estado={pattern.EstadoInvestigacion}.");
                 sb.AppendLine($"    Primera={pattern.PrimeraDeteccion.ToLocalTime():dd/MM/yyyy HH:mm:ss}; última={pattern.UltimaDeteccion.ToLocalTime():dd/MM/yyyy HH:mm:ss}; intervalo promedio={(pattern.IntervaloPromedio.HasValue ? FormatLookback(pattern.IntervaloPromedio.Value) : "No aplica")}.");
             }
+            if (report.PatronesFalla.Count > shownNarrativePatterns.Count)
+                sb.AppendLine($"  … y {report.PatronesFalla.Count - shownNarrativePatterns.Count} patrón(es) más sin mostrar (colección completa en JSON).");
             sb.AppendLine("La recurrencia de un patrón aumenta su prioridad operativa, pero no convierte por sí sola el mecanismo observado en causa primaria confirmada.");
             sb.AppendLine();
         }
@@ -246,7 +254,8 @@ public static class DiagnosticNarrativeBuilder
         if (userInventory?.Evidencia is { Count: > 0 })
         {
             foreach (var e in userInventory.Evidencia) sb.AppendLine($"  - {e.Clave}: {e.Valor}");
-            var accounts = report.Eventos.Where(e => e.Tipo == "USER_ACCOUNT_STATE").Take(60).ToList();
+            var allNarrativeAccounts = report.Eventos.Where(e => e.Tipo == "USER_ACCOUNT_STATE").ToList();
+            var accounts = allNarrativeAccounts.Take(60).ToList();
             if (accounts.Count > 0)
             {
                 sb.AppendLine("  Cuentas locales:");
@@ -255,17 +264,26 @@ public static class DiagnosticNarrativeBuilder
                     string A(string key) => account.Evidencia?.FirstOrDefault(x => x.Clave == key)?.Valor ?? "N/D";
                     sb.AppendLine($"    - {A("Usuario")}: habilitada={A("Habilitada")}; bloqueada={A("Bloqueada")}; contraseña expirada={A("Contraseña expirada")}; cuenta expira={A("Cuenta expira")}; grupos={A("Grupos locales")}; perfil={A("Perfil registrado")}");
                 }
+                if (allNarrativeAccounts.Count > accounts.Count)
+                    sb.AppendLine($"    … y {allNarrativeAccounts.Count - accounts.Count} cuenta(s) más sin mostrar (colección completa en JSON).");
             }
             sb.AppendLine("  Sesiones observadas:");
-            foreach (var session in report.Eventos.Where(e => e.Tipo == "USER_SESSION_STATE").Where(e => (e.Evidencia?.FirstOrDefault(x => x.Clave == "Usuario")?.Valor ?? "N/D") != "N/D").Take(30))
+            var allNarrativeSessions = report.Eventos.Where(e => e.Tipo == "USER_SESSION_STATE").Where(e => (e.Evidencia?.FirstOrDefault(x => x.Clave == "Usuario")?.Valor ?? "N/D") != "N/D").ToList();
+            var narrativeSessions = allNarrativeSessions.Take(30).ToList();
+            foreach (var session in narrativeSessions)
             {
                 string V(string key) => session.Evidencia?.FirstOrDefault(x => x.Clave == key)?.Valor ?? "N/D";
                 sb.AppendLine($"    - {V("Dominio")}\\{V("Usuario")}: SessionId={V("SessionId")}; estado={V("Estado")}; protocolo={V("Protocolo")}; cliente={V("Cliente")}; perfil={V("Perfil")}");
             }
+            if (allNarrativeSessions.Count > narrativeSessions.Count)
+                sb.AppendLine($"    … y {allNarrativeSessions.Count - narrativeSessions.Count} sesión(es) más sin mostrar (colección completa en JSON).");
         }
         else sb.AppendLine("No se obtuvo inventario de usuarios/sesiones.");
         var userProblems = report.Hallazgos.Where(f => f.Id.StartsWith("USER-PROFILE-", StringComparison.OrdinalIgnoreCase)).ToList();
-        foreach (var f in userProblems.Take(30)) sb.AppendLine($"  - [{f.Severidad}] {f.Resumen}");
+        var shownUserProblems = userProblems.Take(30).ToList();
+        foreach (var f in shownUserProblems) sb.AppendLine($"  - [{f.Severidad}] {f.Resumen}");
+        if (userProblems.Count > shownUserProblems.Count)
+            sb.AppendLine($"  … y {userProblems.Count - shownUserProblems.Count} anomalía(s) de perfil más sin mostrar (colección completa en JSON).");
         sb.AppendLine();
 
         sb.AppendLine("4C. CONFIGURACIÓN INTERNA TSPLUS");
@@ -289,11 +307,14 @@ public static class DiagnosticNarrativeBuilder
         if (fileInventories.Count > 0)
         {
             sb.AppendLine("  - Inventario de archivos TSplus (metadatos, solo lectura):");
-            foreach (var inv in fileInventories.Take(12))
+            var shownInventories = fileInventories.Take(12).ToList();
+            foreach (var inv in shownInventories)
             {
                 string V(string key) => inv.Evidencia?.FirstOrDefault(x => x.Clave.Equals(key, StringComparison.OrdinalIgnoreCase))?.Valor ?? "N/D";
                 sb.AppendLine($"    · {V("Producto")}: raíz={V("Raíz")}; relevantes={V("Archivos relevantes")}; binarios 0 bytes={V("Binarios 0 bytes")}; cambios en ventana={V("Cambios de código/configuración en ventana")}; truncado={V("Inventario truncado")}");
             }
+            if (fileInventories.Count > shownInventories.Count)
+                sb.AppendLine($"    … y {fileInventories.Count - shownInventories.Count} inventario(s) más sin mostrar (colección completa en JSON).");
         }
 
         var configProblems = report.Hallazgos.Where(f =>
@@ -305,7 +326,13 @@ public static class DiagnosticNarrativeBuilder
             f.Id.StartsWith("TSPLUS-WEB-JVM-CRASH-", StringComparison.OrdinalIgnoreCase) ||
             f.Id.StartsWith("TSPLUS-INTEGRITY-", StringComparison.OrdinalIgnoreCase)).ToList();
         if (configProblems.Count == 0) sb.AppendLine("  - Anomalías internas detectadas: 0 en las comprobaciones implementadas.");
-        else foreach (var f in configProblems.Take(40)) sb.AppendLine($"  - [{f.Severidad}] {f.Componente}: {f.Resumen}");
+        else
+        {
+            var shownConfigProblems = configProblems.Take(40).ToList();
+            foreach (var f in shownConfigProblems) sb.AppendLine($"  - [{f.Severidad}] {f.Componente}: {f.Resumen}");
+            if (configProblems.Count > shownConfigProblems.Count)
+                sb.AppendLine($"  … y {configProblems.Count - shownConfigProblems.Count} anomalía(s) interna(s) más sin mostrar (colección completa en JSON).");
+        }
         sb.AppendLine("  - Archivos sensibles: TDM conserva sólo metadatos y no exporta credenciales.");
         sb.AppendLine();
 

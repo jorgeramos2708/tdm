@@ -659,6 +659,91 @@ internal static class Program
                 "El encabezado de la causa principal desapareció.");
         });
 
+        Run("Gui_CoverageCountsMatchExport", () =>
+        {
+            var snapshot = new SystemSnapshot(
+                "EQUIPO-PRUEBA", "Windows", "11", "22631", "x64", TimeSpan.FromHours(4), now,
+                TsplusDetectado: true, TsplusRuta: null, TsplusVersion: "prueba");
+            var coverage = new DiagnosticCoverageAssessment(70, "Parcial",
+            [
+                new CoverageSourceAssessment("SRC-CRIT-A", "No disponible", "detalle", true),
+                new CoverageSourceAssessment("SRC-CRIT-B", "Disponible", "detalle", true),
+                new CoverageSourceAssessment("SRC-LOW-A", "Parcial", "detalle", false),
+                new CoverageSourceAssessment("SRC-LOW-B", "No consultado", "detalle", false)
+            ], [], "resumen");
+            var precision = new DiagnosticPrecisionAssessment(80, "Alta", false, 5, 3, 10, 0, false, true, "resumen", []);
+            var report = new DiagnosticReport(snapshot, [], [], now.AddSeconds(-1), now)
+            {
+                CoberturaDiagnostica = coverage,
+                PrecisionDiagnostica = precision
+            };
+            var text = DiagnosticWorkspaceViewModel.BuildCoverage(report);
+            True(text.Contains("Fuentes: 4 | Críticas: 2 | Críticas bloqueadas: 1 | Parciales: 2", StringComparison.Ordinal),
+                "La GUI no calcula Parciales igual que el export (todos los estados Parcial/No consultado).");
+            True(text.Contains("Bloqueos duros: 1", StringComparison.Ordinal),
+                "La GUI mostró FuentesBloqueadas del modelo en vez del conteo de fuentes críticas bloqueadas.");
+            True(text.IndexOf("[CRÍTICA] Fuente: SRC-CRIT-A", StringComparison.Ordinal) >= 0 &&
+                  text.IndexOf("SRC-CRIT-A", StringComparison.Ordinal) < text.IndexOf("SRC-LOW-A", StringComparison.Ordinal),
+                "La GUI no ordena primero las fuentes críticas.");
+        });
+
+        Run("Gui_SummaryWindowWithoutYearZero", () =>
+        {
+            var snapshot = new SystemSnapshot(
+                "EQUIPO-PRUEBA", "Windows", "11", "22631", "x64", TimeSpan.FromHours(4), now,
+                TsplusDetectado: true, TsplusRuta: null, TsplusVersion: "prueba");
+            var report = new DiagnosticReport(snapshot, [], [], now.AddSeconds(-1), now);
+            var text = DiagnosticWorkspaceViewModel.BuildSummary(report);
+            True(!text.Contains("01/01/0001", StringComparison.Ordinal),
+                "La ventana de la GUI cayó al valor por defecto 01/01/0001.");
+            True(text.Contains("Ventana:", StringComparison.Ordinal),
+                "La GUI dejó de mostrar la ventana analizada.");
+        });
+
+        Run("Gui_PatternsMatchExport", () =>
+        {
+            var snapshot = new SystemSnapshot(
+                "EQUIPO-PRUEBA", "Windows", "11", "22631", "x64", TimeSpan.FromHours(4), now,
+                TsplusDetectado: true, TsplusRuta: null, TsplusVersion: "prueba");
+            var singleton = new FailurePattern("PAT-01", TsplusProduct.RemoteAccess, "CompPAT-01", "sem-01",
+                "ExcepcionX", "TSPLUS", "Nuevo", 1, now.AddDays(-1), now, null, ["PAT-01"], []);
+            var report = new DiagnosticReport(snapshot, [], [], now.AddSeconds(-1), now)
+            {
+                PatronesFalla = [singleton]
+            };
+            var text = DiagnosticWorkspaceViewModel.BuildPatterns(report);
+            True(text.Contains("Producto: RemoteAccess | Componente: CompPAT-01 | Incidentes: 1 | Estado: Nuevo", StringComparison.Ordinal),
+                "La tarjeta de patrones de la GUI no muestra Producto ni conserva los singletons.");
+            var empty = DiagnosticWorkspaceViewModel.BuildPatterns(
+                new DiagnosticReport(snapshot, [], [], now.AddSeconds(-1), now));
+            True(empty.Contains("No se detectaron patrones de falla en la ventana.", StringComparison.Ordinal),
+                "El estado vacío de patrones de la GUI diverge.");
+        });
+
+        Run("Gui_ExportStatusDeclaresSanitizedPackage", () =>
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "TDM-export-status-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var snapshot = new SystemSnapshot(
+                    "EQUIPO-PRUEBA", "Windows", "11", "22631", "x64", TimeSpan.FromHours(4), now,
+                    TsplusDetectado: true, TsplusRuta: null, TsplusVersion: "prueba");
+                var report = new DiagnosticReport(snapshot, [], [], now.AddSeconds(-1), now);
+                var vm = new DiagnosticWorkspaceViewModel();
+                vm.ApplyReport(report);
+                vm.SelectExportDirectoryAsync = _ => Task.FromResult<string?>(directory);
+                vm.ExportReportAsync().GetAwaiter().GetResult();
+                True(vm.ExportStatus.Contains("paquete sanitizado", StringComparison.Ordinal),
+                    "El estado de exportación no declara que el paquete sale sanitizado.");
+                True(vm.ExportStatus.Contains(directory, StringComparison.OrdinalIgnoreCase),
+                    "El estado de exportación no conserva la ruta del reporte.");
+            }
+            finally
+            {
+                if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+            }
+        });
+
         Run("EmptySample_Reset", () =>
         {
             var support = new SupportDashboardViewModel(); support.Apply(Array.Empty<ObservabilitySample>()); Equal("N/D", support.ServiceValue);

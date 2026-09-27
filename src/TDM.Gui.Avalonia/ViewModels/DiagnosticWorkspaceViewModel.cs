@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 using TDM.Gui.Avalonia.Services;
 using TDM.Models;
 using TDM.Persistence;
+using TDM.Reporting;
 
 namespace TDM.Gui.Avalonia.ViewModels;
 
@@ -160,8 +161,6 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
 
                 var report = await Task.Run(() => _service.RunAsync(SelectedLookback, runCts.Token), runCts.Token);
                 lastCompletedReport = report;
-                _report = report;
-                HasReport = true;
                 ApplyReport(report);
                 ApplyBaselineIndicator(report);
                 DiagnosticCompleted?.Invoke(this, EventArgs.Empty);
@@ -261,7 +260,7 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
     }
 
     [RelayCommand]
-    private async Task ExportReportAsync()
+    public async Task ExportReportAsync()
     {
         if (_report is null)
         {
@@ -290,7 +289,7 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
                 !File.Exists(result.JsonPath) || new FileInfo(result.JsonPath).Length == 0)
                 throw new IOException("Los archivos del reporte no se generaron correctamente.");
 
-            ExportStatus = $"Reporte guardado: {result.HtmlPath}";
+            ExportStatus = $"Reporte guardado (paquete sanitizado; revise antes de compartir): {result.HtmlPath}";
             try
             {
                 RevealExportedFile?.Invoke(result.HtmlPath);
@@ -470,8 +469,10 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
         BaselineIndicatorBackground = new SolidColorBrush(background);
     }
 
-    private void ApplyReport(DiagnosticReport report)
+    public void ApplyReport(DiagnosticReport report)
     {
+        _report = report;
+        HasReport = true;
         FindingCount = report.Hallazgos.Count;
         EventCount = report.Eventos.Count;
         CriticalCount = report.Hallazgos.Count(x => x.Severidad == DiagnosticSeverity.Critico) +
@@ -581,13 +582,15 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
             _ => DashboardPalette.Muted
         };
 
-    private static string BuildSummary(DiagnosticReport report)
+    public static string BuildSummary(DiagnosticReport report)
     {
         var sb = new StringBuilder();
+        var windowStart = report.PeriodoAnalizadoInicio == default ? report.Inicio - report.Lookback : report.PeriodoAnalizadoInicio;
+        var windowEnd = report.PeriodoAnalizadoFin == default ? report.Inicio : report.PeriodoAnalizadoFin;
         sb.AppendLine($"Equipo: {report.Sistema.Equipo}");
         sb.AppendLine($"Sistema: {report.Sistema.SistemaOperativo} {report.Sistema.Version} | build: {report.Sistema.Build} | arquitectura: {report.Sistema.Arquitectura}");
         sb.AppendLine($"TSplus: {(report.Sistema.TsplusDetectado ? $"Detectado | versión: {report.Sistema.TsplusVersion ?? "N/D"}" : "No detectado")}");
-        sb.AppendLine($"Ventana: {report.PeriodoAnalizadoInicio.ToLocalTime():dd/MM HH:mm} – {report.PeriodoAnalizadoFin.ToLocalTime():dd/MM HH:mm}");
+        sb.AppendLine($"Ventana: {windowStart.ToLocalTime():dd/MM HH:mm} – {windowEnd.ToLocalTime():dd/MM HH:mm}");
         sb.AppendLine($"Hallazgos: {report.Hallazgos.Count} | Eventos: {report.Eventos.Count}");
         if (report.ImpactoFuncional is not null)
             sb.AppendLine($"Impacto funcional: {report.ImpactoFuncional.EstadoGeneral} | detalle: {report.ImpactoFuncional.Resumen}");
@@ -775,14 +778,14 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
         return sb.ToString().TrimEnd();
     }
 
-    private static string BuildPatterns(DiagnosticReport report)
+    public static string BuildPatterns(DiagnosticReport report)
     {
-        if (report.PatronesFalla.Count == 0) return "No se detectaron patrones de falla recurrentes en la ventana.";
+        if (report.PatronesFalla.Count == 0) return "No se detectaron patrones de falla en la ventana.";
         var sb = new StringBuilder();
         var shown = report.PatronesFalla.Take(20).ToList();
         foreach (var pattern in shown)
         {
-            sb.AppendLine($"Componente: {pattern.Componente} | Incidentes: {pattern.Incidentes} | Estado: {pattern.EstadoInvestigacion}");
+            sb.AppendLine($"Producto: {pattern.Producto} | Componente: {pattern.Componente} | Incidentes: {pattern.Incidentes} | Estado: {pattern.EstadoInvestigacion}");
             sb.AppendLine($"Origen: {pattern.OrigenClasificado} | Primera detección: {pattern.PrimeraDeteccion.ToLocalTime():dd/MM HH:mm:ss} | Última detección: {pattern.UltimaDeteccion.ToLocalTime():dd/MM HH:mm:ss}");
             if (!string.IsNullOrWhiteSpace(pattern.ComponenteSemantico)) sb.AppendLine($"Componente semántico: {pattern.ComponenteSemantico}");
             if (!string.IsNullOrWhiteSpace(pattern.TipoExcepcion)) sb.AppendLine($"Tipo de excepción: {pattern.TipoExcepcion}");
@@ -802,19 +805,19 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
         // Primero lo que exige acción (error/advertencia), y dentro por severidad;
         // así las entradas sanas no desplazan a las que requieren intervención.
         var ordered = report.ResolucionesGuiadas
-            .OrderByDescending(x => RequiresAction(x) ? 1 : 0)
+            .OrderByDescending(x => InvestigationGuidanceBuilder.RequiresAction(x) ? 1 : 0)
             .ThenByDescending(x => x.Severidad)
             .ThenBy(x => x.Componente, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var shown = ordered.Take(12).ToList();
-        var actionableTotal = ordered.Count(RequiresAction);
+        var actionableTotal = ordered.Count(InvestigationGuidanceBuilder.RequiresAction);
 
         var sb = new StringBuilder();
         sb.AppendLine($"Resoluciones: {ordered.Count} | Requieren acción: {actionableTotal} | Mostrando: {shown.Count}");
         var currentGroup = (bool?)null;
         foreach (var item in shown)
         {
-            var actionable = RequiresAction(item);
+            var actionable = InvestigationGuidanceBuilder.RequiresAction(item);
             if (currentGroup != actionable)
             {
                 currentGroup = actionable;
@@ -867,11 +870,7 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
         return sb.ToString().TrimEnd();
     }
 
-    private static bool RequiresAction(GuidedResolutionResult item)
-        => item.Severidad is DiagnosticSeverity.Critico or DiagnosticSeverity.Error or DiagnosticSeverity.Advertencia
-           || item.Estado is GuidedResolutionState.Error or GuidedResolutionState.Advertencia;
-
-    private static string BuildCoverage(DiagnosticReport report)
+    public static string BuildCoverage(DiagnosticReport report)
     {
         var coverage = report.CoberturaDiagnostica;
         if (coverage is null) return "Sin evaluación de cobertura.";
@@ -882,12 +881,12 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
 
         var critical = coverage.Fuentes.Count(x => x.Critica);
         var criticalBlocked = coverage.Fuentes.Count(x => x.Critica && x.Estado is "No disponible" or "Bloqueada" or "Timeout");
-        var partialOnly = coverage.Fuentes.Count(x => !x.Critica && x.Estado is "Parcial" or "No consultado");
+        var partialOnly = coverage.Fuentes.Count(x => x.Estado is "Parcial" or "No consultado");
         sb.AppendLine($"Fuentes: {coverage.Fuentes.Count} | Críticas: {critical} | Críticas bloqueadas: {criticalBlocked} | Parciales: {partialOnly}");
 
         if (report.PrecisionDiagnostica is { } precision)
         {
-            sb.AppendLine($"Precisión diagnóstica: {precision.Score}/100 | Nivel: {precision.Nivel} | Cobertura completa: {(precision.CoberturaCompleta ? "sí" : "no")} | Bloqueos duros: {precision.FuentesBloqueadas} | Señales causales: {precision.SenalesCausales}");
+            sb.AppendLine($"Precisión diagnóstica: {precision.Score}/100 | Nivel: {precision.Nivel} | Cobertura completa: {(precision.CoberturaCompleta ? "sí" : "no")} | Bloqueos duros: {criticalBlocked} | Señales causales: {precision.SenalesCausales}");
         }
 
         sb.AppendLine();

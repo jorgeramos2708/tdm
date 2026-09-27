@@ -24,6 +24,10 @@ public static class InvestigationGuidanceBuilder
         };
     }
 
+    public static bool RequiresAction(GuidedResolutionResult item)
+        => item.Severidad is DiagnosticSeverity.Critico or DiagnosticSeverity.Error or DiagnosticSeverity.Advertencia
+           || item.Estado is GuidedResolutionState.Error or GuidedResolutionState.Advertencia;
+
     public static void Append(StringBuilder sb, DiagnosticReport report, RootCauseCandidate? c)
     {
         var state = State(c);

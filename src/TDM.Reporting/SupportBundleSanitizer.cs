@@ -330,6 +330,11 @@ public static class SupportBundleSanitizer
     private static string Pseudonym(string prefix, string? value)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Equals("N/D", StringComparison.OrdinalIgnoreCase)) return value ?? "N/D";
+        if (value.StartsWith(prefix + "-", StringComparison.Ordinal))
+        {
+            var tail = value[(prefix.Length + 1)..];
+            if (tail.Length == 8 && tail.All(Uri.IsHexDigit)) return value;
+        }
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value.Trim().ToUpperInvariant()));
         return $"{prefix}-{Convert.ToHexString(hash)[..8]}";
     }

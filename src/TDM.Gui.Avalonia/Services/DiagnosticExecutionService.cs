@@ -198,7 +198,11 @@ public async Task<DiagnosticReport> RunAsync(string period, CancellationToken ct
             if (jsonFiles.Length >= 1)
             {
                 var prevJson = File.ReadAllText(jsonFiles[0]);
-                previousReport = System.Text.Json.JsonSerializer.Deserialize<DiagnosticReport>(prevJson, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                previousReport = System.Text.Json.JsonSerializer.Deserialize<DiagnosticReport>(prevJson, new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true,
+                    Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+                });
             }
         }
         catch { /* Best-effort: si falla la lectura, se exporta sin diff */ }

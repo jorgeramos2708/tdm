@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using TDM.Application;
 using TDM.Collectors.TSplus;
 using TDM.Collectors.Windows;
@@ -75,7 +77,15 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("ContinuousRunReplansSeedWhenWindowGrows", ContinuousRunReplansSeedWhenWindowGrows),
     ("ContinuousCatalogSwapsHeavySourcesForIncremental", ContinuousCatalogSwapsHeavySourcesForIncremental),
     ("TsplusCoverageAcceptsIncrementalSource", TsplusCoverageAcceptsIncrementalSource),
-    ("GuiRealtimeWiresIncrementalContinuousDiagnostics", GuiRealtimeWiresIncrementalContinuousDiagnostics)
+    ("GuiRealtimeWiresIncrementalContinuousDiagnostics", GuiRealtimeWiresIncrementalContinuousDiagnostics),
+    ("ExportRootCauseMarkersAndFooters", ExportRootCauseMarkersAndFooters),
+    ("ExportGuidedResolutionOrderAndDetails", ExportGuidedResolutionOrderAndDetails),
+    ("ExportPatternsShowSingletonsAndFullColumns", ExportPatternsShowSingletonsAndFullColumns),
+    ("ExportCoverageCountsAndCriticalFirst", ExportCoverageCountsAndCriticalFirst),
+    ("ExportJsonUsesStringEnumsAndRoundTrips", ExportJsonUsesStringEnumsAndRoundTrips),
+    ("SanitizerIdempotentAvoidsSpuriousDiff", SanitizerIdempotentAvoidsSpuriousDiff),
+    ("NarrativeUsesLocalTimeForWindows", NarrativeUsesLocalTimeForWindows),
+    ("EvidenceDetailsFallBackToIngestedAt", EvidenceDetailsFallBackToIngestedAt)
 };
 
 var failed = 0;
@@ -1068,6 +1078,211 @@ static Task GuiRealtimeWiresIncrementalContinuousDiagnostics()
     True(text.Contains("DiagnosticoContinuo", StringComparison.Ordinal),
         "El reporte no declara el modo continuo para exportación y cobertura.");
     return Task.CompletedTask;
+}
+
+static async Task ExportRootCauseMarkersAndFooters()
+{
+    var dir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var manyEvidence = Enumerable.Range(1, 25).Select(i => new EvidenceItem($"Evidencia {i}", $"valor {i}")).ToList();
+        var causes = Enumerable.Range(1, 9)
+            .Select(i => new RootCauseCandidate(i, $"ROOT-{i}", $"Comp-{i}", DiagnosticLayer.Tsplus, 90 - i,
+                ConfidenceLevel.Alta, $"resumen {i}", $"explica {i}", i == 1 ? manyEvidence : [new EvidenceItem("k", "v")],
+                Producto: TsplusProduct.RemoteAccess, OrigenClasificado: "TSPLUS"))
+            .ToList();
+        var principal = Report([], now) with { CausasRaiz = causes, CausaRaizPrincipal = causes[0] };
+        var result = await ReportExporter.ExportAsync(principal, dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("[PRINCIPAL] #1", StringComparison.Ordinal), "El candidato principal no quedó marcado con [PRINCIPAL].");
+        True(html.Contains("id='cau-1'", StringComparison.Ordinal), "Se perdió el ancla de la causa principal.");
+        True(html.Contains("evidencia(s) más (colección completa en JSON)", StringComparison.Ordinal),
+            "La lista de evidencia truncada no indica el resto conservado en JSON.");
+        True(html.Contains("… y 1 candidato(s) más sin mostrar.", StringComparison.Ordinal),
+            "El listado de causas no anuncia el resto sin mostrar.");
+
+        var sinPrincipal = Report([], now) with { CausasRaiz = causes };
+        var second = await ReportExporter.ExportAsync(sinPrincipal, dir, CancellationToken.None);
+        var secondHtml = await File.ReadAllTextAsync(second.HtmlPath);
+        True(secondHtml.Contains("Sin causa principal declarada", StringComparison.Ordinal),
+            "Sin CausaRaizPrincipal el export no explica la ausencia de causa declarada.");
+        False(secondHtml.Contains("[PRINCIPAL]", StringComparison.Ordinal),
+            "Con CausaRaizPrincipal nula no debe aparecer ningún marcador [PRINCIPAL].");
+    }
+    finally { TryDelete(dir); }
+}
+
+static async Task ExportGuidedResolutionOrderAndDetails()
+{
+    var dir = TempDir();
+    try
+    {
+        static GuidedResolutionResult Guided(string comp, GuidedResolutionState estado, DiagnosticSeverity sev)
+            => new(TsplusProduct.RemoteAccess, comp, estado, sev, ConfidenceLevel.Alta, "sintoma " + comp,
+                "causa " + comp, "impacto " + comp, [new GuidedResolutionCheck("check " + comp, "OK", "detalle")],
+                [], ["corregir " + comp], ["validar " + comp], [], "fuente", "https://example.test", "cobertura " + comp);
+
+        var guided = new List<GuidedResolutionResult>
+        {
+            Guided("ACC-CRIT", GuidedResolutionState.Error, DiagnosticSeverity.Critico),
+            Guided("ACC-ERR", GuidedResolutionState.Error, DiagnosticSeverity.Error),
+            Guided("ACC-WARN", GuidedResolutionState.Saludable, DiagnosticSeverity.Advertencia)
+        };
+        guided.AddRange(Enumerable.Range(1, 11).Select(i => Guided($"N{i:D2}", GuidedResolutionState.Saludable, DiagnosticSeverity.Informativo)));
+
+        var report = Report([], DateTimeOffset.Now) with { ResolucionesGuiadas = guided };
+        var result = await ReportExporter.ExportAsync(report, dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+
+        True(html.Contains("Resoluciones: 14 | Requieren acción: 3 | Mostrando: 12", StringComparison.Ordinal),
+            "La línea de conteos de resolución guiada no refleja totales/mostrados.");
+        True(html.Contains("<h3>Requiere acción (3):</h3>", StringComparison.Ordinal), "Falta el encabezado del grupo accionable.");
+        True(html.Contains("<h3>Sin acción requerida:</h3>", StringComparison.Ordinal), "Falta el encabezado del grupo no accionable.");
+        True(html.IndexOf("<h3>Requiere acción (3):</h3>", StringComparison.Ordinal) < html.IndexOf("<h3>Sin acción requerida:</h3>", StringComparison.Ordinal),
+            "El grupo accionable debe listarse primero.");
+        var decodedHtml = System.Net.WebUtility.HtmlDecode(html);
+        True(decodedHtml.Contains("[CRÍTICO] ", StringComparison.Ordinal), "Falta el marcador [CRÍTICO] en la tarjeta guiada.");
+        True(decodedHtml.Contains("[ERROR] ", StringComparison.Ordinal), "Falta el marcador [ERROR] en la tarjeta guiada.");
+        True(decodedHtml.Contains("[ADVERTENCIA] ", StringComparison.Ordinal), "Falta el marcador [ADVERTENCIA] en la tarjeta guiada.");
+        True(html.Contains("ACC-CRIT · Error · Critico · Alta</h4>", StringComparison.Ordinal),
+            "La tarjeta guiada no incluye producto/componente/estado/severidad/confianza en el h4.");
+        True(html.Contains("<strong>Síntoma:</strong>", StringComparison.Ordinal), "La tarjeta guiada no muestra el síntoma.");
+        True(html.Contains("<strong>Comprobaciones:</strong>", StringComparison.Ordinal), "La tarjeta guiada no muestra las comprobaciones.");
+        True(html.Contains("… y 2 resolución(es) más sin mostrar.", StringComparison.Ordinal),
+            "El listado guiado no anuncia el resto sin mostrar.");
+    }
+    finally { TryDelete(dir); }
+}
+
+static async Task ExportPatternsShowSingletonsAndFullColumns()
+{
+    var dir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        FailurePattern Pattern(string id, int incidentes)
+            => new(id, TsplusProduct.RemoteAccess, "Comp" + id, "sem-" + id, "ExcepcionX", "TSPLUS", "Nuevo",
+                incidentes, now.AddDays(-1), now, null, [id], []);
+        var patterns = Enumerable.Range(1, 25).Select(i => Pattern($"PAT-{i:D2}", i == 1 ? 1 : 2)).ToList();
+        var report = Report([], now) with { PatronesFalla = patterns };
+        var result = await ReportExporter.ExportAsync(report, dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("<h2>Patrones de falla</h2>", StringComparison.Ordinal), "La tarjeta dejó de llamarse Patrones de falla.");
+        False(html.Contains("Patrones recurrentes", StringComparison.Ordinal), "Quedó el título viejo Patrones recurrentes.");
+        True(html.Contains("CompPAT-01", StringComparison.Ordinal), "Un patrón singleton (Incidentes=1) dejó de mostrarse.");
+        True(html.Contains("<th>Origen</th>", StringComparison.Ordinal), "Falta la columna Origen en patrones.");
+        True(html.Contains("<th>Intervalo promedio</th>", StringComparison.Ordinal), "Falta la columna Intervalo promedio en patrones.");
+        True(html.Contains("<th>Incidentes relacionados</th>", StringComparison.Ordinal), "Falta la columna Incidentes relacionados en patrones.");
+        True(html.Contains("… y 5 patrón(es) más sin mostrar.", StringComparison.Ordinal),
+            "El listado de patrones no anuncia el resto sin mostrar.");
+
+        var vacio = await ReportExporter.ExportAsync(Report([], now), dir, CancellationToken.None);
+        var vacioHtml = await File.ReadAllTextAsync(vacio.HtmlPath);
+        True(vacioHtml.Contains("No se detectaron patrones de falla en la vista temporal actual.", StringComparison.Ordinal),
+            "El estado vacío de patrones ya no coincide con la GUI.");
+    }
+    finally { TryDelete(dir); }
+}
+
+static async Task ExportCoverageCountsAndCriticalFirst()
+{
+    var dir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var coverage = new DiagnosticCoverageAssessment(70, "Parcial",
+            [
+                new CoverageSourceAssessment("SRC-CRIT-A", "No disponible", "detalle", true),
+                new CoverageSourceAssessment("SRC-CRIT-B", "Disponible", "detalle", true),
+                new CoverageSourceAssessment("SRC-LOW-A", "Parcial", "detalle", false),
+                new CoverageSourceAssessment("SRC-LOW-B", "No consultado", "detalle", false)
+            ], [], "resumen");
+        var report = Report([], now) with { CoberturaDiagnostica = coverage };
+        var result = await ReportExporter.ExportAsync(report, dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("Fuentes: 4 | Críticas: 2 | Críticas bloqueadas: 1 | Parciales: 2", StringComparison.Ordinal),
+            "La línea de conteos de cobertura no cuenta Parciales por estado (incluye críticas).");
+        True(html.IndexOf("SRC-CRIT-A", StringComparison.Ordinal) < html.IndexOf("SRC-LOW-A", StringComparison.Ordinal),
+            "La tabla de cobertura ya no ordena primero las fuentes críticas.");
+    }
+    finally { TryDelete(dir); }
+}
+
+static async Task ExportJsonUsesStringEnumsAndRoundTrips()
+{
+    var dir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var evt = new DiagnosticEvent(now, "Test", "Test", DiagnosticLayer.Windows, DiagnosticSeverity.Critico, "TEST_EVENT", "mensaje");
+        var report = Report([evt], now);
+        var result = await ReportExporter.ExportAsync(report, dir, CancellationToken.None);
+        var json = await File.ReadAllTextAsync(result.JsonPath);
+        True(json.Contains("\"severidad\": \"Critico\"", StringComparison.Ordinal), "La severidad no se serializó como texto en JSON.");
+        True(json.Contains("\"capa\": \"Windows\"", StringComparison.Ordinal), "La capa no se serializó como texto en JSON.");
+        True(json.Contains("\"producto\": \"Ninguno\"", StringComparison.Ordinal), "El producto no se serializó como texto en JSON.");
+        var round = JsonSerializer.Deserialize<DiagnosticReport>(json, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            Converters = { new JsonStringEnumConverter() }
+        });
+        NotNull(round, "El JSON exportado no volvió a leerse como reporte.");
+        Equal(DiagnosticSeverity.Critico, round!.Eventos[0].Severidad, "El ciclo de escritura/lectura de enums perdió severidad.");
+        Equal(DiagnosticLayer.Windows, round.Eventos[0].Capa, "El ciclo de escritura/lectura de enums perdió capa.");
+    }
+    finally { TryDelete(dir); }
+}
+
+static async Task SanitizerIdempotentAvoidsSpuriousDiff()
+{
+    var now = DateTimeOffset.Now;
+    var evt = new DiagnosticEvent(now, "Security", "Accounts", DiagnosticLayer.Windows, DiagnosticSeverity.Error,
+        "USER_ACCOUNT_STATE", "cuenta observada",
+        Evidencia: [new EvidenceItem("Usuario", "alice"), new EvidenceItem("Contraseña", "hunter2")]);
+    var raw = Report([evt], now);
+    var once = SupportBundleSanitizer.Sanitize(raw);
+    var twice = SupportBundleSanitizer.Sanitize(once);
+    Equal(JsonSerializer.Serialize(once), JsonSerializer.Serialize(twice),
+        "Sanitize no es idempotente: la pseudonimización cambió entre pasadas.");
+
+    var dir = TempDir();
+    try
+    {
+        var result = await ReportExporter.ExportAsync(once, dir, CancellationToken.None, once);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        False(html.Contains("Cambios desde el reporte anterior", StringComparison.Ordinal),
+            "Un reporte previo ya sanitizado generó una tarjeta diff espuria por pseudónimos no idempotentes.");
+    }
+    finally { TryDelete(dir); }
+}
+
+static Task NarrativeUsesLocalTimeForWindows()
+{
+    var report = Report([], DateTimeOffset.Now);
+    var text = DiagnosticNarrativeBuilder.Build(report);
+    True(text.Contains($"Periodo visible: {report.PeriodoAnalizadoInicio.ToLocalTime():dd/MM/yyyy HH:mm:ss}", StringComparison.Ordinal),
+        "La ventana del narrativo no se imprime en hora local.");
+    True(text.Contains($"Ejecución TDM: {report.Inicio.ToLocalTime():dd/MM/yyyy HH:mm:ss}", StringComparison.Ordinal),
+        "La ejecución TDM del narrativo no se imprime en hora local.");
+    return Task.CompletedTask;
+}
+
+static async Task EvidenceDetailsFallBackToIngestedAt()
+{
+    var dir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var evt = new DiagnosticEvent(null, "Test", "Test", DiagnosticLayer.Windows, DiagnosticSeverity.Informativo,
+            "TEST_EVENT", "sin timestamp", IngestedAt: now);
+        var report = Report([evt], now);
+        var result = await ReportExporter.ExportAsync(report, dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains($"{now.ToLocalTime():dd/MM/yyyy HH:mm:ss} [Informativo] [Fuente:", StringComparison.Ordinal),
+            "La evidencia sin Timestamp no cae a IngestedAt en los detalles del export.");
+    }
+    finally { TryDelete(dir); }
 }
 
 static string? FindRepoRoot()

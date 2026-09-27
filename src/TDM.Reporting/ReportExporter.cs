@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using TDM.Models;
 
@@ -29,7 +30,8 @@ public static async Task<ReportExportResult> ExportAsync(
         var options = new JsonSerializerOptions
         {
             WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            Converters = { new JsonStringEnumConverter() }
         };
         var json = JsonSerializer.Serialize(safeReport, options);
         // S9: valida que el JSON serializado est� bien formado antes de escribirlo; un truncado
@@ -145,7 +147,7 @@ public static async Task<ReportExportResult> ExportAsync(
         }
         var sb = new StringBuilder();
         sb.Append("<!doctype html><html lang='es-MX'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
-        sb.Append("<title>TDM - Reporte de diagnóstico</title><style>body{font-family:Segoe UI,Arial,sans-serif;margin:22px auto;padding:0 20px;max-width:1180px;color:#e6edf5;background:#070b11;line-height:1.42}h1{margin:0;color:#f4f8fb;font-size:28px}h2{font-size:18px;margin:0 0 12px;color:#39d0ff;text-transform:uppercase;letter-spacing:.02em}h3{color:#39d0ff;text-transform:uppercase;letter-spacing:.02em}.report-sub{color:#8fa3b8;margin:4px 0 18px}.muted{color:#8fa3b8}.card{background:#0d141e;border:1px solid #243247;border-radius:12px;padding:12px;margin:8px 0;box-shadow:0 8px 28px rgba(0,0,0,.18)}.quick-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.quick-card{background:#101b27;border:1px solid #243247;border-radius:10px;padding:12px;min-height:70px}.quick-label{color:#39d0ff;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.02em}.quick-value{font-size:17px;font-weight:700;margin-top:5px}.state-ok{color:#67e8a5}.state-warn{color:#ffd166}.state-error{color:#ff8a3d}.state-muted{color:#8fa3b8}.support-main{border-left:4px solid #39d0ff}.support-title{font-size:21px;font-weight:700;margin:4px 0}.support-meta{display:flex;gap:16px;flex-wrap:wrap;color:#e6edf5;font-size:12px}.support-meta strong{color:#fff}.support-evidence{margin-top:9px;color:#b7c8d8;font-size:12px}.impact-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.impact-item{background:#101b27;border:1px solid #243247;border-radius:8px;padding:10px}.step{display:grid;grid-template-columns:32px 1fr;gap:8px;align-items:start;padding:8px 0;border-bottom:1px solid #1d2a3a}.step-num{width:24px;height:24px;border-radius:50%;background:#173a4a;color:#67d9ff;display:flex;align-items:center;justify-content:center;font-weight:700}.compact-timeline{display:grid;gap:6px}.compact-event{display:grid;grid-template-columns:105px 26px 1fr;gap:8px;align-items:start;padding:8px 0;border-bottom:1px solid #1d2a3a}.compact-time{color:#8fa3b8;font-size:12px}.technical-bundle{margin:16px 0;border:1px solid #31516a;border-radius:12px;background:#0a111a}.technical-bundle>summary{cursor:pointer;padding:15px 17px;font-weight:700;color:#67d9ff;list-style:none}.technical-bundle>summary::-webkit-details-marker{display:none}.technical-bundle>summary:before{content:'＋ ';color:#39d0ff}.technical-bundle[open]>summary:before{content:'− '}.technical-bundle>.card{margin:12px}.card details>summary{cursor:pointer;color:#67d9ff}.card table{font-size:13px}table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #1d2a3a;text-align:left;padding:8px;vertical-align:top}th{color:#fff;font-weight:700}.critical{font-weight:700;color:#ff4d4f}.error{font-weight:700;color:#ff8a3d}.info{color:#ffffff}.mono{font-family:Consolas,monospace;white-space:pre-wrap;color:#dbe8f2}.diag-text{font-family:Consolas,monospace;color:#fff}.diag-line{white-space:pre-wrap;min-height:1.35em}.diag-line strong{font-weight:700;color:#fff}.diag-heading{color:#39d0ff;font-weight:700;text-transform:uppercase;letter-spacing:.02em;margin:12px 0 5px}.diag-gap{height:.7em}.diag-sep{color:#8fa3b8}.badge{display:inline-block;border:1px solid #31516a;border-radius:999px;padding:2px 8px;margin-right:6px;color:#67d9ff}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.metric,.flow-node,.dep{background:#101b27;border:1px solid #243247;border-radius:10px;padding:12px}.metric .label{color:#8fa3b8;font-size:12px}.metric .value{font-weight:700;font-size:18px;margin-top:7px}.flow{display:flex;align-items:stretch;gap:7px;overflow-x:auto;padding-bottom:4px}.flow-node{min-width:185px;flex:1}.flow-node .kind{color:#8fa3b8;font-size:11px}.flow-arrow{display:flex;align-items:center;color:#39d0ff;font-size:22px}.deps{display:flex;gap:7px;overflow-x:auto}.dep{min-width:180px}.ok{border-color:#236b52}.accent{border-color:#39d0ff}.warn{border-color:#ffd166}.error{border-color:#ff8a3d}.critical{border-color:#ff4d4f}.timeline-v{display:grid;gap:7px}.timeline-event{background:#101b27;border-left:3px solid #39d0ff;border-radius:6px;padding:10px}.timeline-event.info{border-left-color:#ffffff}.timeline-event.warn{border-left-color:#ffd166}.timeline-event.error{border-left-color:#ff8a3d}.timeline-event.critical{border-left-color:#ff4d4f}a{color:#67d9ff}@media(max-width:800px){.quick-grid,.impact-grid,.grid{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.flow{flex-direction:column}.flow-arrow{transform:rotate(90deg);justify-content:center}.compact-event{grid-template-columns:85px 22px 1fr}}@media print{body{background:#fff;color:#111}.card,.quick-card,.impact-item,.technical-bundle{background:#fff;border-color:#ccc;box-shadow:none}h1,h2,h3,.mono{color:#111}.muted,.report-sub,.quick-label,.support-meta,.compact-time{color:#555}th{color:#111}.technical-bundle{display:block}.technical-bundle>summary{color:#111}.technical-bundle:not([open])>:not(summary){display:none!important}}</style></head><body>");
+        sb.Append("<title>TDM - Reporte de diagnóstico</title><style>body{font-family:Segoe UI,Arial,sans-serif;margin:22px auto;padding:0 20px;max-width:1180px;color:#e6edf5;background:#070b11;line-height:1.42}h1{margin:0;color:#f4f8fb;font-size:28px}h2{font-size:18px;margin:0 0 12px;color:#39d0ff;text-transform:uppercase;letter-spacing:.02em}h3{color:#39d0ff;text-transform:uppercase;letter-spacing:.02em}h4{color:#39d0ff;font-size:15px;margin:14px 0 6px}.report-sub{color:#8fa3b8;margin:4px 0 18px}.muted{color:#8fa3b8}.card{background:#0d141e;border:1px solid #243247;border-radius:12px;padding:12px;margin:8px 0;box-shadow:0 8px 28px rgba(0,0,0,.18)}.quick-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.quick-card{background:#101b27;border:1px solid #243247;border-radius:10px;padding:12px;min-height:70px}.quick-label{color:#39d0ff;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.02em}.quick-value{font-size:17px;font-weight:700;margin-top:5px}.state-ok{color:#67e8a5}.state-warn{color:#ffd166}.state-error{color:#ff8a3d}.state-muted{color:#8fa3b8}.support-main{border-left:4px solid #39d0ff}.support-title{font-size:21px;font-weight:700;margin:4px 0}.support-meta{display:flex;gap:16px;flex-wrap:wrap;color:#e6edf5;font-size:12px}.support-meta strong{color:#fff}.support-evidence{margin-top:9px;color:#b7c8d8;font-size:12px}.impact-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.impact-item{background:#101b27;border:1px solid #243247;border-radius:8px;padding:10px}.step{display:grid;grid-template-columns:32px 1fr;gap:8px;align-items:start;padding:8px 0;border-bottom:1px solid #1d2a3a}.step-num{width:24px;height:24px;border-radius:50%;background:#173a4a;color:#67d9ff;display:flex;align-items:center;justify-content:center;font-weight:700}.compact-timeline{display:grid;gap:6px}.compact-event{display:grid;grid-template-columns:105px 26px 1fr;gap:8px;align-items:start;padding:8px 0;border-bottom:1px solid #1d2a3a}.compact-time{color:#8fa3b8;font-size:12px}.technical-bundle{margin:16px 0;border:1px solid #31516a;border-radius:12px;background:#0a111a}.technical-bundle>summary{cursor:pointer;padding:15px 17px;font-weight:700;color:#67d9ff;list-style:none}.technical-bundle>summary::-webkit-details-marker{display:none}.technical-bundle>summary:before{content:'＋ ';color:#39d0ff}.technical-bundle[open]>summary:before{content:'− '}.technical-bundle>.card{margin:12px}.card details>summary{cursor:pointer;color:#67d9ff}.card table{font-size:13px}table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #1d2a3a;text-align:left;padding:8px;vertical-align:top}th{color:#fff;font-weight:700}.critical{font-weight:700;color:#ff4d4f}.error{font-weight:700;color:#ff8a3d}.info{color:#ffffff}.mono{font-family:Consolas,monospace;white-space:pre-wrap;color:#dbe8f2}.diag-text{font-family:Consolas,monospace;color:#fff}.diag-line{white-space:pre-wrap;min-height:1.35em}.diag-line strong{font-weight:700;color:#fff}.diag-heading{color:#39d0ff;font-weight:700;text-transform:uppercase;letter-spacing:.02em;margin:12px 0 5px}.diag-gap{height:.7em}.diag-sep{color:#8fa3b8}.badge{display:inline-block;border:1px solid #31516a;border-radius:999px;padding:2px 8px;margin-right:6px;color:#67d9ff}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.metric,.flow-node,.dep{background:#101b27;border:1px solid #243247;border-radius:10px;padding:12px}.metric .label{color:#8fa3b8;font-size:12px}.metric .value{font-weight:700;font-size:18px;margin-top:7px}.flow{display:flex;align-items:stretch;gap:7px;overflow-x:auto;padding-bottom:4px}.flow-node{min-width:185px;flex:1}.flow-node .kind{color:#8fa3b8;font-size:11px}.flow-arrow{display:flex;align-items:center;color:#39d0ff;font-size:22px}.deps{display:flex;gap:7px;overflow-x:auto}.dep{min-width:180px}.ok{border-color:#236b52}.accent{border-color:#39d0ff}.warn{border-color:#ffd166}.error{border-color:#ff8a3d}.critical{border-color:#ff4d4f}.timeline-v{display:grid;gap:7px}.timeline-event{background:#101b27;border-left:3px solid #39d0ff;border-radius:6px;padding:10px}.timeline-event.info{border-left-color:#ffffff}.timeline-event.warn{border-left-color:#ffd166}.timeline-event.error{border-left-color:#ff8a3d}.timeline-event.critical{border-left-color:#ff4d4f}a{color:#67d9ff}@media(max-width:800px){.quick-grid,.impact-grid,.grid{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.flow{flex-direction:column}.flow-arrow{transform:rotate(90deg);justify-content:center}.compact-event{grid-template-columns:85px 22px 1fr}}@media print{body{background:#fff;color:#111}.card,.quick-card,.impact-item,.technical-bundle{background:#fff;border-color:#ccc;box-shadow:none}h1,h2,h3,.mono{color:#111}.muted,.report-sub,.quick-label,.support-meta,.compact-time{color:#555}th{color:#111}.technical-bundle{display:block}.technical-bundle>summary{color:#111}.technical-bundle:not([open])>:not(summary){display:none!important}}</style></head><body>");
         sb.Append("<h1>TSplus Diagnostic Monitor (TDM)</h1>");
         var quickPeriodStart = report.PeriodoAnalizadoInicio == default ? report.Inicio - report.Lookback : report.PeriodoAnalizadoInicio;
         var quickPeriodEnd = report.PeriodoAnalizadoFin == default ? report.Inicio : report.PeriodoAnalizadoFin;
@@ -402,8 +404,13 @@ public static async Task<ReportExportResult> ExportAsync(
 
         if (report.CoberturaDiagnostica is { } coverageReport)
         {
-            sb.Append("<div class='card'><h2>Cobertura y autodiagnóstico</h2><p><strong>" + H($"{coverageReport.Score}/100 · {coverageReport.Nivel}") + "</strong> · " + H(coverageReport.Resumen) + "</p><table><tr><th>Fuente</th><th>Estado</th><th>Crítica</th><th>Detalle</th></tr>");
-            foreach (var source in coverageReport.Fuentes)
+            sb.Append("<div class='card'><h2>Cobertura y autodiagnóstico</h2><p><strong>" + H($"{coverageReport.Score}/100 · {coverageReport.Nivel}") + "</strong> · " + H(coverageReport.Resumen) + "</p>");
+            var criticalCoverageTotal = coverageReport.Fuentes.Count(x => x.Critica);
+            var criticalCoverageBlocked = coverageReport.Fuentes.Count(x => x.Critica && x.Estado is "No disponible" or "Bloqueada" or "Timeout");
+            var coveragePartials = coverageReport.Fuentes.Count(x => x.Estado is "Parcial" or "No consultado");
+            sb.Append($"<p>Fuentes: {coverageReport.Fuentes.Count} | Críticas: {criticalCoverageTotal} | Críticas bloqueadas: {criticalCoverageBlocked} | Parciales: {coveragePartials}</p>");
+            sb.Append("<table><tr><th>Fuente</th><th>Estado</th><th>Crítica</th><th>Detalle</th></tr>");
+            foreach (var source in coverageReport.Fuentes.OrderByDescending(x => x.Critica))
                 sb.Append($"<tr><td>{H(source.Fuente)}</td><td>{H(source.Estado)}</td><td>{(source.Critica ? "Sí" : "No")}</td><td>{H(source.Detalle)}</td></tr>");
             sb.Append("</table>");
             if (coverageReport.Limitaciones.Count > 0)
@@ -448,15 +455,45 @@ public static async Task<ReportExportResult> ExportAsync(
         }
         else
         {
-            sb.Append("<table><tr><th>Producto</th><th>Componente</th><th>Estado</th><th>Confianza</th><th>Interpretación</th></tr>");
-            foreach (var item in report.ResolucionesGuiadas)
-                sb.Append($"<tr><td>{H(item.Producto.ToString())}</td><td>{H(item.Componente)}</td><td>{H(item.Estado.ToString())}</td><td>{H(item.Confianza.ToString())}</td><td>{H(item.CausaProbable)}</td></tr>");
+            var orderedGuided = report.ResolucionesGuiadas
+                .OrderByDescending(x => InvestigationGuidanceBuilder.RequiresAction(x) ? 1 : 0)
+                .ThenByDescending(x => x.Severidad)
+                .ThenBy(x => x.Componente, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var actionableGuidedTotal = orderedGuided.Count(InvestigationGuidanceBuilder.RequiresAction);
+            var shownGuided = orderedGuided.Take(12).ToList();
+            sb.Append("<table><tr><th>Producto</th><th>Componente</th><th>Estado</th><th>Severidad</th><th>Confianza</th><th>Interpretación</th></tr>");
+            foreach (var item in shownGuided)
+                sb.Append($"<tr><td>{H(item.Producto.ToString())}</td><td>{H(item.Componente)}</td><td>{H(item.Estado.ToString())}</td><td>{H(item.Severidad.ToString())}</td><td>{H(item.Confianza.ToString())}</td><td>{H(item.CausaProbable)}</td></tr>");
             sb.Append("</table>");
+            sb.Append($"<p>Resoluciones: {orderedGuided.Count} | Requieren acción: {actionableGuidedTotal} | Mostrando: {shownGuided.Count}</p>");
 
-            foreach (var item in report.ResolucionesGuiadas.Where(r => r.Estado is GuidedResolutionState.Error or GuidedResolutionState.Advertencia).Take(12))
+            var currentGuidedGroup = (bool?)null;
+            foreach (var item in shownGuided)
             {
-                sb.Append($"<h3>{H(item.Producto.ToString())} · {H(item.Componente)} · {H(item.Estado.ToString())}</h3>");
+                var actionable = InvestigationGuidanceBuilder.RequiresAction(item);
+                if (currentGuidedGroup != actionable)
+                {
+                    currentGuidedGroup = actionable;
+                    sb.Append(actionable
+                        ? $"<h3>Requiere acción ({actionableGuidedTotal}):</h3>"
+                        : "<h3>Sin acción requerida:</h3>");
+                }
+                var marker = actionable
+                    ? item.Severidad == DiagnosticSeverity.Critico ? "[CRÍTICO] "
+                        : item.Severidad == DiagnosticSeverity.Error ? "[ERROR] "
+                        : "[ADVERTENCIA] "
+                    : string.Empty;
+                sb.Append($"<h4>{H(marker)}{H(item.Producto.ToString())} · {H(item.Componente)} · {H(item.Estado.ToString())} · {H(item.Severidad.ToString())} · {H(item.Confianza.ToString())}</h4>");
+                sb.Append($"<p><strong>Síntoma:</strong> {H(item.Sintoma)}</p>");
                 sb.Append($"<p><strong>Causa probable:</strong> {H(item.CausaProbable)}<br><strong>Impacto:</strong> {H(item.Impacto)}</p>");
+                if (item.Comprobaciones.Count > 0)
+                {
+                    sb.Append("<p><strong>Comprobaciones:</strong></p><ul>");
+                    foreach (var check in item.Comprobaciones)
+                        sb.Append($"<li>{H(check.Nombre)} — {H(check.Estado)}: {H(check.Detalle)}</li>");
+                    sb.Append("</ul>");
+                }
                 sb.Append("<div class='grid'><div><strong>Cómo corregir / revisar</strong><ol>");
                 foreach (var step in item.ComoCorregir) sb.Append($"<li>{H(step)}</li>");
                 sb.Append("</ol></div><div><strong>Cómo validar</strong><ol>");
@@ -470,6 +507,8 @@ public static async Task<ReportExportResult> ExportAsync(
                 }
                 sb.Append($"<p class='muted'>Cobertura: {H(item.Cobertura)} · Fuente oficial: <a href='{H(item.UrlOficial)}'>{H(item.FuenteOficial)}</a></p>");
             }
+            if (orderedGuided.Count > shownGuided.Count)
+                sb.Append($"<p class='muted'>… y {orderedGuided.Count - shownGuided.Count} resolución(es) más sin mostrar.</p>");
         }
         sb.Append("<p class='muted'>El asistente sólo interpreta evidencia ya recopilada. TDM no ejecuta reparaciones, no reinicia servicios, no cambia políticas y no lee secretos 2FA.</p></div>");
 
@@ -523,7 +562,8 @@ public static async Task<ReportExportResult> ExportAsync(
             sb.Append("<table>");
             foreach (var item in userInventory.Evidencia ?? []) Row(item.Clave, item.Valor);
             sb.Append("</table>");
-            var accounts = report.Eventos.Where(e => e.Tipo == "USER_ACCOUNT_STATE").Take(100).ToList();
+            var allAccounts = report.Eventos.Where(e => e.Tipo == "USER_ACCOUNT_STATE").ToList();
+            var accounts = allAccounts.Take(100).ToList();
             if (accounts.Count > 0)
             {
                 sb.Append("<h3>Cuentas locales</h3><table><tr><th>Usuario</th><th>Estado</th><th>Cuenta expira</th><th>Grupos locales</th><th>Perfil</th></tr>");
@@ -534,10 +574,13 @@ public static async Task<ReportExportResult> ExportAsync(
                     sb.Append($"<tr><td>{H(A("Usuario"))}</td><td>{H(state)}</td><td>{H(A("Cuenta expira"))}</td><td>{H(A("Grupos locales"))}</td><td>{H(A("Perfil registrado"))}</td></tr>");
                 }
                 sb.Append("</table>");
+                if (allAccounts.Count > accounts.Count)
+                    sb.Append($"<p class='muted'>Mostrando {accounts.Count} de {allAccounts.Count} cuentas locales. El JSON conserva la colección completa.</p>");
             }
-            var sessions = report.Eventos.Where(e => e.Tipo == "USER_SESSION_STATE")
+            var allSessions = report.Eventos.Where(e => e.Tipo == "USER_SESSION_STATE")
                 .Where(e => (e.Evidencia?.FirstOrDefault(x => x.Clave == "Usuario")?.Valor ?? "N/D") != "N/D")
-                .Take(60).ToList();
+                .ToList();
+            var sessions = allSessions.Take(60).ToList();
             if (sessions.Count > 0)
             {
                 sb.Append("<h3>Sesiones observadas</h3><table><tr><th>Usuario</th><th>SessionId</th><th>Estado</th><th>Protocolo</th><th>Cliente</th><th>Perfil</th></tr>");
@@ -547,12 +590,14 @@ public static async Task<ReportExportResult> ExportAsync(
                     sb.Append($"<tr><td>{H(V("Dominio"))}\\{H(V("Usuario"))}</td><td>{H(V("SessionId"))}</td><td>{H(V("Estado"))}</td><td>{H(V("Protocolo"))}</td><td>{H(V("Cliente"))}</td><td>{H(V("Perfil"))}</td></tr>");
                 }
                 sb.Append("</table>");
+                if (allSessions.Count > sessions.Count)
+                    sb.Append($"<p class='muted'>Mostrando {sessions.Count} de {allSessions.Count} sesiones observadas. El JSON conserva la colección completa.</p>");
             }
-            var authEvents = report.Eventos
+            var allAuthEvents = report.Eventos
                 .Where(e => e.Timestamp.HasValue && e.Tipo is "USER_LOGON_FAILURE" or "USER_NLA_PASSWORD_FAILURE" or "WINDOWS_CREDENTIAL_VALIDATION_FAILURE" or "ACCOUNT_LOCKOUT" or "KERBEROS_PREAUTH_FAILURE")
                 .OrderByDescending(e => e.Timestamp)
-                .Take(80)
                 .ToList();
+            var authEvents = allAuthEvents.Take(80).ToList();
             if (authEvents.Count > 0)
             {
                 sb.Append("<h3>Autenticación e identidad</h3><table><tr><th>Hora</th><th>Usuario</th><th>Evento</th><th>Origen</th><th>Detalle</th></tr>");
@@ -562,14 +607,20 @@ public static async Task<ReportExportResult> ExportAsync(
                     var source = V("Equipo originador") != "N/D" ? V("Equipo originador") : V("IP origen") != "N/D" ? V("IP origen") : V("Estación");
                     sb.Append($"<tr><td>{auth.Timestamp!.Value.ToLocalTime():dd/MM/yyyy HH:mm:ss}</td><td>{H(V("Dominio") != "N/D" ? V("Dominio") + "\\" + V("Usuario") : V("Usuario"))}</td><td>{H(auth.Tipo)}</td><td>{H(source)}</td><td>{H(auth.Mensaje)}</td></tr>");
                 }
-                sb.Append("</table><p class='muted'>Los eventos de autenticación sólo se elevan a causa raíz cuando existe correlación temporal y de identidad con el síntoma RDP/TSplus; un evento aislado no se considera originador.</p>");
+                sb.Append("</table>");
+                if (allAuthEvents.Count > authEvents.Count)
+                    sb.Append($"<p class='muted'>Mostrando {authEvents.Count} de {allAuthEvents.Count} eventos de autenticación. El JSON conserva la colección completa.</p>");
+                sb.Append("<p class='muted'>Los eventos de autenticación sólo se elevan a causa raíz cuando existe correlación temporal y de identidad con el síntoma RDP/TSplus; un evento aislado no se considera originador.</p>");
             }
             var profileIssues = report.Hallazgos.Where(f => f.Id.StartsWith("USER-PROFILE-", StringComparison.OrdinalIgnoreCase)).ToList();
             if (profileIssues.Count > 0)
             {
                 sb.Append("<h3>Anomalías de perfil</h3><table><tr><th>Severidad</th><th>Componente</th><th>Hallazgo</th></tr>");
-                foreach (var f in profileIssues.Take(50)) sb.Append($"<tr><td>{H(f.Severidad.ToString())}</td><td>{H(f.Componente)}</td><td>{H(f.Resumen)}</td></tr>");
+                var shownProfileIssues = profileIssues.Take(50).ToList();
+                foreach (var f in shownProfileIssues) sb.Append($"<tr><td>{H(f.Severidad.ToString())}</td><td>{H(f.Componente)}</td><td>{H(f.Resumen)}</td></tr>");
                 sb.Append("</table>");
+                if (profileIssues.Count > shownProfileIssues.Count)
+                    sb.Append($"<p class='muted'>Mostrando {shownProfileIssues.Count} de {profileIssues.Count} anomalías de perfil. El JSON conserva la colección completa.</p>");
             }
         }
         sb.Append("<p class='muted'>TDM no recopila contraseñas, hashes ni tokens. La identidad se utiliza para correlacionar cuenta, perfil y sesión.</p></div>");
@@ -586,12 +637,15 @@ public static async Task<ReportExportResult> ExportAsync(
         if (publishedApps.Count > 0)
         {
             sb.Append("<h3>Aplicaciones publicadas</h3><table><tr><th>Aplicación</th><th>Ruta</th><th>Startup</th><th>Usuarios</th><th>Grupos</th></tr>");
-            foreach (var app in publishedApps.Take(100))
+            var shownApps = publishedApps.Take(100).ToList();
+            foreach (var app in shownApps)
             {
                 string V(string key) => app.Evidencia?.FirstOrDefault(x => x.Clave == key)?.Valor ?? "N/D";
                 sb.Append($"<tr><td>{H(V("Aplicación"))}</td><td>{H(V("Ruta"))}</td><td>{H(V("Startup"))}</td><td>{H(V("Usuarios asignados"))}</td><td>{H(V("Grupos asignados"))}</td></tr>");
             }
             sb.Append("</table>");
+            if (publishedApps.Count > shownApps.Count)
+                sb.Append($"<p class='muted'>Mostrando {shownApps.Count} de {publishedApps.Count} aplicaciones publicadas. El JSON conserva la colección completa.</p>");
         }
         var appSecurity = report.Eventos.LastOrDefault(e => e.Tipo == "TSPLUS_APPCONTROL_SECURITY_STATE");
         if (appSecurity?.Evidencia is { Count: > 0 })
@@ -715,8 +769,11 @@ public static async Task<ReportExportResult> ExportAsync(
         if (configIssues.Count > 0)
         {
             sb.Append("<h3>Anomalías internas</h3><table><tr><th>Severidad</th><th>Componente</th><th>Hallazgo</th><th>Acción sugerida</th></tr>");
-            foreach (var f in configIssues.Take(60)) sb.Append($"<tr><td>{H(f.Severidad.ToString())}</td><td>{H(f.Componente)}</td><td>{H(f.Resumen)}</td><td>{H(f.SolucionSugerida)}</td></tr>");
+            var shownConfigIssues = configIssues.Take(60).ToList();
+            foreach (var f in shownConfigIssues) sb.Append($"<tr><td>{H(f.Severidad.ToString())}</td><td>{H(f.Componente)}</td><td>{H(f.Resumen)}</td><td>{H(f.SolucionSugerida)}</td></tr>");
             sb.Append("</table>");
+            if (configIssues.Count > shownConfigIssues.Count)
+                sb.Append($"<p class='muted'>Mostrando {shownConfigIssues.Count} de {configIssues.Count} anomalías internas. El JSON conserva la colección completa.</p>");
         }
         else
         {
@@ -728,14 +785,17 @@ public static async Task<ReportExportResult> ExportAsync(
         }
         sb.Append("<p class='muted'>Los archivos sensibles de credenciales sólo se auditan por metadatos; TDM no lee ni exporta sus valores.</p></div>");
 
-        sb.Append("<div class='card'><h2>Patrones recurrentes</h2>");
-        if (!report.PatronesFalla.Any(p => p.Incidentes > 1)) sb.Append("<p>No se detectaron patrones recurrentes en la vista temporal actual.</p>");
+        sb.Append("<div class='card'><h2>Patrones de falla</h2>");
+        if (report.PatronesFalla.Count == 0) sb.Append("<p>No se detectaron patrones de falla en la vista temporal actual.</p>");
         else
         {
-            sb.Append("<table><tr><th>Producto</th><th>Componente</th><th>Excepción</th><th>Incidentes</th><th>Primera</th><th>Última</th><th>Estado</th></tr>");
-            foreach (var p in report.PatronesFalla.Where(p => p.Incidentes > 1).Take(20))
-                sb.Append($"<tr><td>{H(p.Producto.ToString())}</td><td>{H(p.ComponenteSemantico)}</td><td>{H(p.TipoExcepcion)}</td><td>{p.Incidentes}</td><td>{p.PrimeraDeteccion.ToLocalTime():dd/MM/yyyy HH:mm:ss}</td><td>{p.UltimaDeteccion.ToLocalTime():dd/MM/yyyy HH:mm:ss}</td><td>{H(p.EstadoInvestigacion)}</td></tr>");
+            var shownPatterns = report.PatronesFalla.Take(20).ToList();
+            sb.Append("<table><tr><th>Producto</th><th>Componente</th><th>Componente semántico</th><th>Excepción</th><th>Incidentes</th><th>Origen</th><th>Primera</th><th>Última</th><th>Intervalo promedio</th><th>Incidentes relacionados</th><th>Estado</th></tr>");
+            foreach (var p in shownPatterns)
+                sb.Append($"<tr><td>{H(p.Producto.ToString())}</td><td>{H(p.Componente)}</td><td>{H(p.ComponenteSemantico)}</td><td>{H(p.TipoExcepcion)}</td><td>{p.Incidentes}</td><td>{H(p.OrigenClasificado)}</td><td>{p.PrimeraDeteccion.ToLocalTime():dd/MM/yyyy HH:mm:ss}</td><td>{p.UltimaDeteccion.ToLocalTime():dd/MM/yyyy HH:mm:ss}</td><td>{(p.IntervaloPromedio.HasValue ? p.IntervaloPromedio.Value.ToString() : "No aplica")}</td><td>{p.IdsIncidente.Count}</td><td>{H(p.EstadoInvestigacion)}</td></tr>");
             sb.Append("</table><p class='muted'>La recurrencia aumenta prioridad operativa, pero no confirma por sí sola la causa primaria.</p>");
+            if (report.PatronesFalla.Count > shownPatterns.Count)
+                sb.Append($"<p class='muted'>… y {report.PatronesFalla.Count - shownPatterns.Count} patrón(es) más sin mostrar.</p>");
         }
         sb.Append("</div>");
 
@@ -773,9 +833,13 @@ public static async Task<ReportExportResult> ExportAsync(
         else
         {
             sb.Append("<table><tr><th>Incidente</th><th>Dominio</th><th>Estado</th><th>Severidad</th><th>Ventana</th><th>Señales</th><th>Interpretación</th></tr>");
-            foreach (var incident in report.Incidentes.Take(20))
+            var shownIncidents = report.Incidentes.Take(20).ToList();
+            foreach (var incident in shownIncidents)
                 sb.Append($"<tr><td>{H(incident.Id)}</td><td>{H(incident.Dominio)}</td><td>{H(incident.Estado)}</td><td>{H(incident.SeveridadMaxima.ToString())}</td><td>{H($"{incident.Inicio:dd/MM/yyyy HH:mm:ss} - {incident.Fin:dd/MM/yyyy HH:mm:ss}")}</td><td>{incident.Senales}</td><td>{H(incident.Resumen)}</td></tr>");
-            sb.Append("</table><p class='muted'>La agrupación separa dominios funcionales; proximidad temporal no equivale a causa raíz.</p>");
+            sb.Append("</table>");
+            if (report.Incidentes.Count > shownIncidents.Count)
+                sb.Append($"<p class='muted'>Mostrando {shownIncidents.Count} de {report.Incidentes.Count} incidentes. El JSON conserva la colección completa.</p>");
+            sb.Append("<p class='muted'>La agrupación separa dominios funcionales; proximidad temporal no equivale a causa raíz.</p>");
         }
         sb.Append("</div>");
 
@@ -875,18 +939,31 @@ public static async Task<ReportExportResult> ExportAsync(
                 var bestResponsibility = CausalResponsibilityFormatter.Resolve(best);
                 sb.Append($"<p><strong>{H(bestResponsibility.EtiquetaOrigen)}:</strong> {H(bestResponsibility.OriginadorEspecifico)} · {H(best.Confianza.ToString())} · origen {H(best.OrigenClasificado)} <span class='muted'>(ranking interno {best.Puntaje}/100)</span></p>");
             }
-            foreach (var c in report.CausasRaiz.Take(8))
+            else
             {
-                var causeAnchor = "cau-" + c.Posicion;
-                sb.Append($"<h3 id='{causeAnchor}' class='anchor-target'><a class='anchor-link' href='#{causeAnchor}'>#{c.Posicion} \u2020 {H(c.Componente)}</a></h3><p><span class='badge'>{H(c.Confianza.ToString())}</span><span class='badge muted'>ranking {c.Puntaje}/100</span><span class='badge'>{H(c.Capa.ToString())}</span><span class='badge'>{H(c.Producto.ToString())}</span><span class='badge'>Origen {H(c.OrigenClasificado)}</span></p>");
-            if (c.HoraIncidente.HasValue) sb.Append($"<p><strong>Hora incidente:</strong> {c.HoraIncidente.Value.ToLocalTime():dd/MM/yyyy HH:mm:ss}</p>");
-            sb.Append($"<p>{H(c.Resumen)}</p><p><strong>Por qué:</strong> {H(c.Explicacion)}</p><ul>");
-            foreach (var e in c.Evidencia.Take(24)) sb.Append($"<li><strong>{H(e.Clave)}:</strong> {H(e.Valor)}</li>");
-            sb.Append("</ul>");
-            if (!string.IsNullOrWhiteSpace(c.SolucionSugerida)) sb.Append($"<p><strong>Solución sugerida (no se ejecuta):</strong> {H(c.SolucionSugerida)}</p>");
-            if (!string.IsNullOrWhiteSpace(c.FuenteOficial)) sb.Append($"<p><strong>Fuente oficial:</strong> {H(c.FuenteOficial)}</p>");
-            if (!string.IsNullOrWhiteSpace(c.UrlOficial)) sb.Append($"<p><a href='{H(c.UrlOficial)}'>{H(c.UrlOficial)}</a></p>");
+                sb.Append("<p class='muted'>Sin causa principal declarada: ningún candidato alcanza el margen de evidencia y separación requerido.</p>");
             }
+            var shownCauses = report.CausasRaiz.Take(8).ToList();
+            foreach (var c in shownCauses)
+            {
+                var isPrimary = best is not null
+                                && c.Posicion == best.Posicion
+                                && c.Id.Equals(best.Id, StringComparison.OrdinalIgnoreCase);
+                var causeAnchor = "cau-" + c.Posicion;
+                sb.Append($"<h3 id='{causeAnchor}' class='anchor-target'><a class='anchor-link' href='#{causeAnchor}'>{(isPrimary ? "[PRINCIPAL] " : string.Empty)}#{c.Posicion} \u2020 {H(c.Componente)}</a></h3><p><span class='badge'>{H(c.Confianza.ToString())}</span><span class='badge muted'>ranking {c.Puntaje}/100</span><span class='badge'>{H(c.Capa.ToString())}</span><span class='badge'>{H(c.Producto.ToString())}</span><span class='badge'>Origen {H(c.OrigenClasificado)}</span></p>");
+                if (c.HoraIncidente.HasValue) sb.Append($"<p><strong>Hora incidente:</strong> {c.HoraIncidente.Value.ToLocalTime():dd/MM/yyyy HH:mm:ss}</p>");
+                sb.Append($"<p>{H(c.Resumen)}</p><p><strong>Por qué:</strong> {H(c.Explicacion)}</p><ul>");
+                var shownEvidence = c.Evidencia.Take(24).ToList();
+                foreach (var e in shownEvidence) sb.Append($"<li><strong>{H(e.Clave)}:</strong> {H(e.Valor)}</li>");
+                if (c.Evidencia.Count > shownEvidence.Count)
+                    sb.Append($"<li class='muted'>… y {c.Evidencia.Count - shownEvidence.Count} evidencia(s) más (colección completa en JSON).</li>");
+                sb.Append("</ul>");
+                if (!string.IsNullOrWhiteSpace(c.SolucionSugerida)) sb.Append($"<p><strong>Solución sugerida (no se ejecuta):</strong> {H(c.SolucionSugerida)}</p>");
+                if (!string.IsNullOrWhiteSpace(c.FuenteOficial)) sb.Append($"<p><strong>Fuente oficial:</strong> {H(c.FuenteOficial)}</p>");
+                if (!string.IsNullOrWhiteSpace(c.UrlOficial)) sb.Append($"<p><a href='{H(c.UrlOficial)}'>{H(c.UrlOficial)}</a></p>");
+            }
+            if (report.CausasRaiz.Count > shownCauses.Count)
+                sb.Append($"<p class='muted'>… y {report.CausasRaiz.Count - shownCauses.Count} candidato(s) más sin mostrar.</p>");
         }
         
         // Hallazgos relacionados por causa
@@ -941,7 +1018,7 @@ sb.Append("<div class='card'><h2>Hallazgos</h2>");
         sb.Append("<div class='card'><h2>Evidencia recopilada</h2><details><summary>Mostrar observaciones normalizadas (" + report.Eventos.Count + ")</summary><div class='mono'>");
         if (report.Eventos.Count > 1000) sb.Append($"<p class='muted'>Mostrando 1,000 de {report.Eventos.Count} observaciones normalizadas. El JSON conserva la colección completa del reporte.</p>");
         foreach (var e in report.Eventos.OrderBy(x => x.Timestamp ?? DateTimeOffset.MaxValue).Take(1000))
-            sb.Append(H($"{(e.Timestamp.HasValue ? e.Timestamp.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss") : "Sin fecha")} [{e.Severidad}] [Fuente: {EvidenceSourceForEventReport(e)}] [Capa: {e.Capa}] [{e.Producto}] [{e.Componente}] {e.Tipo}\n  {e.Mensaje}\n\n"));
+            sb.Append(H($"{((e.Timestamp ?? e.IngestedAt)?.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss") ?? "Sin fecha")} [{e.Severidad}] [Fuente: {EvidenceSourceForEventReport(e)}] [Capa: {e.Capa}] [{e.Producto}] [{e.Componente}] {e.Tipo}\n  {e.Mensaje}\n\n"));
         sb.Append("</div></details></div>");
         if (report.Eventos.Count > 1000) sb.Append($"<p class='muted'>Truncado: {report.Eventos.Count - 1000} observaciones no mostradas en HTML (completas en JSON).</p>");
         sb.Append("</details></body></html>");
