@@ -18,7 +18,7 @@ de corrección aplicadas sobre el árbol de trabajo de este repositorio.
 | Fase B | 6 hallazgos P1 (pipeline y reglas) | ✅ completada | `59b4a62` |
 | Fase 1 | Colectores incrementales en la GUI | ✅ completada | `7a5db5d` |
 | Fase 2 | Paridad export ↔ GUI | ✅ completada | `ed22b9e` |
-| Fase 3 | Brechas de privacidad | ⬜ pendiente | — |
+| Fase 3 | Brechas de privacidad | ✅ completada | `ab52e62` |
 | — | Simulación de remediación sobre grafo inventado | ❌ descartada | — |
 
 ---
@@ -211,13 +211,55 @@ de formato/filtrado. 26 divergencias (D1-D26) levantadas con file:line contra el
 - El modelo de precisión conserva `FuentesBloqueadas` (agregado histórico); "Bloqueos duros" de la
   GUI y la línea de cobertura del export ahora calculan el conteo propio de críticas bloqueadas.
 - Marcador `[CRÍTICA]` (GUI) vs columna "Crítica" (export): distinta presentación, mismo dato.
-- `LocalStateStore` persiste el reporte crudo (sólo local, nunca en el paquete sanitizado).
+- `LocalStateStore` persistía el reporte crudo (sólo local, nunca en el paquete sanitizado);
+  cerrado en Fase 3 (`latest-report.json` ahora se guarda sanitizado).
 - Ficheros `.bak`/`fix_exporter.cs` sueltos en el repo: no compilados, fuera de alcance.
 
-## Fase 3 — Brechas de privacidad (pendiente)
+## Fase 3 — Brechas de privacidad (commit `ab52e62`)
 
-Campos que la GUI enmascara (IPs, correos, rutas de perfil, cuentas) pero que el export o la
-persistencia guardan en claro. Pendiente de levantar el detalle concreto con file:line en la fase.
+Campos que la GUI enmascara (`[IP]`/`[IDENTIDAD]`, `ObservabilityStore.cs:532-540`) pero que el export o
+la persistencia guardaban en claro. Levantamiento con file:line y correcciones:
+
+1. **`CausaRaizPrincipal` sin sanitizar en el export.** `SupportBundleSanitizer.Sanitize`
+   (`SupportBundleSanitizer.cs:100-111`) reconstruía `CausasRaiz` pero no `CausaRaizPrincipal`
+   (`DiagnosticModels.cs:233`, asignada en `DiagnosticWorkflow.cs:49`): el JSON exportaba la causa en
+   claro y el HTML/narrativo la renderizaban crudos desde `safeReport` (`ReportExporter.cs:157,294,935`;
+   `DiagnosticNarrativeBuilder.cs:43,396,475`), mientras la misma causa dentro de `CausasRaiz` iba
+   pseudonimizada. Fix: `CausaRaizPrincipal` → `SanitizeCause`.
+2. **`Incidentes` sin sanitizar** (`DiagnosticModels.cs:245`). La evidencia "Identidad del grupo"
+   (`IncidentClusterAnalyzer.cs:128`; `IdentityKey` `:182-206` → `USUARIO|HOST|SERVICIO`) salía en claro
+   en el JSON export. Fix: helper `SanitizeCluster` — `Identidad del grupo` → `Pseudonym("USR", …)`,
+   `Dominio` (valor funcional `AD_AUTENTICACION`…, no un dominio AD) → `SanitizeText`, resto →
+   `SanitizeEvidence`.
+3. **`PrecisionDiagnostica`, `Tensiones` y `MotivoAmpliacion` sin sanitizar**
+   (`DiagnosticModels.cs:246,258,239`) → ahora `SanitizeText`/`SanitizeEvidence`.
+4. **`NormalizeKey` no normalizaba a minúsculas** (`SupportBundleSanitizer.cs:264`): las claves exactas
+   `Usuario`/`Dominio`/`Cuenta` con inicial mayúscula (como las escriben los collectors) no coincidían
+   con las constantes en minúscula de `IsIdentityKey`/`IsDomainKey` y valores en claro (p. ej. `alice`)
+   pasaban al paquete pese a la sanitización. Fix: `.ToLowerInvariant()`.
+5. **`latest-report.json` en claro.** `LocalStateStore.SaveLatestReportAsync`
+   (`LocalStateStore.cs:348-358`), escrito desde `DiagnosticExecutionService.cs:227`, persistía el
+   informe completo (usuarios, IPs, correos, rutas) mientras los dashboards enmascaran esos campos
+   (`ObservabilityStore.cs:357-387,532-540`). Fix: guardar `SupportBundleSanitizer.Sanitize(report)` en
+   el call site (la GUI ya referencia TDM.Reporting; sin nuevos project references). El diff día-a-día
+   no cambia: `ReportExporter.cs:50` ya sanitiza el reporte previo (idempotente desde Fase 2).
+6. **Superficies verificadas limpias** (sin cambios): muestras `observability-window.jsonl`
+   (`ObservabilityStore.cs:357-387` enmascara en origen), `incident-ledger.jsonl` (resúmenes
+   enmascarados de origen), `desktop-journal.jsonl`/`email-journal.jsonl` (señales desde el ledger
+   enmascarado), Sistema/Hallazgos/Eventos/CausasRaiz/Patrones/Guided/Impacto/Plan/Cobertura del
+   export. `RendimientoDiagnostico`: sólo nombres de collectors TDM (sin PII), sin cambios.
+7. **Tests**: `SanitizeCoversPreviouslyRawSections`, `ExportJsonMasksPrimaryCauseAndClusterIdentity`
+   (ProductionTests → 70/70); `Export_LatestReportStoredSanitized` (ParityTests → 38/38, raíz de datos
+   hermética vía `TDM_DATA_DIR`); VERIFY 7/7 y publish portable (138 771 655 bytes).
+
+**Residuales documentados (aceptados en esta fase).**
+
+- Logs GUI (`LogService.cs:132`, `<raíz>/logs/tdm-gui-*.log`): mensajes operativos; las excepciones
+  pueden incluir rutas locales. Fuera de alcance: no son campos que la GUI enmascara.
+- El journal SMTP guarda destinatarios (configuración del operador) y títulos/resúmenes provenientes
+  del ledger ya enmascarado; sin identidades de terceros.
+- `Tensiones`/`PrecisionDiagnostica` son texto de auto-chequeo de TDM (sin PII por construcción);
+  se sanitizan por consistencia y para no depender de esa garantía futura.
 
 ## Descartado — Simulación de remediación sobre grafo inventado
 
