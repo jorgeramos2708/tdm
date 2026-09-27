@@ -103,11 +103,44 @@ public static class SupportBundleSanitizer
             Hallazgos = findings,
             Eventos = events,
             CausasRaiz = causes,
+            CausaRaizPrincipal = report.CausaRaizPrincipal is { } primary ? SanitizeCause(primary) : null,
             PatronesFalla = patterns,
             ResolucionesGuiadas = report.ResolucionesGuiadas.Select(SanitizeGuidedResolution).ToList(),
             ImpactoFuncional = SanitizeImpact(report.ImpactoFuncional),
             PlanAccion = SanitizePlan(report.PlanAccion),
-            CoberturaDiagnostica = SanitizeCoverage(report.CoberturaDiagnostica)
+            CoberturaDiagnostica = SanitizeCoverage(report.CoberturaDiagnostica),
+            Incidentes = report.Incidentes.Select(SanitizeCluster).ToList(),
+            PrecisionDiagnostica = SanitizePrecision(report.PrecisionDiagnostica),
+            Tensiones = report.Tensiones.Select(x => SanitizeText(x) ?? x).ToList(),
+            MotivoAmpliacion = SanitizeText(report.MotivoAmpliacion)
+        };
+    }
+
+    private static DiagnosticIncidentCluster SanitizeCluster(DiagnosticIncidentCluster c)
+    {
+        var evidence = c.Evidencia.Select(item =>
+        {
+            if (item.Clave.Equals("Identidad del grupo", StringComparison.OrdinalIgnoreCase))
+                return new EvidenceItem(item.Clave, Pseudonym("USR", item.Valor));
+            if (item.Clave.Equals("Dominio", StringComparison.OrdinalIgnoreCase))
+                return new EvidenceItem(item.Clave, SanitizeText(item.Valor) ?? item.Valor);
+            return SanitizeEvidence(item);
+        }).ToList();
+        return c with
+        {
+            Resumen = SanitizeText(c.Resumen) ?? c.Resumen,
+            Componentes = c.Componentes.Select(x => SanitizeText(x) ?? x).ToList(),
+            Evidencia = evidence
+        };
+    }
+
+    private static DiagnosticPrecisionAssessment? SanitizePrecision(DiagnosticPrecisionAssessment? precision)
+    {
+        if (precision is null) return null;
+        return precision with
+        {
+            Resumen = SanitizeText(precision.Resumen) ?? precision.Resumen,
+            Evidencia = precision.Evidencia.Select(SanitizeEvidence).ToList()
         };
     }
 
@@ -262,7 +295,7 @@ public static class SupportBundleSanitizer
     }
 
     private static string NormalizeKey(string? key)
-        => Regex.Replace((key ?? string.Empty).Trim(), @"\s+", " ");
+        => Regex.Replace((key ?? string.Empty).Trim(), @"\s+", " ").ToLowerInvariant();
 
     public static string? SanitizePath(string? value)
         => SanitizeText(value);

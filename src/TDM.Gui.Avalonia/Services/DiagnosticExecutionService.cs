@@ -224,7 +224,7 @@ public async Task<DiagnosticReport> RunAsync(string period, CancellationToken ct
         try
         {
             var store = new LocalStateStore();
-            await store.SaveLatestReportAsync(report, ct);
+            await store.SaveLatestReportAsync(SupportBundleSanitizer.Sanitize(report), ct);
         }
         catch { /* Best-effort */ }
 

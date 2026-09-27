@@ -21,6 +21,10 @@ internal static class Program
         Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
         Thread.CurrentThread.CurrentUICulture = CultureInfo.InvariantCulture;
 
+        var stateRoot = Path.Combine(Path.GetTempPath(), "TDM-parity-state-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(stateRoot);
+        Environment.SetEnvironmentVariable("TDM_DATA_DIR", stateRoot);
+
         var now = DateTimeOffset.Now;
         var sessionIncident = new ObservabilityIncident(
             now.AddSeconds(-20), "ACCOUNT_LOCKOUT", "RDP/Auth", "Error", "Bloqueo correlacionado con sesión",
@@ -195,6 +199,39 @@ internal static class Program
                 True(Path.GetFullPath(result.JsonPath).StartsWith(Path.GetFullPath(directory), StringComparison.OrdinalIgnoreCase), "El JSON no se guardó en la carpeta elegida.");
                 True(File.Exists(result.HtmlPath) && new FileInfo(result.HtmlPath).Length > 0, "El HTML exportado está ausente o vacío.");
                 True(File.Exists(result.JsonPath) && new FileInfo(result.JsonPath).Length > 0, "El JSON exportado está ausente o vacío.");
+            }
+            finally
+            {
+                if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+            }
+        });
+
+        Run("Export_LatestReportStoredSanitized", () =>
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "TDM-latest-report-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var snapshot = new SystemSnapshot(
+                    "EQUIPO-PRUEBA", "Windows", "11", "22631", "x64", TimeSpan.FromHours(4), now,
+                    TsplusDetectado: true, TsplusRuta: null, TsplusVersion: "prueba");
+                var evt = new DiagnosticEvent(now, "Netlogon", "Active Directory", DiagnosticLayer.Windows, DiagnosticSeverity.Error,
+                    "WINDOWS_AD_DOMAIN_CONNECTIVITY_FAILURE", "Secure channel failed",
+                    Evidencia: [new EvidenceItem("Usuario", "alice"), new EvidenceItem("Host", "win-pc")]);
+                var report = new DiagnosticReport(snapshot, [], [evt], now.AddSeconds(-1), now);
+                new DiagnosticExecutionService()
+                    .ExportAsync(report, directory, CancellationToken.None).GetAwaiter().GetResult();
+
+                var store = new LocalStateStore();
+                True(File.Exists(store.LatestReportPath),
+                    "La exportación no dejó latest-report.json en el estado local.");
+                var persisted = File.ReadAllText(store.LatestReportPath);
+                True(!persisted.Contains("alice", StringComparison.OrdinalIgnoreCase),
+                    "latest-report.json guardó la identidad en claro aunque la GUI la muestra enmascarada.");
+                True(persisted.Contains("USR-", StringComparison.Ordinal),
+                    "latest-report.json no conserva ninguna sección con pseudónimo de identidad.");
+                var loaded = store.LoadLatestReportAsync().GetAwaiter().GetResult();
+                True(loaded is not null, "latest-report.json ya no se puede volver a leer.");
+                True(loaded!.Eventos.Count == 1, "El reporte persistido perdió eventos al sanitizarse.");
             }
             finally
             {
@@ -758,6 +795,8 @@ internal static class Program
             True(ReferenceEquals(Thread.CurrentThread.CurrentCulture, CultureInfo.InvariantCulture),
                 "El hilo principal no corre con InvariantCulture.");
         });
+
+        try { if (Directory.Exists(stateRoot)) Directory.Delete(stateRoot, recursive: true); } catch { }
 
         Console.WriteLine();
         Console.WriteLine($"TDM_PARITY_TESTS: passed={_passed} failed={_failed}");

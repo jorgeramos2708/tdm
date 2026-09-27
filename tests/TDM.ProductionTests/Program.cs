@@ -85,7 +85,9 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("ExportJsonUsesStringEnumsAndRoundTrips", ExportJsonUsesStringEnumsAndRoundTrips),
     ("SanitizerIdempotentAvoidsSpuriousDiff", SanitizerIdempotentAvoidsSpuriousDiff),
     ("NarrativeUsesLocalTimeForWindows", NarrativeUsesLocalTimeForWindows),
-    ("EvidenceDetailsFallBackToIngestedAt", EvidenceDetailsFallBackToIngestedAt)
+    ("EvidenceDetailsFallBackToIngestedAt", EvidenceDetailsFallBackToIngestedAt),
+    ("SanitizeCoversPreviouslyRawSections", SanitizeCoversPreviouslyRawSections),
+    ("ExportJsonMasksPrimaryCauseAndClusterIdentity", ExportJsonMasksPrimaryCauseAndClusterIdentity)
 };
 
 var failed = 0;
@@ -1281,6 +1283,119 @@ static async Task EvidenceDetailsFallBackToIngestedAt()
         var html = await File.ReadAllTextAsync(result.HtmlPath);
         True(html.Contains($"{now.ToLocalTime():dd/MM/yyyy HH:mm:ss} [Informativo] [Fuente:", StringComparison.Ordinal),
             "La evidencia sin Timestamp no cae a IngestedAt en los detalles del export.");
+    }
+    finally { TryDelete(dir); }
+}
+
+static Task SanitizeCoversPreviouslyRawSections()
+{
+    var now = DateTimeOffset.Now;
+    var identity = new DiagnosticEvent(now, "Netlogon", "Active Directory", DiagnosticLayer.Windows, DiagnosticSeverity.Error,
+        "WINDOWS_AD_DOMAIN_CONNECTIVITY_FAILURE", "Secure channel failed",
+        Evidencia: [new EvidenceItem("Usuario", "alice"), new EvidenceItem("Host", "win-pc")]);
+    var baseReport = Report([identity], now);
+    var clusters = IncidentClusterAnalyzer.Analyze(baseReport);
+    True(clusters.Count == 1, "precondición: la señal de identidad debe formar un clúster.");
+    True(clusters[0].Evidencia.Any(x => x.Valor.Contains("ALICE", StringComparison.Ordinal)),
+        "precondición: la identidad cruda debe estar en la evidencia del clúster.");
+    var primary = new RootCauseCandidate(1, "ROOT-IDENTITY", "Netlogon", DiagnosticLayer.Windows, 88, ConfidenceLevel.Alta,
+        "Canal seguro fallido de alice@corp.example", "Fallo del dominio CORP\\alice",
+        [new EvidenceItem("Usuario", "alice")], HoraIncidente: now, OrigenClasificado: "WINDOWS");
+    var raw = baseReport with
+    {
+        CausasRaiz = [primary],
+        CausaRaizPrincipal = primary,
+        Incidentes = clusters,
+        PrecisionDiagnostica = new DiagnosticPrecisionAssessment(72, "Alta", true, 0, 3, 12, 1, false, true,
+            "Identidad observada alice@corp.example", [new EvidenceItem("Usuario", "alice")]),
+        Tensiones = ["Evidencia de alice@corp.example sin contraste en otra fuente"],
+        MotivoAmpliacion = "Ventana ampliada para alice@corp.example"
+    };
+
+    var once = SupportBundleSanitizer.Sanitize(raw);
+    var twice = SupportBundleSanitizer.Sanitize(once);
+    Equal(JsonSerializer.Serialize(once), JsonSerializer.Serialize(twice),
+        "Las secciones nuevas de Sanitize no son idempotentes.");
+
+    True(raw.CausaRaizPrincipal!.Resumen.Contains("alice", StringComparison.OrdinalIgnoreCase),
+        "Sanitize mutó el reporte original.");
+    True(once.CausaRaizPrincipal is not null, "CausaRaizPrincipal desapareció al sanitizar.");
+    False(once.CausaRaizPrincipal!.Resumen.Contains("alice", StringComparison.OrdinalIgnoreCase),
+        "CausaRaizPrincipal no se sanitizó.");
+    True(once.CausaRaizPrincipal!.Evidencia.Any(x => x.Valor.StartsWith("USR-", StringComparison.Ordinal)),
+        "La evidencia de identidad de CausaRaizPrincipal no se pseudonimizó.");
+
+    True(once.Incidentes.Count == 1, "Los clústeres desaparecieron al sanitizar.");
+    var identityGroup = once.Incidentes[0].Evidencia.FirstOrDefault(x => x.Clave == "Identidad del grupo")?.Valor ?? "";
+    True(identityGroup.StartsWith("USR-", StringComparison.Ordinal),
+        "La identidad del grupo del clúster no se pseudonimizó.");
+    False(identityGroup.Contains("ALICE", StringComparison.Ordinal),
+        "La identidad del grupo del clúster conservó el usuario en claro.");
+    var domainValue = once.Incidentes[0].Evidencia.FirstOrDefault(x => x.Clave == "Dominio")?.Valor ?? "";
+    Equal("AD_AUTENTICACION", domainValue,
+        "El dominio funcional del clúster fue tratado como dominio AD y pseudonimizado.");
+
+    NotNull(once.PrecisionDiagnostica, "PrecisionDiagnostica desapareció al sanitizar.");
+    False(once.PrecisionDiagnostica!.Resumen.Contains("alice", StringComparison.OrdinalIgnoreCase),
+        "El resumen de precisión diagnóstica conservó identidad cruda.");
+    True(once.Tensiones.All(t => !t.Contains("alice", StringComparison.OrdinalIgnoreCase)),
+        "Las tensiones de coherencia conservaron identidad cruda.");
+    False((once.MotivoAmpliacion ?? "").Contains("alice", StringComparison.OrdinalIgnoreCase),
+        "El motivo de ampliación conservó identidad cruda.");
+    return Task.CompletedTask;
+}
+
+static async Task ExportJsonMasksPrimaryCauseAndClusterIdentity()
+{
+    var now = DateTimeOffset.Now;
+    var identity = new DiagnosticEvent(now, "Netlogon", "Active Directory", DiagnosticLayer.Windows, DiagnosticSeverity.Error,
+        "WINDOWS_AD_DOMAIN_CONNECTIVITY_FAILURE", "Secure channel failed",
+        Evidencia: [new EvidenceItem("Usuario", "alice"), new EvidenceItem("Host", "win-pc")]);
+    var primary = new RootCauseCandidate(1, "ROOT-IDENTITY", "Netlogon", DiagnosticLayer.Windows, 88, ConfidenceLevel.Alta,
+        "Canal seguro fallido de alice@corp.example", "El dominio CORP\\alice perdió el canal seguro.",
+        [new EvidenceItem("Usuario", "alice")], HoraIncidente: now, OrigenClasificado: "WINDOWS");
+    var baseReport = Report([identity], now);
+    var report = baseReport with
+    {
+        CausasRaiz = [primary],
+        CausaRaizPrincipal = primary,
+        Incidentes = IncidentClusterAnalyzer.Analyze(baseReport),
+        PrecisionDiagnostica = new DiagnosticPrecisionAssessment(72, "Alta", true, 0, 3, 12, 1, false, true,
+            "Cobertura aceptable; identidad observada alice@corp.example", [new EvidenceItem("Usuario", "alice")]),
+        Tensiones = ["Evidencia de alice@corp.example sin contraste en otra fuente"],
+        MotivoAmpliacion = "Ventana ampliada para alice@corp.example"
+    };
+    var dir = TempDir();
+    try
+    {
+        var result = await ReportExporter.ExportAsync(report, dir, CancellationToken.None);
+        var json = await File.ReadAllTextAsync(result.JsonPath);
+        var html = System.Net.WebUtility.HtmlDecode(await File.ReadAllTextAsync(result.HtmlPath));
+        False(json.Contains("alice", StringComparison.OrdinalIgnoreCase),
+            "El JSON export conservó identidad cruda en secciones sin sanitizar.");
+        False(html.Contains("alice", StringComparison.OrdinalIgnoreCase),
+            "El HTML export conservó identidad cruda (causa principal / narrativo).");
+
+        var round = JsonSerializer.Deserialize<DiagnosticReport>(json, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            Converters = { new JsonStringEnumConverter() }
+        });
+        NotNull(round, "El JSON export no volvió a leerse como reporte.");
+        True(round!.Incidentes.Count == 1, "El clúster de incidentes no llegó al JSON export.");
+        var identityGroup = round.Incidentes[0].Evidencia.FirstOrDefault(x => x.Clave == "Identidad del grupo")?.Valor ?? "";
+        True(identityGroup.StartsWith("USR-", StringComparison.Ordinal),
+            "La identidad del grupo no se pseudonimizó en el JSON export.");
+        NotNull(round.CausaRaizPrincipal, "La causa principal no llegó al JSON export.");
+        True(round.CausaRaizPrincipal!.Evidencia.Any(x => x.Valor.StartsWith("USR-", StringComparison.Ordinal)),
+            "La evidencia de la causa principal no se pseudonimizó en el JSON export.");
+        NotNull(round.PrecisionDiagnostica, "La precisión diagnóstica no llegó al JSON export.");
+        False(round.PrecisionDiagnostica!.Resumen.Contains("alice", StringComparison.OrdinalIgnoreCase),
+            "El resumen de precisión conservó identidad cruda en el JSON export.");
+        True(round.Tensiones.All(t => !t.Contains("alice", StringComparison.OrdinalIgnoreCase)),
+            "Las tensiones conservaron identidad cruda en el JSON export.");
+        False((round.MotivoAmpliacion ?? "").Contains("alice", StringComparison.OrdinalIgnoreCase),
+            "El motivo de ampliación conservó identidad cruda en el JSON export.");
     }
     finally { TryDelete(dir); }
 }
