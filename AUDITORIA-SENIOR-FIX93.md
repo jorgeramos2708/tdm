@@ -17,7 +17,7 @@ de corrección aplicadas sobre el árbol de trabajo de este repositorio.
 | Fase A | 4 hallazgos P0 | ✅ completada | `7fa346d` |
 | Fase B | 6 hallazgos P1 (pipeline y reglas) | ✅ completada | `59b4a62` |
 | Fase 1 | Colectores incrementales en la GUI | ✅ completada | `7a5db5d` |
-| Fase 2 | Paridad export ↔ GUI | ✅ completada | — |
+| Fase 2 | Paridad export ↔ GUI | ✅ completada | `ed22b9e` |
 | Fase 3 | Brechas de privacidad | ⬜ pendiente | — |
 | — | Simulación de remediación sobre grafo inventado | ❌ descartada | — |
 
