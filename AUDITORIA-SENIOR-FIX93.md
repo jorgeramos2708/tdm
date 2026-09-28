@@ -19,6 +19,7 @@ de corrección aplicadas sobre el árbol de trabajo de este repositorio.
 | Fase 1 | Colectores incrementales en la GUI | ✅ completada | `7a5db5d` |
 | Fase 2 | Paridad export ↔ GUI | ✅ completada | `ed22b9e` |
 | Fase 3 | Brechas de privacidad | ✅ completada | `ab52e62` |
+| Fase 4 | Críticos C1–C3 (cobertura, continuidad Event Viewer, cursor TSplus) | ✅ completada | `ab6d42e` |
 | — | Simulación de remediación sobre grafo inventado | ❌ descartada | — |
 
 ---
@@ -260,6 +261,53 @@ la persistencia guardaban en claro. Levantamiento con file:line y correcciones:
   del ledger ya enmascarado; sin identidades de terceros.
 - `Tensiones`/`PrecisionDiagnostica` son texto de auto-chequeo de TDM (sin PII por construcción);
   se sanitizan por consistencia y para no depender de esa garantía futura.
+
+## Fase 4 — Críticos C1–C3 (commit `ab6d42e`)
+
+Los tres hallazgos críticos de la auditoría, con sus cadenas completas:
+
+1. **C1 — `"No disponible"` clasificado como `"Disponible"`.** `DiagnosticCoverageAnalyzer.cs:159`
+   evaluaba `Contains("Disponible")` antes que `Contains("No disponible")`, y "No disponible" contiene
+   "Disponible": el Security Log no leído (`UserSessionProfileCollector.cs:303,453-459`) se registraba
+   "Disponible" (peso crítico ×2 completo, sin limitación `Cobertura de autenticación/NLA/Kerberos
+   limitada`) y `CriticalHardBlockedCount`/el resumen de cobertura lo trataban como sano. Fix: orden
+   `IsBlocked → No disponible → Disponible → Parcial` (permisos/no legible → "Bloqueada").
+2. **C2 — evidencia perdida tras reinicio/parada del servicio (cadena).**
+   - `WindowsCursorState` (`IncrementalWindowsEventCollector.cs:25-28`) no persistía `_lastSuccessUtc`
+     (`:23`, memoria volátil): tras reinicio el mark era null.
+   - Rama GAP (`:168`): condición sobre `_lastSuccessUtc.HasValue` → nunca se declaraba el hueco post-reinicio.
+   - `TdmWorker.cs:180,418`: ciclos normal/emergencia usaban fijo `NormalInterval` (60 s) y
+     `EmergencyPolicy.Lookback` (2 min); ninguna ventana cubría el arranque.
+   - Persistencia (antes `:279`→`:294`): el estado se guardaba antes de calcular `lost`; con el
+     nuevo campo había que decidir el `LastSuccessUtc` a guardar sin que una muestra parcial
+     firmara continuidad (avance condicionado a `lost == 0 && persistOk`).
+   - Mensaje GAP (`:178`) decía sólo "El cursor se perdió", inaplicable a reinicio.
+   Fix (cinco piezas): `LastSuccessUtc` persistido con fallback a `SavedAt` (estados legados);
+   `Prime()` restaura la marca y resetea `_gapDeclared`/`_firstCollectStarted`; método público
+   `RecoveryLookback(now)` (≤1 min → null; 1–15 min → hueco; >15 min o cursor corrupto → 15 min;
+   ya ejecutada la primera colección → null, desarme por proceso vivo); `TdmWorker` lo aplica con
+   `recoveryLookback ?? NormalInterval` y `recoveryLookback ?? EmergencyPolicy.Lookback`; la
+   persistencia se reordenó (`advancedLastSuccess` = `lost == 0 ? Now : _lastSuccessUtc` calculado
+   antes de guardar y guardado en el estado; avance real sólo si `lost == 0 && persistOk`), el
+   hallazgo GAP se declara una sola vez por hueco (`_gapDeclared`, rearmed por muestra exitosa) y el
+   mensaje cubre "reinicio del servicio o discontinuidad prolongada".
+3. **C3 — cursor TSplus: replay completo + hash de archivo entero.** `ComputeFileHash`
+   (`IncrementalTsplusLogCollector.cs`, antes `:624`) leía el archivo entero en `Prime()` (antes
+   `:67`) y en cada `PersistCursorState()` (antes `:333`); como el hash cubría el archivo completo,
+   cualquier append posterior al último guardado (típico en `hb.log`) hacía fallar la validación y el
+   offset se reiniciaba a 0 → replay total del log en cada arranque, más I/O completo por muestra en
+   archivos grandes. Fix: hash de prefijo acotado a 1 MiB (`MaxCursorHashBytes`) con lectura
+   incremental (`TransformBlock`), y `Prime()` exige además `Offset >= 0 && Offset <= info.Length`
+   (conserva `CreationUtcTicks`); append normal conserva cursor, rotación/truncamiento sigue forzando
+   replay. Estados legados con hash de archivo completo → un único replay al subir de versión.
+4. **Tests**: `SecurityLogMissingStatusIsNotAvailable` (C1: cuatro estados + limitación + penalización
+   de puntaje), `WindowsEventRecoveryLookbackRestoresPersistedGap` (C2: fresco→null, 30 s→null,
+   5 min→5 min, 2 h→15 min, legado sin `lastSuccessUtc`→cae a `savedAt`), 
+   `WindowsEventRecoveryLookbackDisarmsAfterFirstCollect` (C2: desarme tras primera colección
+   cancelada), `TsplusCursorKeepsOffsetAfterAppend` (C3: cursor de prefijo + hash real conservado,
+   sólo la línea nueva se emite), `WindowsEventGapRecoveryIsWiredInWorker` (C2: cableado en
+   `TdmWorker` y campos en el collector). Gates: build 0/0, ProductionTests 75/75, ParityTests
+   38/38, VERIFY 7/7, publish portable (138 779 847 bytes), lock files restaurados.
 
 ## Descartado — Simulación de remediación sobre grafo inventado
 
