@@ -129,6 +129,66 @@ public static class SupportThresholdsValidator
 
     public static bool IsValid(SupportThresholds? value)
         => Validate(value).Count == 0;
+
+    public static SupportThresholds Sanitize(SupportThresholds? value)
+    {
+        if (value is null) return new SupportThresholds();
+        var defaults = new SupportThresholds();
+        var result = value;
+
+        static bool OkDouble(double v, double min, double max) => double.IsFinite(v) && v >= min && v <= max;
+        static bool OkInt(int v, int min, int max) => v >= min && v <= max;
+        static bool OkLong(long v, long min, long max) => v >= min && v <= max;
+
+        if (!(OkDouble(result.CpuWarning, 1, 100) && OkDouble(result.CpuCritical, 1, 100) && result.CpuWarning < result.CpuCritical))
+            result = result with { CpuWarning = defaults.CpuWarning, CpuCritical = defaults.CpuCritical };
+        if (!(OkDouble(result.MemoryUsedWarning, 1, 100) && OkDouble(result.MemoryUsedCritical, 1, 100) && result.MemoryUsedWarning < result.MemoryUsedCritical))
+            result = result with { MemoryUsedWarning = defaults.MemoryUsedWarning, MemoryUsedCritical = defaults.MemoryUsedCritical };
+        if (!(OkInt(result.SessionWarning, 1, 100000) && OkInt(result.SessionCritical, 1, 100000) && result.SessionWarning < result.SessionCritical))
+            result = result with { SessionWarning = defaults.SessionWarning, SessionCritical = defaults.SessionCritical };
+        if (!(OkInt(result.ServiceChangesWarning, 1, 10000) && OkInt(result.ServiceChangesCritical, 1, 10000) && result.ServiceChangesWarning < result.ServiceChangesCritical))
+            result = result with { ServiceChangesWarning = defaults.ServiceChangesWarning, ServiceChangesCritical = defaults.ServiceChangesCritical };
+        if (!(OkDouble(result.TdmCpuWarning, 0.1, 100) && OkDouble(result.TdmCpuCritical, 0.1, 100) && result.TdmCpuWarning < result.TdmCpuCritical))
+            result = result with { TdmCpuWarning = defaults.TdmCpuWarning, TdmCpuCritical = defaults.TdmCpuCritical };
+        if (!(OkDouble(result.TdmMemoryWarningPercent, 0.1, 100) && OkDouble(result.TdmMemoryCriticalPercent, 0.1, 100) && result.TdmMemoryWarningPercent < result.TdmMemoryCriticalPercent))
+            result = result with { TdmMemoryWarningPercent = defaults.TdmMemoryWarningPercent, TdmMemoryCriticalPercent = defaults.TdmMemoryCriticalPercent };
+        if (!(OkInt(result.TdmHandlesWarning, 100, 1000000) && OkInt(result.TdmHandlesCritical, 100, 1000000) && result.TdmHandlesWarning < result.TdmHandlesCritical))
+            result = result with { TdmHandlesWarning = defaults.TdmHandlesWarning, TdmHandlesCritical = defaults.TdmHandlesCritical };
+        if (!(OkInt(result.TdmThreadsWarning, 1, 100000) && OkInt(result.TdmThreadsCritical, 1, 100000) && result.TdmThreadsWarning < result.TdmThreadsCritical))
+            result = result with { TdmThreadsWarning = defaults.TdmThreadsWarning, TdmThreadsCritical = defaults.TdmThreadsCritical };
+        if (!(OkDouble(result.DiskFreeWarningPercent, 1, 100) && OkDouble(result.DiskFreeCriticalPercent, 1, 100) && result.DiskFreeWarningPercent > result.DiskFreeCriticalPercent))
+            result = result with { DiskFreeWarningPercent = defaults.DiskFreeWarningPercent, DiskFreeCriticalPercent = defaults.DiskFreeCriticalPercent };
+        if (!OkInt(result.IncidentCooldownSeconds, 10, 86400))
+            result = result with { IncidentCooldownSeconds = defaults.IncidentCooldownSeconds };
+        if (!OkInt(result.IncidentRecoveryConfirmSamples, 1, 20))
+            result = result with { IncidentRecoveryConfirmSamples = defaults.IncidentRecoveryConfirmSamples };
+        if (!OkInt(result.ClockDriftWarningSeconds, 1, 86400))
+            result = result with { ClockDriftWarningSeconds = defaults.ClockDriftWarningSeconds };
+        if (!(OkInt(result.NodeStaleWarningSeconds, 30, 86400) && OkInt(result.NodeOfflineSeconds, 31, 604800) && result.NodeStaleWarningSeconds < result.NodeOfflineSeconds))
+            result = result with { NodeStaleWarningSeconds = defaults.NodeStaleWarningSeconds, NodeOfflineSeconds = defaults.NodeOfflineSeconds };
+        if (!OkInt(result.NodeReadTimeoutSeconds, 2, 30))
+            result = result with { NodeReadTimeoutSeconds = defaults.NodeReadTimeoutSeconds };
+        if (!OkInt(result.CauseStabilityFlappingThreshold, 2, 5))
+            result = result with { CauseStabilityFlappingThreshold = defaults.CauseStabilityFlappingThreshold };
+        if (!OkInt(result.MaxFilesPerDirectory, 50, 2000))
+            result = result with { MaxFilesPerDirectory = defaults.MaxFilesPerDirectory };
+        if (!OkInt(result.MaxBytesPerFile, 1024 * 1024, 512 * 1024 * 1024))
+            result = result with { MaxBytesPerFile = defaults.MaxBytesPerFile };
+        if (!OkLong(result.MaxTotalBytes, 10L * 1024 * 1024, 2048L * 1024 * 1024))
+            result = result with { MaxTotalBytes = defaults.MaxTotalBytes };
+        if (!OkInt(result.MaxEvents, 100, 50000))
+            result = result with { MaxEvents = defaults.MaxEvents };
+        if (!OkInt(result.MaxFilesPerDirectoryIncremental, 50, 1000))
+            result = result with { MaxFilesPerDirectoryIncremental = defaults.MaxFilesPerDirectoryIncremental };
+        if (!OkInt(result.MaxBytesPerFileIncremental, 64 * 1024, 1024 * 1024))
+            result = result with { MaxBytesPerFileIncremental = defaults.MaxBytesPerFileIncremental };
+        if (!OkLong(result.MaxTotalBytesIncremental, 256L * 1024, 16L * 1024 * 1024))
+            result = result with { MaxTotalBytesIncremental = defaults.MaxTotalBytesIncremental };
+        if (!OkInt(result.MaxEventsIncremental, 50, 2000))
+            result = result with { MaxEventsIncremental = defaults.MaxEventsIncremental };
+
+        return IsValid(result) ? result : defaults;
+    }
 }
 
 public sealed record SupportMonitoringSettings(
@@ -154,18 +214,21 @@ public sealed class SupportMonitoringSettingsStore
     public async Task<SupportMonitoringSettings> LoadAsync(CancellationToken ct = default)
     {
         if (!File.Exists(Path)) return SupportMonitoringSettings.Default;
+        SupportMonitoringSettings? loaded;
         try
         {
             await using var stream = new FileStream(Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
                 16 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            var loaded = await JsonSerializer.DeserializeAsync<SupportMonitoringSettings>(stream, _json, ct);
-            if (loaded is null || !SupportThresholdsValidator.IsValid(loaded.Thresholds))
-                return SupportMonitoringSettings.Default;
-            return loaded;
+            loaded = await JsonSerializer.DeserializeAsync<SupportMonitoringSettings>(stream, _json, ct);
         }
         catch (JsonException) { return SupportMonitoringSettings.Default; }
         catch (IOException) { return SupportMonitoringSettings.Default; }
         catch (UnauthorizedAccessException) { return SupportMonitoringSettings.Default; }
+        if (loaded is null) return SupportMonitoringSettings.Default;
+        var sanitized = loaded with { Thresholds = SupportThresholdsValidator.Sanitize(loaded.Thresholds) };
+        if (sanitized.Thresholds.Equals(loaded.Thresholds)) return sanitized;
+        try { await SaveAsync(sanitized, ct); } catch { }
+        return sanitized;
     }
 
     public async Task SaveAsync(SupportMonitoringSettings settings, CancellationToken ct = default)

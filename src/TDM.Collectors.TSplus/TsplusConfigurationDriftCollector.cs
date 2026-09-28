@@ -46,20 +46,34 @@ public sealed class TsplusConfigurationDriftCollector : IReadOnlyCollector
                 Path.Combine(install, "UserDesktop", "files", "AppControl.ini"),
                 Path.Combine(install, "UserDesktop", "AppControl.ini"),
                 Path.Combine(install, "Clients", "webserver", "runwebserver.bat"),
-                Path.Combine(install, "Clients", "www", "software", "html5", "settings.js")
+                Path.Combine(install, "Clients", "www", "software", "html5", "settings.js"),
+                Path.Combine(install, "Clients", "webserver", "balance.bin"),
+                Path.Combine(install, "Clients", "webserver", "settings.bin"),
+                Path.Combine(install, "Clients", "webserver", "web.config"),
+                Path.Combine(install, "Clients", "www", "web.config"),
+                Path.Combine(install, "Clients", "webportal", "web.config")
             };
 
             var current = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var currentIni = new Dictionary<string, Dictionary<string, List<string>>>(StringComparer.OrdinalIgnoreCase);
             var evidence = new List<EvidenceItem>();
+            var unreadable = new List<string>();
             foreach (var path in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 // Lectura única por archivo: del mismo buffer salen el hash y la
                 // estructura de claves (una segunda lectura podría ver otro instante).
-                if (!TryReadFile(path, out var bytes, out var note))
+                if (!TryReadFile(path, out var bytes, out var note, out var present))
                 {
-                    evidence.Add(new EvidenceItem(ShortName(path), note));
+                    if (present)
+                    {
+                        unreadable.Add(path);
+                        evidence.Add(new EvidenceItem(ShortName(path), note));
+                    }
+                    else if (evidence.All(e => !e.Clave.Equals(ShortName(path), StringComparison.OrdinalIgnoreCase)))
+                    {
+                        evidence.Add(new EvidenceItem(ShortName(path), note));
+                    }
                     continue;
                 }
                 var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
@@ -83,18 +97,41 @@ public sealed class TsplusConfigurationDriftCollector : IReadOnlyCollector
                 return Task.FromResult(new CollectorResult(findings, events));
             }
 
-            var added = current.Keys.Except(baseline.Hashes.Keys, StringComparer.OrdinalIgnoreCase).Take(8).ToList();
-            var removed = baseline.Hashes.Keys.Except(current.Keys, StringComparer.OrdinalIgnoreCase).Take(8).ToList();
+            var newlyTracked = new List<string>();
+            var added = new List<string>();
+            foreach (var path in current.Keys.Except(baseline.Hashes.Keys, StringComparer.OrdinalIgnoreCase))
+            {
+                var created = TryGetCreationUtc(path);
+                if (created is not null && baseline.SavedAt != default && created <= baseline.SavedAt.UtcDateTime)
+                    newlyTracked.Add(path);
+                else
+                    added.Add(path);
+            }
+            added = added.Take(8).ToList();
+            var removed = baseline.Hashes.Keys
+                .Except(current.Keys, StringComparer.OrdinalIgnoreCase)
+                .Where(k => !unreadable.Contains(k, StringComparer.OrdinalIgnoreCase))
+                .Take(8).ToList();
             var changed = current
                 .Where(kv => baseline.Hashes.TryGetValue(kv.Key, out var previous) && !previous.Equals(kv.Value, StringComparison.OrdinalIgnoreCase))
                 .Select(kv => kv.Key).Take(8).ToList();
+            if (newlyTracked.Count > 0)
+                evidence.Add(new EvidenceItem("Incorporados al seguimiento", string.Join(" | ", newlyTracked.Take(8).Select(ShortName))));
 
             // P1-semántico: QUÉ ajuste cambió (claves agregadas/eliminadas, nunca valores).
             // Solo si la línea base previa ya trae estructura; una base antigua la
-            // inicializa sin comparar para no declarar drift espurio.
-            var semanticChanges = baseline.IniStructure is null
+            // inicializa sin comparar para no declarar drift espurio. Los artefactos
+            // presentes-pero-ilegibles se excluyen de ambos lados: no hay lectura nueva.
+            var baselineIni = baseline.IniStructure;
+            if (baselineIni is not null && unreadable.Count > 0)
+            {
+                baselineIni = baselineIni
+                    .Where(kv => !unreadable.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+            }
+            var semanticChanges = baselineIni is null
                 ? new List<TsplusConfigSemanticDiff.KeyChange>()
-                : TsplusConfigSemanticDiff.DiffIni(baseline.IniStructure, currentIni).ToList();
+                : TsplusConfigSemanticDiff.DiffIni(baselineIni, currentIni).ToList();
             var regAdded = new List<string>();
             var regRemoved = new List<string>();
             var regChanged = new List<string>();
@@ -153,7 +190,16 @@ public sealed class TsplusConfigurationDriftCollector : IReadOnlyCollector
                     Capa: DiagnosticLayer.Tsplus));
             }
 
-            var baselineFinal = new ConfigBaselineState(current, DateTimeOffset.Now, currentIni, registry);
+            var finalHashes = new Dictionary<string, string>(current, StringComparer.OrdinalIgnoreCase);
+            var finalIni = new Dictionary<string, Dictionary<string, List<string>>>(currentIni, StringComparer.OrdinalIgnoreCase);
+            foreach (var path in unreadable)
+            {
+                if (baseline.Hashes.TryGetValue(path, out var kept))
+                    finalHashes[path] = kept;
+                if (baseline.IniStructure is not null && baseline.IniStructure.TryGetValue(path, out var keptIni))
+                    finalIni[path] = keptIni;
+            }
+            var baselineFinal = new ConfigBaselineState(finalHashes, DateTimeOffset.Now, finalIni, registry);
             // P1-05: Save to history store for multi-generation diff
             ConfigurationHistoryStore.Instance.SaveAsync(baselineFinal, cancellationToken);
             return Task.FromResult(new CollectorResult(findings, events));
@@ -174,29 +220,58 @@ public sealed class TsplusConfigurationDriftCollector : IReadOnlyCollector
         }
     }
 
-    private static bool TryReadFile(string path, out byte[] bytes, out string note)
+    private static bool TryReadFile(string path, out byte[] bytes, out string note, out bool present)
     {
         bytes = [];
-        note = "No presente / no legible";
+        note = "No presente";
+        present = false;
+        var probe = FileSystemProbe.File(path);
+        if (probe.IsAbsent)
+        {
+            note = "No presente";
+            present = false;
+            return false;
+        }
+        if (!probe.IsAvailable)
+        {
+            note = "No evaluado · " + probe.StatusText + (string.IsNullOrWhiteSpace(probe.Detail) ? string.Empty : " (" + probe.Detail + ")");
+            present = true;
+            return false;
+        }
         try
         {
             var info = new FileInfo(path);
-            if (!info.Exists) return false;
             if (info.Length > MaxHashBytes)
             {
                 note = $"Omitido por tamaño ({info.Length} bytes > {MaxHashBytes})";
+                present = true;
                 return false;
             }
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
             using var memory = new MemoryStream((int)Math.Min(info.Length, MaxHashBytes) + 1);
             stream.CopyTo(memory);
             bytes = memory.ToArray();
+            present = true;
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             note = "No legible: " + ex.Message;
+            present = true;
             return false;
+        }
+    }
+
+    private static DateTimeOffset? TryGetCreationUtc(string path)
+    {
+        try
+        {
+            var created = File.GetCreationTimeUtc(path);
+            return created == DateTime.MinValue ? null : new DateTimeOffset(created, TimeSpan.Zero);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return null;
         }
     }
 

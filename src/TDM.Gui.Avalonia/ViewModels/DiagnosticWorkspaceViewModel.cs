@@ -598,6 +598,12 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
             sb.AppendLine($"Precisión diagnóstica: {report.PrecisionDiagnostica.Score}/100 | nivel: {report.PrecisionDiagnostica.Nivel}");
         if (report.RendimientoDiagnostico is not null)
             sb.AppendLine($"Duración: {report.RendimientoDiagnostico.DuracionTotalMs / 1000d:0.0} s | collectors: {report.RendimientoDiagnostico.CollectorsEjecutados} | timeout: {report.RendimientoDiagnostico.CollectorsConTimeout} | error: {report.RendimientoDiagnostico.CollectorsConError}");
+        if (report.Tensiones.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Tensiones de coherencia:");
+            foreach (var tension in report.Tensiones) sb.AppendLine("• " + tension);
+        }
 
         var serious = report.Hallazgos
             .Where(x => x.Severidad is DiagnosticSeverity.Critico or DiagnosticSeverity.Error or DiagnosticSeverity.Advertencia)

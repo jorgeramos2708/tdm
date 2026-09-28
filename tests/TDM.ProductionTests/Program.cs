@@ -99,7 +99,16 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("ResourceMetricReadersUseStableKeys", ResourceMetricReadersUseStableKeys),
     ("NotEvaluatedTsplusDetectionIsCommunicated", NotEvaluatedTsplusDetectionIsCommunicated),
     ("TsplusLogCoverageNotEvaluatedWithoutDetection", TsplusLogCoverageNotEvaluatedWithoutDetection),
-    ("IncrementalCoverageCountsMissingExpectedSources", IncrementalCoverageCountsMissingExpectedSources)
+    ("IncrementalCoverageCountsMissingExpectedSources", IncrementalCoverageCountsMissingExpectedSources),
+    ("ServiceRecentTransitionsWiredBeforeCorrelation", ServiceRecentTransitionsWiredBeforeCorrelation),
+    ("RecordAndEnrichDeduplicatesPreRecordedTransitions", RecordAndEnrichDeduplicatesPreRecordedTransitions),
+    ("CarryForwardKeepsDroppedObservationLinked", CarryForwardKeepsDroppedObservationLinked),
+    ("ConfigDriftUnreadableFileKeepsBaseline", ConfigDriftUnreadableFileKeepsBaseline),
+    ("ConfigDriftTracksWebArtifactsAndSeedsExisting", ConfigDriftTracksWebArtifactsAndSeedsExisting),
+    ("ExportRendersTensionesSection", ExportRendersTensionesSection),
+    ("ExportExecutiveCardsAndCountsAreCoherent", ExportExecutiveCardsAndCountsAreCoherent),
+    ("NarrativeCountsTsplusFindingsAsInternalAnomalies", NarrativeCountsTsplusFindingsAsInternalAnomalies),
+    ("SettingsLoadRepairsInvalidThresholdsPerGroup", SettingsLoadRepairsInvalidThresholdsPerGroup)
 };
 
 var failed = 0;
@@ -1808,6 +1817,315 @@ static async Task ExportJsonMasksPrimaryCauseAndClusterIdentity()
             "El motivo de ampliación conservó identidad cruda en el JSON export.");
     }
     finally { TryDelete(dir); }
+}
+
+static Task ServiceRecentTransitionsWiredBeforeCorrelation()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de transiciones del servicio no ejecutable.");
+    var worker = File.ReadAllText(Path.Combine(root!, "src", "TDM.Service", "TdmWorker.cs"));
+    var readIndex = worker.IndexOf("AddRecentMonitorTransitionsAsync", StringComparison.Ordinal);
+    True(readIndex >= 0, "El servicio no lee el journal reciente de transiciones (forensic/integrity/monitor).");
+    var analyzeIndex = worker.IndexOf("DiagnosticWorkflow.Analyze(", StringComparison.Ordinal);
+    True(analyzeIndex > readIndex, "La lectura del journal reciente no ocurre antes de DiagnosticWorkflow.Analyze en el ciclo del servicio.");
+    return Task.CompletedTask;
+}
+
+static async Task RecordAndEnrichDeduplicatesPreRecordedTransitions()
+{
+    var root = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var store = new LocalStateStore(root);
+        await store.RecordAsync(StateSnapshotBuilder.Build(
+            Report([ServiceStateEvent(now, "Running")], now), "1.0.0"), "service-monitor");
+        var resultB = await store.RecordAsync(StateSnapshotBuilder.Build(
+            Report([ServiceStateEvent(now.AddSeconds(5), "Stopped")], now.AddSeconds(5)), "1.0.0"), "service-monitor");
+        Equal(1, resultB.Transitions.Count, "precondición: Running→Stopped debe producir una transición.");
+
+        var report = Report([ServiceStateEvent(now.AddSeconds(5), "Stopped")], now.AddSeconds(5));
+        report = StateReportIntegrator.AddTransitionsFromRecordResult(report, resultB, "service-monitor");
+        Equal(1, report.Eventos.Count(e => e.Tipo == "TDM_MONITOR_STATE_TRANSITION"),
+            "precondición: el pre-record debe aportar el evento de transición.");
+
+        report = await StateReportIntegrator.RecordAndEnrichAsync(report, "1.0.0", CancellationToken.None,
+            channel: "service-monitor", rootPath: root, preRecordedResult: resultB);
+
+        var duplicated = report.Eventos.Count(e => e.Tipo == "TDM_STATE_TRANSITION"
+            && e.Componente.Equals("Spooler", StringComparison.OrdinalIgnoreCase));
+        Equal(0, duplicated, "RecordAndEnrich duplicó la transición ya emitida por el pre-record del ciclo.");
+        var totalTransitions = report.Eventos.Count(e => e.Tipo is "TDM_MONITOR_STATE_TRANSITION" or "TDM_STATE_TRANSITION");
+        Equal(1, totalTransitions, "El mismo cambio físico debe existir una sola vez en el reporte.");
+    }
+    finally { TryDelete(root); }
+}
+
+static async Task CarryForwardKeepsDroppedObservationLinked()
+{
+    var root = TempDir();
+    try
+    {
+        var store = new LocalStateStore(root);
+        var now = DateTimeOffset.Now;
+        var full = await store.RecordAsync(StateSnapshotBuilder.Build(
+            Report([LongitudinalConfigEvent(now, "Disponible", "Running")], now), "1.0.0"), "diagnostic");
+        Equal(1, full.Snapshot.Observations.Count, "precondición: la observación longitudinal debe persistirse.");
+
+        var degraded = await store.RecordAsync(StateSnapshotBuilder.Build(
+            Report([LongitudinalConfigEvent(now.AddMinutes(1), "Sin permisos de lectura", "Stopped")], now.AddMinutes(1)), "1.0.0"), "diagnostic");
+        Equal(0, degraded.Transitions.Count, "precondición: una cobertura degradada no debe producir transición.");
+        var latest = await File.ReadAllTextAsync(store.GetLatestSnapshotPath("diagnostic"));
+        True(latest.Contains("Running", StringComparison.Ordinal),
+            "latest.json perdió la observación cuando la cobertura quedó degradada.");
+
+        var recovered = await store.RecordAsync(StateSnapshotBuilder.Build(
+            Report([LongitudinalConfigEvent(now.AddMinutes(2), "Disponible", "Stopped")], now.AddMinutes(2)), "1.0.0"), "diagnostic");
+        Equal(1, recovered.Transitions.Count,
+            "La observación reaparecida no vinculó contra el último estado conocido (carry-forward ausente).");
+        True(recovered.Transitions[0].PreviousValue.Contains("Running", StringComparison.Ordinal),
+            "La transición detectada no parte del último estado conocido conservado.");
+        True(recovered.Transitions[0].CurrentValue.Contains("Stopped", StringComparison.Ordinal),
+            "La transición detectada no llega al estado actual.");
+    }
+    finally { TryDelete(root); }
+}
+
+static async Task ConfigDriftUnreadableFileKeepsBaseline()
+{
+    var stateRoot = TempDir();
+    var install = TempDir();
+    var prior = Environment.GetEnvironmentVariable("TDM_STATE_ROOT");
+    try
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", stateRoot);
+        SeedMinimalInstall(install, out var iniPath, out var original);
+
+        var collector = new TsplusConfigurationDriftCollector();
+        var ctx = InstallContext(install);
+        var first = await collector.CollectAsync(ctx);
+        True(first.Eventos.Any(e => e.Tipo == "TSPLUS_CONFIG_BASELINE_INITIALIZED"),
+            "precondición: la primera ejecución debe inicializar la línea base.");
+        True(File.Exists(Path.Combine(stateRoot, "tsplus-config-baseline.json")),
+            "precondición: la línea base no se persistió en el state root aislado.");
+
+        File.WriteAllText(iniPath, original + Environment.NewLine + new string('x', 1100 * 1024));
+        var oversized = await collector.CollectAsync(ctx);
+        False(oversized.Hallazgos.Any(f => f.Id == "TSPLUS-CONFIG-DRIFT"),
+            "Un archivo presente-pero-ilegible por tamaño se reportó como eliminado (drift falso).");
+        True(oversized.Eventos.Any(e => e.Tipo == "TSPLUS_CONFIG_STABLE"),
+            "Un archivo ilegible por tamaño dejó de emitir el estado estable de configuración.");
+
+        File.WriteAllText(iniPath, original);
+        var restored = await collector.CollectAsync(ctx);
+        False(restored.Hallazgos.Any(f => f.Id == "TSPLUS-CONFIG-DRIFT"),
+            "La línea base se reescribió sin el archivo ilegible: al volver apareció un drift falso.");
+
+        File.WriteAllText(iniPath, original + Environment.NewLine + "Port=8443");
+        var changed = await collector.CollectAsync(ctx);
+        True(changed.Hallazgos.Any(f => f.Id == "TSPLUS-CONFIG-DRIFT"
+                && f.Evidencia.Any(x => x.Clave == "Archivos modificados" && x.Valor.Contains("AppControl.ini", StringComparison.Ordinal))),
+            "Un cambio real en un archivo rastreado dejó de detectarse.");
+
+        File.Delete(Path.Combine(install, "Clients", "www", "software", "html5", "settings.js"));
+        var removed = await collector.CollectAsync(ctx);
+        True(removed.Hallazgos.Any(f => f.Id == "TSPLUS-CONFIG-DRIFT"
+                && f.Evidencia.Any(x => x.Clave == "Archivos eliminados" && x.Valor.Contains("settings.js", StringComparison.Ordinal))),
+            "La eliminación real de un archivo rastreado dejó de detectarse.");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", prior);
+        TryDelete(stateRoot);
+        TryDelete(install);
+    }
+}
+
+static async Task ConfigDriftTracksWebArtifactsAndSeedsExisting()
+{
+    var stateRoot = TempDir();
+    var install = TempDir();
+    var prior = Environment.GetEnvironmentVariable("TDM_STATE_ROOT");
+    try
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", stateRoot);
+        SeedMinimalInstall(install, out _, out _);
+
+        var descriptor = TsplusConfigurationArtifactCatalog.Find("web.config");
+        NotNull(descriptor, "web.config no está en el catálogo de artefactos de configuración TSplus.");
+        Equal("Web / HTML5", descriptor!.Component, "web.config se clasificó fuera del componente Web / HTML5.");
+
+        var collector = new TsplusConfigurationDriftCollector();
+        var ctx = InstallContext(install);
+        var first = await collector.CollectAsync(ctx);
+        True(first.Eventos.Any(e => e.Tipo == "TSPLUS_CONFIG_BASELINE_INITIALIZED"),
+            "precondición: la primera ejecución debe inicializar la línea base.");
+
+        var wsDir = Path.Combine(install, "Clients", "webserver");
+        Directory.CreateDirectory(wsDir);
+        var webConfig = Path.Combine(wsDir, "web.config");
+        var balance = Path.Combine(wsDir, "balance.bin");
+        var settingsBin = Path.Combine(wsDir, "settings.bin");
+        File.WriteAllText(webConfig, "<configuration></configuration>");
+        File.WriteAllText(balance, "routes-v1");
+        File.WriteAllText(settingsBin, "meta-v1");
+        var past = DateTime.UtcNow.AddDays(-3);
+        File.SetCreationTimeUtc(webConfig, past);
+        File.SetCreationTimeUtc(balance, past);
+        File.SetCreationTimeUtc(settingsBin, past);
+
+        var seeded = await collector.CollectAsync(ctx);
+        False(seeded.Hallazgos.Any(f => f.Id == "TSPLUS-CONFIG-DRIFT"),
+            "Artefactos previos a la línea base se reportaron como archivos agregados (falso drift de upgrade).");
+        True(seeded.Eventos.Any(e => e.Tipo == "TSPLUS_CONFIG_STABLE"
+                && e.Evidencia?.Any(x => x.Clave == "Incorporados al seguimiento" && x.Valor.Contains("web.config", StringComparison.Ordinal)) == true),
+            "El seguimiento de artefactos incorporados no quedó declarado en la evidencia.");
+
+        File.WriteAllText(webConfig, "<configuration><system.webServer></system.webServer></configuration>");
+        var modified = await collector.CollectAsync(ctx);
+        True(modified.Hallazgos.Any(f => f.Id == "TSPLUS-CONFIG-DRIFT"
+                && f.Evidencia.Any(x => x.Clave == "Archivos modificados" && x.Valor.Contains("web.config", StringComparison.Ordinal))),
+            "La modificación de web.config no quedó rastreada como drift de configuración.");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", prior);
+        TryDelete(stateRoot);
+        TryDelete(install);
+    }
+}
+
+static async Task ExportRendersTensionesSection()
+{
+    var dir = TempDir();
+    var cleanDir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var tension = "Hallazgo de severidad alta sin causa causal que lo explique en la ventana visible.";
+        var withTension = Report([], now) with { Tensiones = [tension] };
+        var result = await ReportExporter.ExportAsync(withTension, dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("<h2>Tensiones de coherencia</h2>", StringComparison.Ordinal),
+            "El HTML dejó de renderizar la sección de tensiones de coherencia.");
+        True(html.Contains(tension, StringComparison.Ordinal),
+            "El texto de la tensión no llegó al HTML exportado.");
+
+        var clean = await ReportExporter.ExportAsync(Report([], now), cleanDir, CancellationToken.None);
+        var cleanHtml = await File.ReadAllTextAsync(clean.HtmlPath);
+        False(cleanHtml.Contains("Tensiones de coherencia", StringComparison.Ordinal),
+            "Un reporte sin tensiones mostró la sección vacía.");
+    }
+    finally { TryDelete(dir); TryDelete(cleanDir); }
+}
+
+static async Task ExportExecutiveCardsAndCountsAreCoherent()
+{
+    var dir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var coverage = new DiagnosticCoverageAssessment(55, "BAJA",
+            [
+                new CoverageSourceAssessment("SRC-CRIT-PARTIAL", "Parcial", "detalle", true),
+                new CoverageSourceAssessment("SRC-CRIT-BLOCKED", "No disponible", "detalle", true),
+                new CoverageSourceAssessment("SRC-LOW-OK", "Disponible", "detalle", false)
+            ], [], "resumen");
+        var precision = new DiagnosticPrecisionAssessment(60, "LIMITADA", false, 2, 4, 9, 0, false, false, "resumen", []);
+        var report = Report([], now) with
+        {
+            CoberturaDiagnostica = coverage,
+            PrecisionDiagnostica = precision,
+            ImpactoFuncional = new FunctionalImpactAssessment(FunctionalImpactState.SinImpactoObservado, "Sin impacto funcional confirmado.", [])
+        };
+        var result = await ReportExporter.ExportAsync(report, dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("<div class='quick-label'>ESTADO</div><div class='quick-value state-muted'>NO EVALUADO</div>", StringComparison.Ordinal),
+            "Con cobertura crítica incompleta y sin causa, el estado ejecutivo no quedó en NO EVALUADO.");
+        False(html.Contains("<div class='quick-label'>IMPACTO</div><div class='quick-value state-ok'>SALUDABLE</div>", StringComparison.Ordinal),
+            "La tarjeta IMPACTO contradice ESTADO: declara SALUDABLE con cobertura crítica incompleta.");
+        True(html.Contains("Incompleta &#183; 1 fuente(s) bloqueada(s) &#183; 2 sin cobertura completa", StringComparison.Ordinal),
+            "El detalle técnico no separa bloqueos duros de fuentes críticas sin cobertura completa.");
+        True(html.Contains("Fuentes: 3 | Críticas: 2 | Críticas bloqueadas: 1 | Parciales: 1", StringComparison.Ordinal),
+            "Los conteos de la tarjeta de cobertura no coinciden con el bloqueo duro del detalle técnico.");
+    }
+    finally { TryDelete(dir); }
+}
+
+static Task NarrativeCountsTsplusFindingsAsInternalAnomalies()
+{
+    var now = DateTimeOffset.Now;
+    var finding = new DiagnosticFinding("TSPLUS-CONFIG-DRIFT", "Configuración TSplus", DiagnosticSeverity.Advertencia,
+        "Cambios detectados en archivos de configuración", "detalle de prueba", [], Capa: DiagnosticLayer.Tsplus);
+    var narrative = DiagnosticNarrativeBuilder.Build(Report([], now, [finding]));
+    False(narrative.Contains("Anomalías internas detectadas: 0", StringComparison.Ordinal),
+        "La narrativa declaró 0 anomalías internas pese a hallazgos TSPLUS en el reporte.");
+    True(narrative.Contains("Cambios detectados en archivos de configuración", StringComparison.Ordinal),
+        "El hallazgo TSPLUS no aparece en la sección de anomalías internas de la narrativa.");
+    return Task.CompletedTask;
+}
+
+static async Task SettingsLoadRepairsInvalidThresholdsPerGroup()
+{
+    var root = TempDir();
+    try
+    {
+        var store = new SupportMonitoringSettingsStore(root);
+        Directory.CreateDirectory(Path.GetDirectoryName(store.Path)!);
+        File.WriteAllText(store.Path,
+            "{\"thresholds\":{\"cpuWarning\":55,\"cpuCritical\":95,\"sessionWarning\":200,\"sessionCritical\":100,\"tdmHandlesWarning\":3500,\"tdmHandlesCritical\":4500},\"enableIncidentAntiNoise\":false,\"enableSynchronizedCursor\":true,\"enableMultiServer\":true}");
+        var loaded = await store.LoadAsync();
+        Equal(55d, loaded.Thresholds.CpuWarning, "Un umbral válido se revirtió a defaults junto con el grupo inválido.");
+        Equal(80, loaded.Thresholds.SessionWarning, "El par de sesiones inválido no se reparó a defaults.");
+        Equal(120, loaded.Thresholds.SessionCritical, "El par de sesiones inválido no se reparó a defaults.");
+        Equal(3500, loaded.Thresholds.TdmHandlesWarning, "Un umbral de handles válido no se conservó.");
+        False(loaded.EnableIncidentAntiNoise, "Un flag de configuración se perdió al sanear umbrales.");
+        True(SupportThresholdsValidator.IsValid(loaded.Thresholds), "LoadAsync devolvió umbrales aún inválidos.");
+
+        var healed = JsonSerializer.Deserialize<SupportMonitoringSettings>(
+            await File.ReadAllTextAsync(store.Path),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        NotNull(healed, "El archivo reparado no volvió a leerse.");
+        Equal(80, healed!.Thresholds.SessionWarning, "El archivo no se sanearon/selló tras la reparación en carga.");
+        Equal(55d, healed.Thresholds.CpuWarning, "La reparación en carga perdió el valor personalizado en disco.");
+    }
+    finally { TryDelete(root); }
+}
+
+static DiagnosticEvent ServiceStateEvent(DateTimeOffset at, string state)
+    => new(at, "Service Control Manager", "Spooler", DiagnosticLayer.Windows,
+        state == "Stopped" ? DiagnosticSeverity.Error : DiagnosticSeverity.Informativo,
+        "SERVICE_STATE", $"Servicio Spooler {state}",
+        Evidencia: [new EvidenceItem("Servicio", "Spooler"), new EvidenceItem("Estado", state)]);
+
+static DiagnosticEvent LongitudinalConfigEvent(DateTimeOffset at, string coverage, string estado)
+    => new(at, "TSplus Filesystem", "Web / HTML5", DiagnosticLayer.Tsplus, DiagnosticSeverity.Informativo,
+        "TSPLUS_LONGITUDINAL_CONFIG_STATE", "Estado longitudinal de configuración TSplus: web.config.",
+        Archivo: @"C:\\TSplus\\Clients\\webserver\\web.config",
+        Evidencia:
+        [
+            new EvidenceItem("Archivo", @"C:\\TSplus\\Clients\\webserver\\web.config"),
+            new EvidenceItem("Cobertura", coverage),
+            new EvidenceItem("Estado", estado)
+        ]);
+
+static DiagnosticContext InstallContext(string install)
+    => new(new SystemSnapshot("TEST", "Windows Server", "2025", "test", "x64", TimeSpan.FromHours(1),
+        DateTimeOffset.Now, true, install, "19"), TimeSpan.FromHours(4));
+
+static void SeedMinimalInstall(string install, out string iniPath, out string original)
+{
+    var iniDir = Path.Combine(install, "UserDesktop", "files");
+    Directory.CreateDirectory(iniDir);
+    iniPath = Path.Combine(iniDir, "AppControl.ini");
+    original = "[appsettings]" + Environment.NewLine + "Port=443";
+    File.WriteAllText(iniPath, original);
+    var webDir = Path.Combine(install, "Clients", "www", "software", "html5");
+    Directory.CreateDirectory(webDir);
+    File.WriteAllText(Path.Combine(webDir, "settings.js"), "// settings");
+    var wsDir = Path.Combine(install, "Clients", "webserver");
+    Directory.CreateDirectory(wsDir);
+    File.WriteAllText(Path.Combine(wsDir, "runwebserver.bat"), "@echo off");
 }
 
 static string? FindRepoRoot()

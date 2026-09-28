@@ -162,7 +162,11 @@ public static async Task<ReportExportResult> ExportAsync(
         var criticalCoverageComplete = report.CoberturaDiagnostica is not null && !report.CoberturaDiagnostica.Fuentes.Any(x => x.Critica && x.Estado is not "Disponible" and not "No aplica");
         var quickQuality = report.PrecisionDiagnostica is null ? "N/D" : $"{report.PrecisionDiagnostica.Score}/100";
         var quickConfidence = quickCause?.Confianza.ToString() ?? "Insuficiente";
-        var quickImpactState = quickImpact is null ? "No evaluado" : CompactImpactState(quickImpact.EstadoGeneral);
+        var quickImpactState = quickImpact is null
+            ? "No evaluado"
+            : quickImpact.EstadoGeneral is FunctionalImpactState.SinImpactoObservado && !criticalCoverageComplete
+                ? "NO EVALUADO"
+                : CompactImpactState(quickImpact.EstadoGeneral);
         sb.Append("<div class='quick-grid'>");
         QuickCard("ESTADO", quickState, ExecutiveStateCss(quickState));
         var directImpact = quickImpact?.Impactos.FirstOrDefault(i => i.Estado is FunctionalImpactState.Interrumpido or FunctionalImpactState.Degradado);
@@ -226,6 +230,13 @@ public static async Task<ReportExportResult> ExportAsync(
             sb.Append("</div>");
         }
 
+        if (report.Tensiones.Count > 0)
+        {
+            sb.Append("<div class='card warn'><h2>Tensiones de coherencia</h2><ul>");
+            foreach (var tension in report.Tensiones) sb.Append($"<li>{H(tension)}</li>");
+            sb.Append("</ul><p class='muted'>El auto-chequeo interno de TDM señala afirmaciones que conviene validar con lectura del técnico antes de actuar.</p></div>");
+        }
+
         sb.Append("<div class='grid'>");
         sb.Append("<div class='card'><h2>Qué revisar</h2>");
         var quickSteps = report.PlanAccion?.DondeEmpezar.Take(2).ToList() ?? [];
@@ -285,7 +296,11 @@ public static async Task<ReportExportResult> ExportAsync(
         if (report.PrecisionDiagnostica is { } precision)
         {
             Row("Calidad de evidencia", $"{precision.Score}/100 · {precision.Nivel} (no es probabilidad)");
-            Row("Cobertura crítica", precision.CoberturaCompleta ? "Completa" : $"Incompleta · {precision.FuentesBloqueadas} fuente(s) bloqueada(s)");
+            var criticalHardBlocked = report.CoberturaDiagnostica?.Fuentes.Count(x => x.Critica && x.Estado is "No disponible" or "Bloqueada" or "Timeout") ?? precision.FuentesBloqueadas;
+            var blockedText = $"{criticalHardBlocked} fuente(s) bloqueada(s)";
+            if (precision.FuentesBloqueadas != criticalHardBlocked)
+                blockedText += $" · {precision.FuentesBloqueadas} sin cobertura completa";
+            Row("Cobertura crítica", precision.CoberturaCompleta ? "Completa" : $"Incompleta · {blockedText}");
             Row("Señales causales / contexto", $"{precision.SenalesCausales} / {precision.EventosContexto}");
             Row("Conflicto de origen", precision.OrigenEnConflicto ? "Sí" : "No");
         }

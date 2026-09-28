@@ -254,6 +254,10 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
                             _logger.LogWarning(ex, "Historial verificado no disponible en este ciclo; el ranking usa solo evidencia actual");
                         }
 
+                        var transitionsFrom = (report.PeriodoAnalizadoInicio == default ? report.Inicio : report.PeriodoAnalizadoInicio) - TimeSpan.FromMinutes(15);
+                        var transitionsTo = report.PeriodoAnalizadoFin == default ? report.Fin : report.PeriodoAnalizadoFin;
+                        report = await StateReportIntegrator.AddRecentMonitorTransitionsAsync(report, transitionsFrom, transitionsTo, stoppingToken, _root).ConfigureAwait(false);
+
                         report = DiagnosticWorkflow.Analyze(report, includeGuidedResolution: false, verifiedHitRates: verifiedHitRates);
 
                         // P2-estabilidad: si la causa principal rota entre muestras, el top se

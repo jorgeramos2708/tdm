@@ -816,6 +816,26 @@ internal static class Program
             }
         });
 
+        Run("Gui_SummaryRendersTensiones", () =>
+        {
+            var snapshot = new SystemSnapshot(
+                "EQUIPO-PRUEBA", "Windows", "11", "22631", "x64", TimeSpan.FromHours(4), now,
+                TsplusDetectado: true, TsplusRuta: null, TsplusVersion: "prueba");
+            var report = new DiagnosticReport(snapshot, [], [], now.AddSeconds(-1), now)
+            {
+                Tensiones = ["El hallazgo de Spooler no tiene causa causal en la ventana."]
+            };
+            var text = DiagnosticWorkspaceViewModel.BuildSummary(report);
+            True(text.Contains("Tensiones de coherencia:", StringComparison.Ordinal),
+                "La GUI dejó de mostrar las tensiones de coherencia en el resumen.");
+            True(text.Contains("El hallazgo de Spooler no tiene causa causal en la ventana.", StringComparison.Ordinal),
+                "El detalle de la tensión no llegó al resumen de la GUI.");
+            var clean = DiagnosticWorkspaceViewModel.BuildSummary(
+                new DiagnosticReport(snapshot, [], [], now.AddSeconds(-1), now));
+            True(!clean.Contains("Tensiones de coherencia:", StringComparison.Ordinal),
+                "La GUI mostró la sección de tensiones vacía.");
+        });
+
         Run("EmptySample_Reset", () =>
         {
             var support = new SupportDashboardViewModel(); support.Apply(Array.Empty<ObservabilitySample>()); Equal("N/D", support.ServiceValue);

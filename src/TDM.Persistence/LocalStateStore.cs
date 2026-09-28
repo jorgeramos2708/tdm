@@ -64,7 +64,10 @@ public sealed class LocalStateStore
         foreach (var transition in transitions)
             await AppendJsonLineAsync(transitionsPath, transition, durable, ct);
 
-        await WriteAtomicAsync(latestSnapshotPath, snapshot, pretty: durable, durable: durable, ct: ct);
+        var persisted = previous is not null && previous.SchemaVersion == snapshot.SchemaVersion
+            ? CarryForwardMissing(previous, snapshot)
+            : snapshot;
+        await WriteAtomicAsync(latestSnapshotPath, persisted, pretty: durable, durable: durable, ct: ct);
         CleanupRetentionIfDue();
 
         return new RecordResult(
@@ -182,6 +185,13 @@ public sealed class LocalStateStore
         var transitions = Directory.Exists(historyDir) ? Directory.EnumerateFiles(historyDir, "transitions-*.jsonl").Count() : 0;
         return new LocalStoreStatus(RootPath, LatestSnapshotPath, BaselinePath, baseline is not null, baseline?.CapturedAt,
             RetentionDays, history, transitions);
+    }
+
+    public static PersistentStateSnapshot CarryForwardMissing(PersistentStateSnapshot previous, PersistentStateSnapshot current)
+    {
+        var currentKeys = current.Observations.Select(o => o.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var carried = previous.Observations.Where(o => !currentKeys.Contains(o.Key)).ToList();
+        return carried.Count == 0 ? current : current with { Observations = [.. current.Observations, .. carried] };
     }
 
     public static IReadOnlyList<StateTransition> CompareTransitions(PersistentStateSnapshot previous, PersistentStateSnapshot current)

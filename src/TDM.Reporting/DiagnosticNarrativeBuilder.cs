@@ -319,14 +319,8 @@ public static class DiagnosticNarrativeBuilder
                 sb.AppendLine($"    … y {fileInventories.Count - shownInventories.Count} inventario(s) más sin mostrar (colección completa en JSON).");
         }
 
-        var configProblems = report.Hallazgos.Where(f =>
-            f.Id.StartsWith("TSPLUS-APPCONTROL-", StringComparison.OrdinalIgnoreCase) ||
-            f.Id.StartsWith("TSPLUS-PUBLISHED-APP-", StringComparison.OrdinalIgnoreCase) ||
-            f.Id.StartsWith("TSPLUS-WEB-CONFIG-", StringComparison.OrdinalIgnoreCase) ||
-            f.Id.StartsWith("TSPLUS-WEB-RUNTIME-", StringComparison.OrdinalIgnoreCase) ||
-            f.Id.StartsWith("TSPLUS-WEB-PORT-", StringComparison.OrdinalIgnoreCase) ||
-            f.Id.StartsWith("TSPLUS-WEB-JVM-CRASH-", StringComparison.OrdinalIgnoreCase) ||
-            f.Id.StartsWith("TSPLUS-INTEGRITY-", StringComparison.OrdinalIgnoreCase)).ToList();
+        var configProblems = report.Hallazgos
+            .Where(f => f.Id.StartsWith("TSPLUS-", StringComparison.OrdinalIgnoreCase)).ToList();
         if (configProblems.Count == 0) sb.AppendLine("  - Anomalías internas detectadas: 0 en las comprobaciones implementadas.");
         else
         {

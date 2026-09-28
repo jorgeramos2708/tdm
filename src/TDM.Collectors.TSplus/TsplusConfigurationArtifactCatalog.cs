@@ -28,6 +28,7 @@ public static class TsplusConfigurationArtifactCatalog
             ["common_applications.js"] = new("common_applications.js", TsplusProduct.RemoteAccess, "Web / HTML5", "JavaScript / lectura segura sin ejecución"),
             ["startup.config"] = new("startup.config", TsplusProduct.RemoteAccess, "Sesiones / RemoteApp", "XML/configuración / sintaxis conservadora"),
             ["settings.bin"] = new("settings.bin", TsplusProduct.RemoteAccess, "Web / HTML5", "BIN / metadatos"),
+            ["web.config"] = new("web.config", TsplusProduct.RemoteAccess, "Web / HTML5", "XML/configuración / sintaxis conservadora"),
             ["webcredentials.ini"] = new("webcredentials.ini", TsplusProduct.RemoteAccess, "Web / HTML5", "INI / estructura; contenido sensible no exportado", true),
             ["webcredentials1.ini"] = new("webcredentials1.ini", TsplusProduct.RemoteAccess, "Web / HTML5", "INI / estructura; contenido sensible no exportado", true)
         };

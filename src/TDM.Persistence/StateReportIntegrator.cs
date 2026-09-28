@@ -72,6 +72,8 @@ public static class StateReportIntegrator
 
             foreach (var transition in result.Transitions.Take(100))
             {
+                if (events.Any(e => SamePhysicalTransition(e, transition)))
+                    continue;
                 events.Add(new DiagnosticEvent(
                     transition.Timestamp > anchor ? anchor : transition.Timestamp,
                     "TDM State Journal",

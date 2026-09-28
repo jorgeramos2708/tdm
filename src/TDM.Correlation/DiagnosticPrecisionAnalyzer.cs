@@ -178,7 +178,7 @@ public static class DiagnosticPrecisionAnalyzer
             new("Puntaje de calidad de evidencia", $"{score}/100 (no es probabilidad)"),
             new("Nivel de calidad", level),
             new("Cobertura crítica completa", coverageComplete ? "Sí" : "No"),
-            new("Fuentes bloqueadas/no legibles", blockedSources.ToString()),
+            new("Fuentes críticas sin cobertura completa", blockedSources.ToString()),
             new("Bloqueos duros de fuentes críticas", hardBlockedSources.ToString()),
             new("Señales causales/operativas", signals.ToString()),
             new("Incidentes funcionales detectados", operationalIncidents.ToString()),
