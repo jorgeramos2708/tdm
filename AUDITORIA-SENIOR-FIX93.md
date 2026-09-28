@@ -21,6 +21,7 @@ de corrección aplicadas sobre el árbol de trabajo de este repositorio.
 | Fase 3 | Brechas de privacidad | ✅ completada | `ab52e62` |
 | Fase 4 | Críticos C1–C3 (cobertura, continuidad Event Viewer, cursor TSplus) | ✅ completada | `ab6d42e` |
 | Fase 5 | Altos H1/H2/H3/H8/H9/H11 (detección y cobertura) | ✅ completada | `d288174` |
+| Fase 6 | Altos H4/H5/H6/H7/H12–H15 + tests extremo-a-extremo de coherencia HTML | ✅ completada | `940e4b7` |
 | — | Simulación de remediación sobre grafo inventado | ❌ descartada | — |
 
 ---
@@ -361,6 +362,69 @@ Seis hallazgos altos de la auditoría:
    (ProductionTests, 82/82), `Causality_UsesRealDiagnosticKinds` (ParityTests, 39/39). Gates: build
    0/0, VERIFY 7/7, publish portable (138 796 231 bytes), lock files restaurados.
 
+## Fase 6 — Altos H4/H5/H6/H7/H12–H15 (commit `940e4b7`)
+
+Ocho hallazgos altos de la auditoría:
+
+1. **H4 — el modo servicio no correlacionaba con las transiciones recientes.** `TdmWorker` no
+   llamaba a `StateReportIntegrator.AddRecentMonitorTransitionsAsync`, que la GUI sí invoca en
+   `DiagnosticExecutionService.cs:119-121` antes de correlacionar: los candidatos longitudinales de
+   mayor puntaje (94/90), que emparejan una transición con una falla posterior, jamás se generaban
+   en el servicio. Fix: el ciclo añade las transiciones de `PeriodoAnalizadoInicio − 15 min`
+   (margen de emparejamiento del correlacionador) hasta `PeriodoAnalizadoFin` con `_root`, justo
+   antes de `DiagnosticWorkflow.Analyze`.
+   Test: `ServiceRecentTransitionsWiredBeforeCorrelation`.
+2. **H15 — `TDM_STATE_TRANSITION` sin deduplicar.** `RecordAndEnrichAsync` emitía las transiciones
+   del `preRecordedResult` aunque el informe ya las hubiera enriquecido (el canal monitor sí
+   deduplicaba). Fix: `events.Any(e => SamePhysicalTransition(e, transition))` → `continue`.
+   Test: `RecordAndEnrichDeduplicatesPreRecordedTransitions`.
+3. **H5 — una observación descartada borraba la última buena de `latest.json`.**
+   `StateSnapshotBuilder.cs:96-102` descarta estados longitudinales cuya cobertura no empieza por
+   "Disponible"/"Completa" y `RecordAsync` reescribía `latest.json` sólo con la captura nueva; al
+   volver el acceso, `CompareTransitions` no encontraba el valor previo (`:205` `continue`) y el
+   cambio real quedaba permanentemente indetectado. Fix: `latest.json` se escribe con
+   `CarryForwardMissing(previous, snapshot)` (sólo si coincide `SchemaVersion`); la historia JSONL
+   y `RecordResult.Snapshot` conservan la captura cruda.
+   Test: `CarryForwardKeepsDroppedObservationLinked`.
+4. **H6 — un fichero ilegible contaba como eliminado.** `TryReadFile` no distinguía ausencia de
+   fallo de lectura: un permiso denegado o un `AppControl.ini` mayor que `MaxHashBytes` entraba en
+   `removed` (falso `TSPLUS-CONFIG-DRIFT`) y la baseline se reescribía sin él. Fix:
+   `TryReadFile(..., out present)` con `FileSystemProbe` ("No presente" / "No evaluado · …" /
+   "Omitido por tamaño" / "No legible: …"); los ilegibles se excluyen de `removed`, se conservan en
+   `baselineFinal` (hashes e INI) y se filtran de `baselineIni` antes de `DiffIni`, y la evidencia
+   por `ShortName` no se duplica cuando dos rutas comparten nombre.
+   Test: `ConfigDriftUnreadableFileKeepsBaseline`.
+5. **H7 — artefactos web fuera del seguimiento de deriva.** `web.config`, `balance.bin` y
+   `settings.bin` no estaban en las candidatas ni `web.config` en el catálogo, y los ficheros ya
+   existentes al primer baseline aparecían como añadidos. Fix: 5 rutas nuevas en candidatas
+   (`web.config` en `Clients\webserver|www|webportal`), entrada en
+   `TsplusConfigurationArtifactCatalog`, y clasificación "Incorporados al seguimiento" cuando
+   `TryGetCreationUtc(path) <= baseline.SavedAt` en lugar de `added`.
+   Test: `ConfigDriftTracksWebArtifactsAndSeedsExisting`.
+6. **H12 — `Tensiones` invisible en HTML y GUI.** Fix: tarjeta "Tensiones de coherencia" en el
+   export (tras la tarjeta de impacto funcional) y sección "Tensiones de coherencia" en
+   `BuildSummary` de la GUI.
+   Tests: `ExportRendersTensionesSection`, `Gui_SummaryRendersTensiones`.
+7. **H13 — tarjetas contradictorias con los mismos datos.** (a) `quickImpactState` declara
+   "NO EVALUADO" cuando `SinImpactoObservado` llega con cobertura crítica incompleta;
+   (b) la narrativa cuenta todos los hallazgos `TSPLUS-*` (antes 7 prefijos fijos que excluían
+   anomalías reales); (c) la fila "Cobertura crítica" separa los bloqueos duros de fuentes
+   críticas (desde `CoberturaDiagnostica.Fuentes`, con respaldo a `FuentesBloqueadas`) de
+   "N sin cobertura completa", y la evidencia de precisión se etiqueta "Fuentes críticas sin
+   cobertura completa".
+   Tests: `ExportExecutiveCardsAndCountsAreCoherent`,
+   `NarrativeCountsTsplusFindingsAsInternalAnomalies`.
+8. **H14 — un umbral inválido revertía toda la configuración en silencio.** `LoadAsync` devolvía
+   `SupportMonitoringSettings.Default` enteros ante cualquier valor fuera de rango, sin persistir
+   y sin lanzar (el `catch` de `TdmWorker` jamás se activaba). Fix:
+   `SupportThresholdsValidator.Sanitize` repara cada grupo de umbrales por separado hacia sus
+   defaults sin descartar el resto, y `LoadAsync` devuelve lo saneado y lo re-guarda en disco
+   (best-effort, con el stream ya cerrado).
+   Test: `SettingsLoadRepairsInvalidThresholdsPerGroup`.
+9. **Tests**: los 9 de ProductionTests anteriores (91/91) y `Gui_SummaryRendersTensiones`
+   (ParityTests, 40/40). Gates: build 0/0, VERIFY 7/7, publish portable (138 820 807 bytes),
+   lock files restaurados.
+
 ### Anexo — tabla completa de hallazgos altos H1–H15 (persistida)
 
 | # | Hallazgo | file:line | Estado |
@@ -368,21 +432,21 @@ Seis hallazgos altos de la auditoría:
 | H1 | Panel de causalidad **siempre vacío**: filtra `SampleKind=="diagnostic"` pero ningún productor lo emite (escribe `avalonia-monitor`/`service-monitor`/`diagnostic-avalonia`/`monitor`/`monitor-summary`) | `CausalityDashboardViewModel.cs:21`, `ObservabilityStore.cs:247,678` | ✅ Fase 5 |
 | H2 | Anomalías CPU/memoria muertas en la GUI: lee claves `"CpuPercent"`/`"MemoryFreePercent"`, los collectors emiten `"Metric.Cpu.Percent"`/`"Metric.Memory.FreePercent"` | `IntegratedMonitoringService.cs:238-239` vs `ResourceMetricKeys.cs:10-11` | ✅ Fase 5 |
 | H3 | `"Canal no disponible"` no cuenta como parcial ⇒ la cobertura base de Event Log emite *"La lectura base … se completó"*; además `WINDOWS_EVENT_COVERAGE` se emite y **nadie lo consume** (solo se renderiza `WINDOWS_FORENSIC_COVERAGE`) | `WindowsEventCollector.cs:132-170,167`, `ReportExporter.cs:806` | ✅ Fase 5 |
-| H4 | En modo servicio, `RecordAsync` de canales forensic/integrity **se descarta el resultado** ⇒ los candidatos longitudinales de mayor puntaje (94/90) jamás se generan (solo la GUI los recupera) | `TdmWorker.cs:656` vs `DiagnosticExecutionService.cs:119-121`, `Longitudinal.cs:10` | ⏳ Fase 6 |
-| H5 | Observación con cobertura ≠"Disponible" no se persiste ⇒ un cambio real ocurrido en un ciclo con acceso denegado queda **permanentemente indetectable** | `StateSnapshotBuilder.cs:99-102`, `LocalStateStore.cs:195` | ⏳ Fase 6 |
-| H6 | Deriva de config: archivo presente-pero-ilegible cuenta como "eliminado" ⇒ falso `TSPLUS-CONFIG-DRIFT` y la baseline se reescribe sin él | `TsplusConfigurationDriftCollector.cs:60-64,86-87,156` | ⏳ Fase 6 |
-| H7 | `web.config` (y `balance.bin`/`settings.bin`) no están en el baseline SHA-256 ni en el catálogo `known` ⇒ ediciones de Web no generan deriva ni transición | `TsplusConfigurationDriftCollector.cs:44-50`, `TsplusConfigurationArtifactCatalog.cs:23-32` | ⏳ Fase 6 |
+| H4 | En modo servicio, `RecordAsync` de canales forensic/integrity **se descarta el resultado** ⇒ los candidatos longitudinales de mayor puntaje (94/90) jamás se generan (solo la GUI los recupera) | `TdmWorker.cs:656` vs `DiagnosticExecutionService.cs:119-121`, `Longitudinal.cs:10` | ✅ Fase 6 |
+| H5 | Observación con cobertura ≠"Disponible" no se persiste ⇒ un cambio real ocurrido en un ciclo con acceso denegado queda **permanentemente indetectable** | `StateSnapshotBuilder.cs:99-102`, `LocalStateStore.cs:195` | ✅ Fase 6 |
+| H6 | Deriva de config: archivo presente-pero-ilegible cuenta como "eliminado" ⇒ falso `TSPLUS-CONFIG-DRIFT` y la baseline se reescribe sin él | `TsplusConfigurationDriftCollector.cs:60-64,86-87,156` | ✅ Fase 6 |
+| H7 | `web.config` (y `balance.bin`/`settings.bin`) no están en el baseline SHA-256 ni en el catálogo `known` ⇒ ediciones de Web no generan deriva ni transición | `TsplusConfigurationDriftCollector.cs:44-50`, `TsplusConfigurationArtifactCatalog.cs:23-32` | ✅ Fase 6 |
 | H8 | Cobertura de logs TSplus se evalúa **aunque TSplus no esté detectado** (`AddTsplusLogs` fuera del `if (TsplusDetectado)`) ⇒ fuente crítica "No disponible" y penalización falsa del score en hosts sin TSplus | `DiagnosticCoverageAnalyzer.cs:22,192-194`, `TsplusLogDiscovery.cs:57-68` | ✅ Fase 5 |
 | H9 | Cobertura incremental usa como denominador los ficheros **observados**, no los esperados: si `hb.log`/`APSC.log` dejan de emitirse, todo sigue "Disponible" | `DiagnosticCoverageAnalyzer.cs:180-182`, `IncrementalTsplusLogCollector.cs:276` | ✅ Fase 5 |
 | H10 | Versión TSplus desconocida ⇒ `Soportado=false` ⇒ ausencia de `settings.js` deja de reportarse (`TSPLUS-WEB-SETTINGSJS-MISSING` silenciado) | `TsplusReleaseCatalog.cs:16-30`, `TsplusInternalConfigurationCollector.cs:529` | ⏳ sin fase asignada |
 | H11 | `NotEvaluated` (permiso denegado al detectar) se comporta como `ConfirmedAbsent`: correlación sale (`RootCauseCorrelator.cs:27`) y el informe afirma "no está detectado" sin comunicar la limitación real | `TsplusInstallDiscovery.cs:30,75`, `DiagnosticModels.cs:181,195` | ✅ Fase 5 (texto del informe; la correlación ya sólo salía con `ConfirmedAbsent`) |
-| H12 | Consistencia: `Tensiones` (JSON/sanitizado) **no se renderiza en HTML ni GUI**, pese a que `ReportConsistencyAnalyzer` detecta "causa sin causa"/"impacto sin causa" — nadie lo ve | `DiagnosticWorkflow.cs:58`, `ReportConsistencyAnalyzer.cs:28-30` | ⏳ Fase 6 |
-| H13 | Tarjetas contradictorias con los mismos datos: `ExecutiveState`="NO EVALUADO" junto a `CompactImpactState`="SALUDABLE"; narrativa "0 anomalías" junto a tabla poblada; tres números distintos de "fuentes bloqueadas" en un mismo HTML | `ReportExporter.cs:1042-1078,167-171,288,409-411`, `DiagnosticNarrativeBuilder.cs:320-328` | ⏳ Fase 6 |
-| H14 | Umbral fuera de rango ⇒ **toda** la config del administrador revierte a defaults en silencio (`LoadAsync` nunca lanza, así que el `catch` de TdmWorker jamás dispara) | `SupportMonitoringSettings.cs:162-168` | ⏳ Fase 6 |
-| H15 | Transiciones duplicadas: `TDM_MONITOR_STATE_TRANSITION` (con dedup) + `TDM_STATE_TRANSITION` **sin dedup** por el mismo `preRecordedResult` | `TdmWorker.cs:236`, `StateReportIntegrator.cs:73-91,166` | ⏳ Fase 6 |
+| H12 | Consistencia: `Tensiones` (JSON/sanitizado) **no se renderiza en HTML ni GUI**, pese a que `ReportConsistencyAnalyzer` detecta "causa sin causa"/"impacto sin causa" — nadie lo ve | `DiagnosticWorkflow.cs:58`, `ReportConsistencyAnalyzer.cs:28-30` | ✅ Fase 6 |
+| H13 | Tarjetas contradictorias con los mismos datos: `ExecutiveState`="NO EVALUADO" junto a `CompactImpactState`="SALUDABLE"; narrativa "0 anomalías" junto a tabla poblada; tres números distintos de "fuentes bloqueadas" en un mismo HTML | `ReportExporter.cs:1042-1078,167-171,288,409-411`, `DiagnosticNarrativeBuilder.cs:320-328` | ✅ Fase 6 |
+| H14 | Umbral fuera de rango ⇒ **toda** la config del administrador revierte a defaults en silencio (`LoadAsync` nunca lanza, así que el `catch` de TdmWorker jamás dispara) | `SupportMonitoringSettings.cs:162-168` | ✅ Fase 6 |
+| H15 | Transiciones duplicadas: `TDM_MONITOR_STATE_TRANSITION` (con dedup) + `TDM_STATE_TRANSITION` **sin dedup** por el mismo `preRecordedResult` | `TdmWorker.cs:236`, `StateReportIntegrator.cs:73-91,166` | ✅ Fase 6 |
 
 Plan de fases: Fase 4 = C1–C3 (✅ `ab6d42e`); Fase 5 = H3/H1/H2/H11/H8/H9 (✅ `d288174`);
-Fase 6 = H4, H5, H6/H7, H12–H15 + tests extremo-a-extremo de coherencia HTML.
+Fase 6 = H4, H5, H6/H7, H12–H15 + tests extremo-a-extremo de coherencia HTML (✅ `940e4b7`).
 
 ## Descartado — Simulación de remediación sobre grafo inventado
 
