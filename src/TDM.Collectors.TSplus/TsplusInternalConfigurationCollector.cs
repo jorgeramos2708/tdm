@@ -436,7 +436,7 @@ public sealed partial class TsplusInternalConfigurationCollector : IReadOnlyColl
 
     private static void AuditWebConfiguration(
         string install,
-        bool enforceKnownFiles,
+        bool supportedProfile,
         List<DiagnosticFinding> findings,
         List<DiagnosticEvent> events,
         CancellationToken ct)
@@ -526,15 +526,22 @@ public sealed partial class TsplusInternalConfigurationCollector : IReadOnlyColl
                     ConfidenceLevel.Confirmada,
                     Capa: DiagnosticLayer.Tsplus));
             }
-            else if (enforceKnownFiles)
+            else
             {
                 findings.Add(new DiagnosticFinding(
                     "TSPLUS-WEB-SETTINGSJS-MISSING",
                     "TSplus Web / HTML5",
-                    DiagnosticSeverity.Error,
-                    "No se encontró settings.js aunque el árbol Web de TSplus está presente.",
-                    "settings.js es una fuente principal de configuración del cliente HTML5. TDM conserva esta inconsistencia como Error, pero la causa raíz exige correlación con listener, runtime, logs o impacto Web.",
-                    [new EvidenceItem("Ruta esperada", settingsJs)],
+                    supportedProfile ? DiagnosticSeverity.Error : DiagnosticSeverity.Advertencia,
+                    supportedProfile
+                        ? "No se encontró settings.js aunque el árbol Web de TSplus está presente."
+                        : "No se encontró settings.js con el árbol Web de TSplus presente y la versión detectada fuera del perfil soportado.",
+                    supportedProfile
+                        ? "settings.js es una fuente principal de configuración del cliente HTML5. TDM conserva esta inconsistencia como Error, pero la causa raíz exige correlación con listener, runtime, logs o impacto Web."
+                        : "settings.js es una fuente principal de configuración del cliente HTML5 y el árbol Web está presente. TDM no declara el archivo obligatorio para una rama sin perfil soportado, pero conserva la inconsistencia física como Advertencia; la causa raíz exige correlación con listener, runtime, logs o impacto Web.",
+                    [
+                        new EvidenceItem("Ruta esperada", settingsJs),
+                        new EvidenceItem("Perfil de versión", supportedProfile ? "Soportado" : "Sin perfil soportado")
+                    ],
                     ConfidenceLevel.Alta,
                     "TSplus — HTML Pages and Customization / settings.js",
                     "https://docs.tsplus.net/tsplus/html-pages-and-customization/",

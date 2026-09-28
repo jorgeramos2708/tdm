@@ -108,7 +108,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("ExportRendersTensionesSection", ExportRendersTensionesSection),
     ("ExportExecutiveCardsAndCountsAreCoherent", ExportExecutiveCardsAndCountsAreCoherent),
     ("NarrativeCountsTsplusFindingsAsInternalAnomalies", NarrativeCountsTsplusFindingsAsInternalAnomalies),
-    ("SettingsLoadRepairsInvalidThresholdsPerGroup", SettingsLoadRepairsInvalidThresholdsPerGroup)
+    ("SettingsLoadRepairsInvalidThresholdsPerGroup", SettingsLoadRepairsInvalidThresholdsPerGroup),
+    ("UnknownTsplusVersionStillReportsMissingSettingsJs", UnknownTsplusVersionStillReportsMissingSettingsJs)
 };
 
 var failed = 0;
@@ -2090,6 +2091,41 @@ static async Task SettingsLoadRepairsInvalidThresholdsPerGroup()
         Equal(55d, healed.Thresholds.CpuWarning, "La reparación en carga perdió el valor personalizado en disco.");
     }
     finally { TryDelete(root); }
+}
+
+static async Task UnknownTsplusVersionStillReportsMissingSettingsJs()
+{
+    var install = TempDir();
+    try
+    {
+        SeedMinimalInstall(install, out _, out _);
+        File.Delete(Path.Combine(install, "Clients", "www", "software", "html5", "settings.js"));
+
+        var collector = new TsplusInternalConfigurationCollector();
+        var baseCtx = InstallContext(install);
+
+        var unknownCtx = baseCtx with { Sistema = baseCtx.Sistema with { TsplusVersion = null } };
+        var unknown = await collector.CollectAsync(unknownCtx);
+        var silenced = unknown.Hallazgos.FirstOrDefault(f => f.Id == "TSPLUS-WEB-SETTINGSJS-MISSING");
+        NotNull(silenced, "Con versión TSplus desconocida la ausencia de settings.js quedó silenciada (H10).");
+        Equal(DiagnosticSeverity.Advertencia, silenced!.Severidad,
+            "Sin perfil de versión soportado la ausencia debe reportarse como Advertencia, no silenciarse.");
+        True(silenced.Evidencia.Any(x => x.Clave == "Perfil de versión"),
+            "El hallazgo no declara el perfil de versión que condiciona su severidad.");
+
+        var supportedCtx = baseCtx with { Sistema = baseCtx.Sistema with { TsplusVersion = "19.30" } };
+        var supported = await collector.CollectAsync(supportedCtx);
+        var supportedMissing = supported.Hallazgos.FirstOrDefault(f => f.Id == "TSPLUS-WEB-SETTINGSJS-MISSING");
+        NotNull(supportedMissing, "Con versión soportada dejó de reportarse la ausencia de settings.js.");
+        Equal(DiagnosticSeverity.Error, supportedMissing!.Severidad,
+            "Con perfil soportado la ausencia de settings.js debe seguir siendo Error.");
+
+        File.WriteAllText(Path.Combine(install, "Clients", "www", "software", "html5", "settings.js"), "// settings");
+        var present = await collector.CollectAsync(unknownCtx);
+        False(present.Hallazgos.Any(f => f.Id == "TSPLUS-WEB-SETTINGSJS-MISSING"),
+            "settings.js presente se reportó como ausente.");
+    }
+    finally { TryDelete(install); }
 }
 
 static DiagnosticEvent ServiceStateEvent(DateTimeOffset at, string state)
