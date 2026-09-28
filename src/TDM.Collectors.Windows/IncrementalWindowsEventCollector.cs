@@ -21,11 +21,14 @@ public sealed class IncrementalWindowsEventCollector : IReadOnlyCollector
     private bool _primed;
     private bool _forceReplayAfterCursorLoss;
     private DateTimeOffset? _lastSuccessUtc;
+    private bool _gapDeclared;
+    private bool _firstCollectStarted;
 
     private sealed record WindowsCursorState(
     Dictionary<string, long> Cursors,
     DateTimeOffset SavedAt,
-    Dictionary<string, string> LastKnownGoodState);
+    Dictionary<string, string> LastKnownGoodState,
+    DateTimeOffset? LastSuccessUtc);
 
     private static readonly ChannelSpec[] Channels =
     [
@@ -59,13 +62,17 @@ public void Prime()
             {
                 _lastRecordIds.Clear();
                 _lastKnownGoodState.Clear();
+                _lastSuccessUtc = null;
+                _gapDeclared = false;
+                _firstCollectStarted = false;
                 var loaded = CollectorCursorStore.TryLoad<WindowsCursorState>("windows-event-cursors", out var state, out var error)
                              && state?.Cursors is not null;
                 _forceReplayAfterCursorLoss = !loaded && !string.IsNullOrWhiteSpace(error);
                 _cursorPersistenceWarning = error;
                 if (loaded)
                 {
-                    foreach (var pair in state!.Cursors)
+                    _lastSuccessUtc = state!.LastSuccessUtc ?? state.SavedAt;
+                    foreach (var pair in state.Cursors)
                         _lastRecordIds[pair.Key] = Math.Max(0, pair.Value);
                     if (state.LastKnownGoodState is not null)
                     {
@@ -89,12 +96,28 @@ public void Prime()
         }
     }
 
+    public TimeSpan? RecoveryLookback(DateTimeOffset now)
+    {
+        if (!_primed) Prime();
+        lock (_sync)
+        {
+            if (_firstCollectStarted) return null;
+            if (_forceReplayAfterCursorLoss) return TimeSpan.FromMinutes(15);
+            if (!_lastSuccessUtc.HasValue) return null;
+            var gap = now - _lastSuccessUtc.Value;
+            if (gap <= TimeSpan.FromMinutes(1)) return null;
+            return gap > TimeSpan.FromMinutes(15) ? TimeSpan.FromMinutes(15) : gap;
+        }
+    }
+
     public Task<CollectorResult> CollectAsync(DiagnosticContext context, CancellationToken cancellationToken = default)
     {
         if (!_primed) Prime();
+        lock (_sync) _firstCollectStarted = true;
         var events = new List<DiagnosticEvent>();
         var findings = new List<DiagnosticFinding>();
         var coverage = new List<EvidenceItem>();
+        var gapDeclaredNow = false;
 
         foreach (var channel in Channels)
         {
@@ -142,7 +165,7 @@ public void Prime()
                 }
                 // W6: no añadir después una segunda entrada "Disponible tras replay" que duplique la cobertura.
             }
-            else if (_lastSuccessUtc.HasValue && DateTimeOffset.Now - _lastSuccessUtc.Value > TimeSpan.FromMinutes(15))
+            else if (!_gapDeclared && _lastSuccessUtc.HasValue && DateTimeOffset.Now - _lastSuccessUtc.Value > TimeSpan.FromMinutes(15))
             {
                 // P18/S1: hueco no recuperable por el incremental; se declara explícitamente en vez
                 // de fingir continuidad. Sufijo hash: Sanitize(28) colisionaba entre los dos canales
@@ -152,13 +175,14 @@ public void Prime()
                     $"Event Viewer / {channel.Name}",
                     DiagnosticSeverity.Advertencia,
                     "Discontinuidad de Event Viewer fuera de la ventana de replay.",
-                    "El cursor se perdió y la última muestra exitosa supera 15 min; el replay acotado no cubre el hueco. Ejecute un diagnóstico puntual de 24 h para cerrar la ventana.",
+                    "La última muestra con cobertura completa supera los 15 min (reinicio del servicio o discontinuidad prolongada) y el replay acotado no cubre el hueco. Ejecute un diagnóstico puntual de 24 h para cerrar la ventana.",
                     [new EvidenceItem("Canal", channel.Name),
                      new EvidenceItem("Última muestra exitosa", _lastSuccessUtc.Value.ToString("O")),
                      new EvidenceItem("Replay aplicado", "15 min"),
                      new EvidenceItem("Cobertura", "Parcial; hueco no recuperable por el incremental")],
                     ConfidenceLevel.Alta,
                     Capa: channel.Layer));
+                gapDeclaredNow = true;
             }
             var baseFilter = replayAfterReset ? AppendRecentWindow(channel.Filter, TimeSpan.FromMinutes(15)) : channel.Filter;
             var xpath = AppendCursor(baseFilter, cursor);
@@ -244,7 +268,10 @@ public void Prime()
         // P0-02: Refresh LastKnownGoodState with current service states for relevant services.
         // This ensures we have the latest known state even if no failure events were emitted.
         RefreshLastKnownGoodState(context);
-        
+        if (gapDeclaredNow) _gapDeclared = true;
+
+        var lostBeforePersist = CountLostCoverage(coverage);
+        var advancedLastSuccess = lostBeforePersist == 0 ? DateTimeOffset.Now : _lastSuccessUtc;
         Dictionary<string, long> snapshot;
         Dictionary<string, string> stateSnapshot;
         lock (_sync)
@@ -252,7 +279,7 @@ public void Prime()
             snapshot = new Dictionary<string, long>(_lastRecordIds, StringComparer.OrdinalIgnoreCase);
             stateSnapshot = new Dictionary<string, string>(_lastKnownGoodState, StringComparer.OrdinalIgnoreCase);
         }
-        var persistOk = CollectorCursorStore.TrySave("windows-event-cursors", new WindowsCursorState(snapshot, DateTimeOffset.Now, stateSnapshot), out var persistError);
+        var persistOk = CollectorCursorStore.TrySave("windows-event-cursors", new WindowsCursorState(snapshot, DateTimeOffset.Now, stateSnapshot, advancedLastSuccess), out var persistError);
         if (!persistOk)
         {
             _cursorPersistenceWarning = persistError ?? "No fue posible persistir el bookmark incremental.";
@@ -267,12 +294,7 @@ public void Prime()
             _forceReplayAfterCursorLoss = false;
         }
 
-        var lost = coverage.Count(x => x.Valor.StartsWith("Sin permisos", StringComparison.OrdinalIgnoreCase)
-            || x.Valor.StartsWith("No legible", StringComparison.OrdinalIgnoreCase)
-            || x.Valor.StartsWith("Canal no disponible", StringComparison.OrdinalIgnoreCase)
-            || x.Valor.StartsWith("NO EVALUADO", StringComparison.OrdinalIgnoreCase)
-            // T3: "Parcial" genérico cubre backlog y replay acotado (historial previo perdido).
-            || x.Valor.StartsWith("Parcial", StringComparison.OrdinalIgnoreCase));
+        var lost = CountLostCoverage(coverage);
         events.Add(new DiagnosticEvent(DateTimeOffset.Now, "TDM", "Cobertura incremental Windows", DiagnosticLayer.Windows,
             lost > 0 ? DiagnosticSeverity.Advertencia : DiagnosticSeverity.Informativo,
             "WINDOWS_INCREMENTAL_COVERAGE",
@@ -282,9 +304,20 @@ public void Prime()
         // P18: la marca de éxito solo avanza con cobertura total y cursor persistido;
         // una muestra parcial/backlog no debe hacer creer continuidad a la detección de huecos.
         if (lost == 0 && persistOk)
-            _lastSuccessUtc = DateTimeOffset.Now;
+        {
+            _lastSuccessUtc = advancedLastSuccess;
+            _gapDeclared = false;
+        }
         return Task.FromResult(new CollectorResult(findings, events));
     }
+
+    private static int CountLostCoverage(List<EvidenceItem> coverage)
+        => coverage.Count(x => x.Valor.StartsWith("Sin permisos", StringComparison.OrdinalIgnoreCase)
+            || x.Valor.StartsWith("No legible", StringComparison.OrdinalIgnoreCase)
+            || x.Valor.StartsWith("Canal no disponible", StringComparison.OrdinalIgnoreCase)
+            || x.Valor.StartsWith("NO EVALUADO", StringComparison.OrdinalIgnoreCase)
+            // T3: "Parcial" genérico cubre backlog y replay acotado (historial previo perdido).
+            || x.Valor.StartsWith("Parcial", StringComparison.OrdinalIgnoreCase));
 
     private static DiagnosticEvent CoverageLossEvent(ChannelSpec channel, string state, string detail) =>
         new(DateTimeOffset.Now, "Windows Event Log", channel.Name, channel.Layer,

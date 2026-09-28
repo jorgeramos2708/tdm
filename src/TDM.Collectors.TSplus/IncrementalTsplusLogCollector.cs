@@ -12,11 +12,12 @@ namespace TDM.Collectors.TSplus;
     {
         public string Nombre => "Logs TSplus incrementales";
 
-        private const int DefaultMaxFiles = 240;
-        private const int DefaultMaxEvents = 300;
-        private const long DefaultMaxNewBytesPerFile = 256 * 1024;
-        private const long DefaultMaxNewBytesPerCycle = 1024 * 1024;
-        private const int DefaultMaxPartialChars = 512 * 1024;
+    private const int DefaultMaxFiles = 240;
+    private const int DefaultMaxEvents = 300;
+    private const long DefaultMaxNewBytesPerFile = 256 * 1024;
+    private const long DefaultMaxNewBytesPerCycle = 1024 * 1024;
+    private const int DefaultMaxPartialChars = 512 * 1024;
+    private const long MaxCursorHashBytes = 1024 * 1024;
 
     private readonly object _sync = new();
     private readonly Dictionary<string, long> _offsets = new(StringComparer.OrdinalIgnoreCase);
@@ -63,12 +64,10 @@ namespace TDM.Collectors.TSplus;
                 {
                     var info = new FileInfo(candidate.Path);
                     var creation = info.CreationTimeUtc.Ticks;
-                    // P2-03: Compute file hash for robust cursor tracking (file+size+hash)
-                    var fileHash = ComputeFileHash(candidate.Path);
                     if (loaded && state!.Files.TryGetValue(candidate.Path, out var saved)
                                && saved.CreationUtcTicks == creation
-                               && saved.FileHash == fileHash
-                               && saved.Offset >= 0 && saved.Offset <= info.Length)
+                               && saved.Offset >= 0 && saved.Offset <= info.Length
+                               && saved.FileHash == ComputeFileHash(candidate.Path, Math.Min(saved.Offset, MaxCursorHashBytes)))
                     {
                         _offsets[candidate.Path] = saved.Offset;
                         _creationTicks[candidate.Path] = creation;
@@ -331,7 +330,7 @@ namespace TDM.Collectors.TSplus;
                     pair.Value,
                     _creationTicks.TryGetValue(pair.Key, out var creation) ? creation : 0,
                     _partialLines.TryGetValue(pair.Key, out var partial) ? partial : string.Empty,
-                    ComputeFileHash(pair.Key)),
+                    ComputeFileHash(pair.Key, Math.Min(pair.Value, MaxCursorHashBytes))),
                 StringComparer.OrdinalIgnoreCase);
         }
         return CollectorCursorStore.TrySave("tsplus-log-cursors", new TsplusCursorState(files, DateTimeOffset.Now), out error);
@@ -619,19 +618,30 @@ namespace TDM.Collectors.TSplus;
     }
 
     /// <summary>
-    /// P2-03: Computes SHA256 hash of file for robust cursor tracking (file+size+hash).
-    /// Used to detect file rotation/truncation beyond offset/creation time.
+    /// P2-03: Computes a bounded SHA256 prefix hash for robust cursor tracking (file+offset+hash).
+    /// Used to detect file rotation/truncation beyond offset/creation time. Only the first
+    /// maxBytes are hashed so persisted cursors can never trigger an unbounded full-file read;
+    /// maxBytes &lt;= 0 hashes the empty prefix (deterministic placeholder for empty cursors).
     /// </summary>
-    private static string ComputeFileHash(string path)
+    private static string ComputeFileHash(string path, long maxBytes)
     {
         try
         {
             var info = new FileInfo(path);
             if (!info.Exists) return string.Empty;
+            if (maxBytes <= 0) return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Array.Empty<byte>())).ToLowerInvariant();
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
             using var sha = System.Security.Cryptography.SHA256.Create();
-            var hash = sha.ComputeHash(stream);
-            return Convert.ToHexString(hash).ToLowerInvariant();
+            var buffer = new byte[64 * 1024];
+            long remaining = Math.Min(maxBytes, info.Length);
+            int read;
+            while (remaining > 0 && (read = stream.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining))) > 0)
+            {
+                sha.TransformBlock(buffer, 0, read, null, 0);
+                remaining -= read;
+            }
+            sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+            return Convert.ToHexString(sha.Hash ?? System.Security.Cryptography.SHA256.HashData(Array.Empty<byte>())).ToLowerInvariant();
         }
         catch { return string.Empty; }
     }

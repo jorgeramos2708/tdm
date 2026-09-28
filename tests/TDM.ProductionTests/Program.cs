@@ -87,7 +87,12 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("NarrativeUsesLocalTimeForWindows", NarrativeUsesLocalTimeForWindows),
     ("EvidenceDetailsFallBackToIngestedAt", EvidenceDetailsFallBackToIngestedAt),
     ("SanitizeCoversPreviouslyRawSections", SanitizeCoversPreviouslyRawSections),
-    ("ExportJsonMasksPrimaryCauseAndClusterIdentity", ExportJsonMasksPrimaryCauseAndClusterIdentity)
+    ("ExportJsonMasksPrimaryCauseAndClusterIdentity", ExportJsonMasksPrimaryCauseAndClusterIdentity),
+    ("SecurityLogMissingStatusIsNotAvailable", SecurityLogMissingStatusIsNotAvailable),
+    ("WindowsEventRecoveryLookbackRestoresPersistedGap", WindowsEventRecoveryLookbackRestoresPersistedGap),
+    ("WindowsEventRecoveryLookbackDisarmsAfterFirstCollect", WindowsEventRecoveryLookbackDisarmsAfterFirstCollect),
+    ("TsplusCursorKeepsOffsetAfterAppend", TsplusCursorKeepsOffsetAfterAppend),
+    ("WindowsEventGapRecoveryIsWiredInWorker", WindowsEventGapRecoveryIsWiredInWorker)
 };
 
 var failed = 0;
@@ -1064,6 +1069,177 @@ static Task TsplusCoverageAcceptsIncrementalSource()
     return Task.CompletedTask;
 }
 
+static Task SecurityLogMissingStatusIsNotAvailable()
+{
+    var now = DateTimeOffset.Now;
+    DiagnosticEvent Coverage(string raw) => new(now, "TDM", "Auditoría de autenticación", DiagnosticLayer.Seguridad,
+        DiagnosticSeverity.Informativo, "USER_AUTH_AUDIT_COVERAGE", "Cobertura de auditoría de autenticación",
+        Evidencia: [new EvidenceItem("Security log", raw)]);
+
+    var missing = DiagnosticCoverageAnalyzer.Analyze(Report([Coverage("No disponible")], now));
+    Equal("No disponible", missing.Fuentes.Single(x => x.Fuente == "Security Log / autenticación").Estado,
+        "'No disponible' en el Security Log no quedó como fuente no disponible.");
+    True(missing.Limitaciones.Any(l => l.StartsWith("Cobertura de autenticación/NLA/Kerberos limitada", StringComparison.Ordinal)),
+        "La ausencia de Security Log no dejó la limitación de autenticación.");
+
+    var available = DiagnosticCoverageAnalyzer.Analyze(Report([Coverage("Disponible")], now));
+    Equal("Disponible", available.Fuentes.Single(x => x.Fuente == "Security Log / autenticación").Estado,
+        "'Disponible' dejó de reconocerse como cobertura completa.");
+    False(available.Limitaciones.Any(l => l.StartsWith("Cobertura de autenticación/NLA/Kerberos limitada", StringComparison.Ordinal)),
+        "Una fuente Disponible no debe declarar limitación de autenticación.");
+
+    var partial = DiagnosticCoverageAnalyzer.Analyze(Report([Coverage("Parcial: límite adaptativo de eventos aplicado")], now));
+    Equal("Parcial", partial.Fuentes.Single(x => x.Fuente == "Security Log / autenticación").Estado,
+        "Un estado parcial del Security Log no quedó como Parcial.");
+
+    var blocked = DiagnosticCoverageAnalyzer.Analyze(Report([Coverage("Sin permisos de lectura")], now));
+    Equal("Bloqueada", blocked.Fuentes.Single(x => x.Fuente == "Security Log / autenticación").Estado,
+        "Sin permisos de lectura no quedó como fuente bloqueada.");
+
+    True(missing.Score < available.Score, "Perder el Security Log no penalizó el puntaje de cobertura.");
+    return Task.CompletedTask;
+}
+
+static Task WindowsEventRecoveryLookbackRestoresPersistedGap()
+{
+    var root = TempDir();
+    var prior = Environment.GetEnvironmentVariable("TDM_STATE_ROOT");
+    try
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", root);
+
+        var fresh = new IncrementalWindowsEventCollector();
+        fresh.Prime();
+        False(fresh.RecoveryLookback(DateTimeOffset.Now).HasValue, "Sin estado persistido no debe haber lookback de recuperación.");
+
+        var probe = DateTimeOffset.Now;
+        var justNow = probe.AddSeconds(-30);
+        var recent = new WindowsCursorFixture(new Dictionary<string, long> { ["Security"] = 1 }, justNow, new Dictionary<string, string>(), justNow);
+        True(CollectorCursorStore.TrySave("windows-event-cursors", recent, out var saveError), "No se guardó el cursor de Event Viewer: " + saveError);
+        var recentCollector = new IncrementalWindowsEventCollector();
+        recentCollector.Prime();
+        False(recentCollector.RecoveryLookback(probe).HasValue, "Un hueco mínimo no debe ampliar la ventana de recuperación.");
+
+        var fiveMinAgo = probe.AddMinutes(-5);
+        var five = new WindowsCursorFixture(new Dictionary<string, long> { ["Security"] = 1 }, fiveMinAgo, new Dictionary<string, string>(), fiveMinAgo);
+        True(CollectorCursorStore.TrySave("windows-event-cursors", five, out saveError), "No se guardó el cursor de Event Viewer: " + saveError);
+        var fiveCollector = new IncrementalWindowsEventCollector();
+        fiveCollector.Prime();
+        Equal(TimeSpan.FromMinutes(5), fiveCollector.RecoveryLookback(fiveMinAgo.AddMinutes(5)) ?? TimeSpan.Zero,
+            "Tras reiniciar no se restauró la última muestra con cobertura completa.");
+
+        var twoHoursAgo = probe.AddHours(-2);
+        var old = new WindowsCursorFixture(new Dictionary<string, long> { ["Security"] = 1 }, twoHoursAgo, new Dictionary<string, string>(), twoHoursAgo);
+        True(CollectorCursorStore.TrySave("windows-event-cursors", old, out saveError), "No se guardó el cursor de Event Viewer: " + saveError);
+        var oldCollector = new IncrementalWindowsEventCollector();
+        oldCollector.Prime();
+        Equal(TimeSpan.FromMinutes(15), oldCollector.RecoveryLookback(twoHoursAgo.AddHours(2)) ?? TimeSpan.Zero,
+            "Un hueco prolongado no se acotó a 15 min.");
+
+        File.WriteAllText(Path.Combine(root, "windows-event-cursors.json"),
+            "{\"cursors\":{\"Security\":1},\"savedAt\":\"" + fiveMinAgo.ToString("O", CultureInfo.InvariantCulture) + "\",\"lastKnownGoodState\":{}}");
+        var legacyCollector = new IncrementalWindowsEventCollector();
+        legacyCollector.Prime();
+        Equal(TimeSpan.FromMinutes(5), legacyCollector.RecoveryLookback(fiveMinAgo.AddMinutes(5)) ?? TimeSpan.Zero,
+            "Un estado legado sin lastSuccessUtc no cayó a savedAt.");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", prior);
+        TryDelete(root);
+    }
+    return Task.CompletedTask;
+}
+
+static async Task WindowsEventRecoveryLookbackDisarmsAfterFirstCollect()
+{
+    var root = TempDir();
+    var prior = Environment.GetEnvironmentVariable("TDM_STATE_ROOT");
+    try
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", root);
+        var last = DateTimeOffset.Now.AddMinutes(-5);
+        var state = new WindowsCursorFixture(new Dictionary<string, long> { ["Security"] = 1 }, last, new Dictionary<string, string>(), last);
+        True(CollectorCursorStore.TrySave("windows-event-cursors", state, out var saveError), "No se guardó el cursor de Event Viewer: " + saveError);
+        var collector = new IncrementalWindowsEventCollector();
+        collector.Prime();
+        NotNull(collector.RecoveryLookback(DateTimeOffset.Now), "El estado persistido no armó el lookback de recuperación.");
+        try
+        {
+            await collector.CollectAsync(Context(TimeSpan.FromHours(1)), new CancellationToken(true));
+            throw new InvalidOperationException("La primera recolección cancelada no interrumpió el ciclo.");
+        }
+        catch (OperationCanceledException) { }
+        False(collector.RecoveryLookback(DateTimeOffset.Now).HasValue,
+            "Tras la primera recolección el lookback de recuperación debía desarmarse.");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", prior);
+        TryDelete(root);
+    }
+}
+
+static async Task TsplusCursorKeepsOffsetAfterAppend()
+{
+    var dir = TempDir();
+    var stateRoot = TempDir();
+    var prior = Environment.GetEnvironmentVariable("TDM_STATE_ROOT");
+    try
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", stateRoot);
+        var install = Path.Combine(dir, "TSplus");
+        var logDir = Path.Combine(install, "Clients", "www", "cgi-bin");
+        Directory.CreateDirectory(logDir);
+        var logPath = Path.Combine(logDir, "hb.log");
+        var oldContent = "ERROR connection refused old-event-1\nERROR connection refused old-event-2\n";
+        await File.WriteAllTextAsync(logPath, oldContent);
+        var creation = new FileInfo(logPath).CreationTimeUtc.Ticks;
+        var oldBytes = System.Text.Encoding.UTF8.GetBytes(oldContent);
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(oldBytes)).ToLowerInvariant();
+        var cursor = new TsplusCursorFixture(new Dictionary<string, TsplusFileCursorFixture>
+        {
+            [logPath] = new TsplusFileCursorFixture(oldBytes.LongLength, creation, string.Empty, hash)
+        }, DateTimeOffset.Now);
+        True(CollectorCursorStore.TrySave("tsplus-log-cursors", cursor, out var saveError), "No se guardó el cursor TSplus: " + saveError);
+
+        await File.AppendAllTextAsync(logPath, "ERROR connection refused new-event-1\n");
+
+        var collector = new IncrementalTsplusLogCollector();
+        collector.Prime(install);
+        var result = await collector.CollectAsync(new DiagnosticContext(Snapshot() with { TsplusRuta = install }, TimeSpan.FromHours(1)));
+
+        var fromLog = result.Eventos.Where(e => e.Archivo == logPath).ToList();
+        True(fromLog.Any(e => e.Mensaje.Contains("new-event-1", StringComparison.Ordinal)),
+            "El cursor no leyó la línea agregada tras reiniciar.");
+        False(fromLog.Any(e => e.Mensaje.Contains("old-event", StringComparison.Ordinal)),
+            "El cursor releyó historial ya consumido.");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", prior);
+        TryDelete(dir);
+        TryDelete(stateRoot);
+    }
+}
+
+static Task WindowsEventGapRecoveryIsWiredInWorker()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del cableado de recuperación no ejecutable.");
+    var worker = File.ReadAllText(Path.Combine(root!, "src", "TDM.Service", "TdmWorker.cs"));
+    True(worker.Contains("recoveryLookback ?? NormalInterval", StringComparison.Ordinal),
+        "El ciclo continuo no aplica el lookback de recuperación tras reinicio.");
+    True(worker.Contains("recoveryLookback ?? EmergencyPolicy.Lookback", StringComparison.Ordinal),
+        "El ciclo de emergencia no aplica el lookback de recuperación tras reinicio.");
+    var collector = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "IncrementalWindowsEventCollector.cs"));
+    True(collector.Contains("_gapDeclared", StringComparison.Ordinal),
+        "El collector no persiste el estado de hueco declarado entre muestras.");
+    True(collector.Contains("LastSuccessUtc", StringComparison.Ordinal),
+        "El collector no persiste la última muestra con cobertura completa.");
+    return Task.CompletedTask;
+}
+
 static Task GuiRealtimeWiresIncrementalContinuousDiagnostics()
 {
     var root = FindRepoRoot();
@@ -1412,6 +1588,12 @@ static string? FindRepoRoot()
 }
 
 sealed record CursorFixture(Dictionary<string, long> Values, DateTimeOffset SavedAt);
+
+sealed record WindowsCursorFixture(Dictionary<string, long> Cursors, DateTimeOffset SavedAt, Dictionary<string, string> LastKnownGoodState, DateTimeOffset? LastSuccessUtc);
+
+sealed record TsplusCursorFixture(Dictionary<string, TsplusFileCursorFixture> Files, DateTimeOffset SavedAt);
+
+sealed record TsplusFileCursorFixture(long Offset, long CreationUtcTicks, string PartialLine, string FileHash);
 
 sealed class MemorySink : INotificationSink
 {

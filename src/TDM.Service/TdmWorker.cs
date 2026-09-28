@@ -177,7 +177,8 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
                             _logger.LogDebug(ex, "No se pudo cargar configuración de umbrales; usando valores por defecto");
                         }
 
-                        var context = new DiagnosticContext(snapshot, NormalInterval, TsplusProfile: tsplusProfile, Options: options);
+                        var recoveryLookback = _windowsIncremental.RecoveryLookback(DateTimeOffset.Now);
+                        var context = new DiagnosticContext(snapshot, recoveryLookback ?? NormalInterval, TsplusProfile: tsplusProfile, Options: options);
                         var collectors = CollectorCatalog.CreateServiceMonitor(guard, includeHeavy);
                         collectors.Add(_windowsIncremental);
                         collectors.Add(_tsplusIncremental);
@@ -415,7 +416,8 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
             _logger.LogDebug(ex, "No se pudo cargar configuración de umbrales (emergencia); usando valores por defecto");
         }
 
-        var context = new DiagnosticContext(snapshot, EmergencyPolicy.Lookback, TsplusProfile: tsplusProfile, Options: options);
+        var recoveryLookback = _windowsIncremental.RecoveryLookback(DateTimeOffset.Now);
+        var context = new DiagnosticContext(snapshot, recoveryLookback ?? EmergencyPolicy.Lookback, TsplusProfile: tsplusProfile, Options: options);
         var policy = DiagnosticExecutionPolicy.Uniform(EmergencyPolicy.CollectorTimeout, EmergencyPolicy.MaxRawEvents);
         var engine = new DiagnosticEngine(
             new IReadOnlyCollector[] { _windowsIncremental, _tsplusIncremental },
