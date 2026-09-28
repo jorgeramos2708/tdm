@@ -102,7 +102,8 @@ namespace TDM.Collectors.TSplus;
         if (!_primed) Prime(context.Sistema.TsplusRuta);
         var events = new List<DiagnosticEvent>();
         var findings = new List<DiagnosticFinding>();
-        var candidateEnumeration = EnumerateCandidates(GetSources(context.Sistema.TsplusRuta));
+        var sources = GetSources(context.Sistema.TsplusRuta);
+        var candidateEnumeration = EnumerateCandidates(sources);
         // V3: el Take(240) seguía orden de discovery (estáticas→dinámicas→perfiles) y amputaba
         // fuentes tardías aunque fueran más nuevas. Orden global por recencia antes de cortar.
         var candidates = candidateEnumeration.Candidates
@@ -261,6 +262,8 @@ namespace TDM.Collectors.TSplus;
         var candidatesTruncated = candidateEnumeration.Candidates.Count > _maxFiles;
         var coverageLosses = readLosses + candidateEnumeration.Failures;
         var partialCoverage = coverageLosses > 0 || discoveryPartial || candidatesTruncated || candidateEnumeration.TruncatedDirectories > 0 || backlogFiles > 0;
+        var expectedSources = sources.Count(s => !s.FuenteOpcional);
+        var expectedAvailable = sources.Count(s => !s.FuenteOpcional && s.Existe);
 
         var coverageEvent = new DiagnosticEvent(
             DateTimeOffset.Now, "TDM", "Cobertura incremental TSplus", DiagnosticLayer.Tsplus,
@@ -274,6 +277,8 @@ namespace TDM.Collectors.TSplus;
                 new EvidenceItem("Cobertura", partialCoverage ? "Parcial" : "Disponible"),
                 new EvidenceItem("Fuentes candidatas", candidatesObserved.ToString()),
                 new EvidenceItem("Fuentes no evaluadas", coverageLosses.ToString()),
+                new EvidenceItem("Fuentes esperadas", expectedSources.ToString()),
+                new EvidenceItem("Fuentes esperadas disponibles", expectedAvailable.ToString()),
                 new EvidenceItem("Fuentes con backlog", backlogFiles.ToString()),
                 new EvidenceItem("Bytes leídos en ciclo", bytesReadThisCycle.ToString()),
                 new EvidenceItem("Caracteres parciales descartados por límite", partialTruncatedChars.ToString()),

@@ -248,7 +248,7 @@ public static async Task<ReportExportResult> ExportAsync(
         sb.Append("<details class='technical-bundle'><summary>Detalle técnico completo</summary>");
         sb.Append("<div class='card'><h2>Resumen técnico</h2><table>");
         Row("Equipo", report.Sistema.Equipo); Row("Sistema", $"{report.Sistema.SistemaOperativo} {report.Sistema.Version} (build {report.Sistema.Build}, {report.Sistema.Arquitectura})");
-        Row("TSplus Remote Access", report.Sistema.TsplusDetectado ? "Detectado" : "No detectado");
+        Row("TSplus Remote Access", report.Sistema.EstadoDeteccionTexto());
         if (report.Sistema.TsplusDetectado) { Row("Versión TSplus", report.Sistema.TsplusVersion ?? "N/D"); Row("Ruta TSplus", report.Sistema.TsplusRuta ?? "N/D"); }
         var periodoInicio = report.PeriodoAnalizadoInicio == default ? report.Inicio - report.Lookback : report.PeriodoAnalizadoInicio;
         var periodoFin = report.PeriodoAnalizadoFin == default ? report.Inicio : report.PeriodoAnalizadoFin;
@@ -804,6 +804,7 @@ public static async Task<ReportExportResult> ExportAsync(
         sb.Append("</div></div>");
 
         var forensicCoverage = report.Eventos.LastOrDefault(e => e.Tipo == "WINDOWS_FORENSIC_COVERAGE");
+        var eventCoverage = report.Eventos.LastOrDefault(e => e.Tipo == "WINDOWS_EVENT_COVERAGE");
         var changeCoverage = report.Eventos.LastOrDefault(e => e.Tipo == "WINDOWS_CHANGE_COVERAGE");
         var forensicArtifacts = report.Eventos.LastOrDefault(e => e.Tipo == "FORENSIC_ARTIFACT_SUMMARY");
         sb.Append("<div class='card'><h2>Diagnóstico forense</h2>");
@@ -814,6 +815,12 @@ public static async Task<ReportExportResult> ExportAsync(
             sb.Append("</table>");
         }
         else sb.Append("<p>No disponible.</p>");
+        if (eventCoverage?.Evidencia is { Count: > 0 })
+        {
+            sb.Append("<h3>Cobertura base de eventos Windows</h3><table><tr><th>Canal</th><th>Estado</th></tr>");
+            foreach (var item in eventCoverage.Evidencia) sb.Append($"<tr><td>{H(item.Clave)}</td><td>{H(item.Valor)}</td></tr>");
+            sb.Append("</table>");
+        }
         if (changeCoverage?.Evidencia is { Count: > 0 })
         {
             sb.Append("<h3>Cobertura de cambios previos</h3><table><tr><th>Fuente</th><th>Estado</th></tr>");
@@ -921,7 +928,9 @@ public static async Task<ReportExportResult> ExportAsync(
         sb.Append("</div></div><p class='muted'>Esta comparación resume candidatos; los hallazgos completos se muestran una sola vez en la sección Hallazgos. Un observador Windows que registra la caída de un proceso TSplus no se considera automáticamente originador. La presencia de un antivirus/EDR/driver tampoco implica causalidad.</p></div>");
 
         sb.Append("<div class='card'><h2>Análisis de causa raíz</h2>");
-        if (!report.Sistema.TsplusDetectado) sb.Append("<p>TSplus Remote Access no está detectado. TDM no emite una causa raíz de TSplus en este equipo.</p>");
+        if (!report.Sistema.TsplusDetectado) sb.Append(report.Sistema.DeteccionInconclusa()
+            ? "<p>No fue posible evaluar la instalación de TSplus Remote Access (permisos insuficientes). TDM no concluye presencia ni ausencia y no atribuye una causa raíz de TSplus en este equipo.</p>"
+            : "<p>TSplus Remote Access no está detectado. TDM no emite una causa raíz de TSplus en este equipo.</p>");
         else if (report.CausasRaiz.Count == 0)
         {
             var coverageNote = criticalCoverageComplete

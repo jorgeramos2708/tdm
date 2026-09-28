@@ -73,6 +73,11 @@ public sealed record ObservabilitySample
     public long ObservabilityBytes { get; init; }
     public double? NetworkReceiveMbps { get; init; }
     public double? NetworkSendMbps { get; init; }
+
+    public bool IsDiagnosticSample =>
+        SampleKind.Equals("diagnostic", StringComparison.OrdinalIgnoreCase)
+        || SampleKind.Equals("diagnostic-avalonia", StringComparison.OrdinalIgnoreCase)
+        || SampleKind.Equals("service-monitor", StringComparison.OrdinalIgnoreCase);
 }
 
 
@@ -441,7 +446,7 @@ public sealed class ObservabilityStore
     private static string MaxBurstSeverity(string a, string b)
         => BurstSeverityRank(b) > BurstSeverityRank(a) ? b : a;
 
-    private static double? ParseCpu(DiagnosticEvent? resources)
+    public static double? ParseCpu(DiagnosticEvent? resources)
     {
         var typed = MetricDouble(resources, ResourceMetricKeys.CpuPercent);
         if (typed.HasValue) return typed;
@@ -453,7 +458,7 @@ public sealed class ObservabilityStore
         return match.Success ? ParseDouble(match.Groups["v"].Value) : null;
     }
 
-    private static double? ParseMemory(DiagnosticEvent? resources)
+    public static double? ParseMemory(DiagnosticEvent? resources)
     {
         var typed = MetricDouble(resources, ResourceMetricKeys.MemoryFreePercent);
         if (typed.HasValue) return typed;

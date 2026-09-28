@@ -154,10 +154,7 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
             }
         }
 
-        var partial = coverage.Skip(1).Any(x =>
-            x.Valor.StartsWith("Parcial", StringComparison.OrdinalIgnoreCase) ||
-            x.Valor.StartsWith("Sin permisos", StringComparison.OrdinalIgnoreCase) ||
-            x.Valor.StartsWith("No legible", StringComparison.OrdinalIgnoreCase));
+        var partial = IsPartialCoverage(coverage.Skip(1));
         events.Add(new DiagnosticEvent(
             DateTimeOffset.Now,
             "TDM",
@@ -172,6 +169,13 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
 
         return Task.FromResult(new CollectorResult(findings, events));
     }
+
+    public static bool IsPartialCoverage(IEnumerable<EvidenceItem> channelCoverage) =>
+        channelCoverage.Any(x =>
+            x.Valor.StartsWith("Parcial", StringComparison.OrdinalIgnoreCase) ||
+            x.Valor.StartsWith("Sin permisos", StringComparison.OrdinalIgnoreCase) ||
+            x.Valor.StartsWith("No legible", StringComparison.OrdinalIgnoreCase) ||
+            x.Valor.StartsWith("Canal no disponible", StringComparison.OrdinalIgnoreCase));
 
     public static int ResolveRelevantLimit(TimeSpan lookback, int? maxEvents)
     {

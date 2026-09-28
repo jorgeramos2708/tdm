@@ -92,7 +92,14 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("WindowsEventRecoveryLookbackRestoresPersistedGap", WindowsEventRecoveryLookbackRestoresPersistedGap),
     ("WindowsEventRecoveryLookbackDisarmsAfterFirstCollect", WindowsEventRecoveryLookbackDisarmsAfterFirstCollect),
     ("TsplusCursorKeepsOffsetAfterAppend", TsplusCursorKeepsOffsetAfterAppend),
-    ("WindowsEventGapRecoveryIsWiredInWorker", WindowsEventGapRecoveryIsWiredInWorker)
+    ("WindowsEventGapRecoveryIsWiredInWorker", WindowsEventGapRecoveryIsWiredInWorker),
+    ("WindowsEventBaseCoverageCountsMissingChannelAsPartial", WindowsEventBaseCoverageCountsMissingChannelAsPartial),
+    ("ExportRendersBaseWindowsEventCoverage", ExportRendersBaseWindowsEventCoverage),
+    ("DiagnosticSampleKindUnifiesProducers", DiagnosticSampleKindUnifiesProducers),
+    ("ResourceMetricReadersUseStableKeys", ResourceMetricReadersUseStableKeys),
+    ("NotEvaluatedTsplusDetectionIsCommunicated", NotEvaluatedTsplusDetectionIsCommunicated),
+    ("TsplusLogCoverageNotEvaluatedWithoutDetection", TsplusLogCoverageNotEvaluatedWithoutDetection),
+    ("IncrementalCoverageCountsMissingExpectedSources", IncrementalCoverageCountsMissingExpectedSources)
 };
 
 var failed = 0;
@@ -1238,6 +1245,233 @@ static Task WindowsEventGapRecoveryIsWiredInWorker()
     True(collector.Contains("LastSuccessUtc", StringComparison.Ordinal),
         "El collector no persiste la última muestra con cobertura completa.");
     return Task.CompletedTask;
+}
+
+static Task WindowsEventBaseCoverageCountsMissingChannelAsPartial()
+{
+    True(WindowsEventCollector.IsPartialCoverage([new EvidenceItem("Security", "Canal no disponible")]),
+        "Un canal no disponible no dejó la cobertura base parcial.");
+    True(WindowsEventCollector.IsPartialCoverage([new EvidenceItem("System", "Parcial; relevantes=1; examinados=2")]),
+        "Una cobertura parcial dejó de detectarse.");
+    True(WindowsEventCollector.IsPartialCoverage([new EvidenceItem("System", "Sin permisos de lectura")]),
+        "Un canal sin permisos no dejó la cobertura base parcial.");
+    True(WindowsEventCollector.IsPartialCoverage([new EvidenceItem("System", "No legible: error")]),
+        "Un canal no legible no dejó la cobertura base parcial.");
+    False(WindowsEventCollector.IsPartialCoverage([new EvidenceItem("System", "Disponible; relevantes=0; examinados=0")]),
+        "Una cobertura disponible se marcó parcial.");
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de cobertura base no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsEventCollector.cs"));
+    True(text.Contains("IsPartialCoverage(coverage.Skip(1))", StringComparison.Ordinal),
+        "El evento de cobertura base ya no se calcula con IsPartialCoverage.");
+    return Task.CompletedTask;
+}
+
+static async Task ExportRendersBaseWindowsEventCoverage()
+{
+    var dir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var coverage = new DiagnosticEvent(now, "TDM", "Cobertura de eventos Windows", DiagnosticLayer.Windows,
+            DiagnosticSeverity.Advertencia, "WINDOWS_EVENT_COVERAGE",
+            "La lectura base de eventos Windows quedó parcial; las ausencias no se interpretan como estado sano.",
+            Evidencia:
+            [
+                new EvidenceItem("Ventana solicitada", $"{now.AddHours(-4):O} → {now:O}"),
+                new EvidenceItem("System", "Disponible; relevantes=1; examinados=1"),
+                new EvidenceItem("Security", "Canal no disponible")
+            ]);
+        var result = await ReportExporter.ExportAsync(Report([coverage], now), dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("Cobertura base de eventos Windows", StringComparison.Ordinal),
+            "El HTML no renderiza la cobertura base de Event Log.");
+        True(html.Contains("Canal no disponible", StringComparison.Ordinal),
+            "El HTML no muestra el canal no disponible de la cobertura base.");
+    }
+    finally { TryDelete(dir); }
+}
+
+static Task DiagnosticSampleKindUnifiesProducers()
+{
+    True(new ObservabilitySample { SampleKind = "diagnostic" }.IsDiagnosticSample,
+        "El tipo legado 'diagnostic' dejó de reconocerse como diagnóstico.");
+    True(new ObservabilitySample { SampleKind = "diagnostic-avalonia" }.IsDiagnosticSample,
+        "Las ejecuciones de diagnóstico de la GUI dejaron de contar como diagnóstico.");
+    True(new ObservabilitySample { SampleKind = "service-monitor" }.IsDiagnosticSample,
+        "Los ciclos de diagnóstico del servicio dejaron de contar como diagnóstico.");
+    False(new ObservabilitySample { SampleKind = "monitor" }.IsDiagnosticSample,
+        "Un muestreo simple se contó como diagnóstico.");
+    False(new ObservabilitySample { SampleKind = "monitor-summary" }.IsDiagnosticSample,
+        "El resumen de monitoreo se contó como diagnóstico.");
+    False(new ObservabilitySample { SampleKind = "avalonia-monitor" }.IsDiagnosticSample,
+        "El monitoreo en vivo de la GUI se contó como diagnóstico.");
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de SampleKind no ejecutable.");
+    var causality = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "ViewModels", "CausalityDashboardViewModel.cs"));
+    True(causality.Contains("IsDiagnosticSample", StringComparison.Ordinal),
+        "El panel de causalidad volvió a filtrar por un SampleKind que ningún productor escribe.");
+    var preventive = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "ViewModels", "PreventiveDashboardViewModel.cs"));
+    True(preventive.Contains("IsDiagnosticSample", StringComparison.Ordinal),
+        "El panel preventivo volvió a filtrar por un SampleKind que ningún productor escribe.");
+    return Task.CompletedTask;
+}
+
+static Task ResourceMetricReadersUseStableKeys()
+{
+    var now = DateTimeOffset.Now;
+    var stable = new DiagnosticEvent(now, "TDM", "Recursos", DiagnosticLayer.Windows,
+        DiagnosticSeverity.Informativo, "SYSTEM_RESOURCE_STATE", "Recursos", Evidencia:
+        [
+            new EvidenceItem(ResourceMetricKeys.CpuPercent, "42.5"),
+            new EvidenceItem(ResourceMetricKeys.MemoryFreePercent, "63.25")
+        ]);
+    Equal(42.5, ObservabilityStore.ParseCpu(stable) ?? -1, "El lector de CPU ignora la clave estable Metric.Cpu.Percent.");
+    Equal(63.25, ObservabilityStore.ParseMemory(stable) ?? -1, "El lector de memoria ignora la clave estable Metric.Memory.FreePercent.");
+
+    var legacy = new DiagnosticEvent(now, "TDM", "Recursos", DiagnosticLayer.Windows,
+        DiagnosticSeverity.Informativo, "SYSTEM_RESOURCE_STATE", "Recursos", Evidencia:
+        [
+            new EvidenceItem("CPU", "87 %"),
+            new EvidenceItem("Memoria física", "Memoria disponible (50% libre)")
+        ]);
+    Equal(87d, ObservabilityStore.ParseCpu(legacy) ?? -1, "El lector de CPU perdió el respaldo legado.");
+    Equal(50d, ObservabilityStore.ParseMemory(legacy) ?? -1, "El lector de memoria perdió el respaldo legado.");
+
+    True(ObservabilityStore.ParseCpu(new DiagnosticEvent(now, "TDM", "Recursos", DiagnosticLayer.Windows,
+        DiagnosticSeverity.Informativo, "SYSTEM_RESOURCE_STATE", "Recursos")) is null,
+        "Sin métricas el lector de CPU devolvió un valor fabricado.");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de métricas no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "Services", "IntegratedMonitoringService.cs"));
+    True(text.Contains("ObservabilityStore.ParseCpu(", StringComparison.Ordinal),
+        "El monitor GUI sigue leyendo claves de métricas locales en vez del lector estable.");
+    True(!text.Contains("e.Clave.Equals(\"CpuPercent\"", StringComparison.Ordinal),
+        "El monitor GUI sigue buscando la clave legada 'CpuPercent'.");
+    True(!text.Contains("e.Clave.Equals(\"MemoryFreePercent\"", StringComparison.Ordinal),
+        "El monitor GUI sigue buscando la clave legada 'MemoryFreePercent'.");
+    return Task.CompletedTask;
+}
+
+static async Task NotEvaluatedTsplusDetectionIsCommunicated()
+{
+    var now = DateTimeOffset.Now;
+    var inconcluso = Report([], now) with
+    {
+        Sistema = Snapshot() with { TsplusDetectado = false, TsplusEstadoDeteccion = TsplusDetectionState.NotEvaluated }
+    };
+    var narrative = DiagnosticNarrativeBuilder.Build(inconcluso);
+    True(narrative.Contains("No evaluado", StringComparison.Ordinal),
+        "La detección no evaluada no se comunica en la narrativa.");
+    False(narrative.Contains("no está detectado", StringComparison.OrdinalIgnoreCase),
+        "La narrativa afirma ausencia de TSplus cuando sólo hubo un permiso denegado.");
+
+    var ausente = Report([], now) with
+    {
+        Sistema = Snapshot() with { TsplusDetectado = false, TsplusEstadoDeteccion = TsplusDetectionState.ConfirmedAbsent }
+    };
+    True(DiagnosticNarrativeBuilder.Build(ausente).Contains("no está detectado", StringComparison.Ordinal),
+        "Con ausencia confirmada la narrativa dejó de declararlo.");
+
+    Equal("No evaluado", (Snapshot() with { TsplusDetectado = false, TsplusEstadoDeteccion = TsplusDetectionState.NotEvaluated }).EstadoDeteccionTexto(),
+        "El estado NotEvaluated no se tradujo a 'No evaluado'.");
+    Equal("No detectado", (Snapshot() with { TsplusDetectado = false, TsplusEstadoDeteccion = TsplusDetectionState.ConfirmedAbsent }).EstadoDeteccionTexto(),
+        "La ausencia confirmada cambió su texto estable.");
+    Equal("Detectado", Snapshot().EstadoDeteccionTexto(),
+        "La detección confirmada cambió su texto estable.");
+
+    var dir = TempDir();
+    try
+    {
+        var result = await ReportExporter.ExportAsync(inconcluso, dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("No evaluado", StringComparison.Ordinal),
+            "El HTML no comunica la detección no evaluada.");
+        False(html.Contains("no está detectado", StringComparison.OrdinalIgnoreCase),
+            "El HTML afirma ausencia de TSplus ante una detección inconclusa.");
+    }
+    finally { TryDelete(dir); }
+}
+
+static Task TsplusLogCoverageNotEvaluatedWithoutDetection()
+{
+    var now = DateTimeOffset.Now;
+    var sinTsplus = Report([], now) with
+    {
+        Sistema = Snapshot() with { TsplusDetectado = false, TsplusEstadoDeteccion = TsplusDetectionState.ConfirmedAbsent }
+    };
+    var assessment = DiagnosticCoverageAnalyzer.Analyze(sinTsplus);
+    var fuente = assessment.Fuentes.Single(x => x.Fuente == "Logs TSplus Remote Access");
+    Equal("No aplica", fuente.Estado,
+        "Sin TSplus detectado la cobertura de logs se evaluó como fuente crítica.");
+    False(assessment.Limitaciones.Any(l => l.StartsWith("Sin cobertura de logs TSplus", StringComparison.Ordinal)),
+        "Sin TSplus detectado se agregó una limitación de cobertura de logs.");
+
+    var conTsplus = Report([], now);
+    var assessmentCon = DiagnosticCoverageAnalyzer.Analyze(conTsplus);
+    Equal("No disponible", assessmentCon.Fuentes.Single(x => x.Fuente == "Logs TSplus Remote Access").Estado,
+        "Con TSplus detectado y sin cobertura la fuente debe seguir No disponible.");
+    True(assessment.Score > assessmentCon.Score,
+        "La ausencia de TSplus sigue penalizando el puntaje de cobertura.");
+
+    var inconcluso = Report([], now) with
+    {
+        Sistema = Snapshot() with { TsplusDetectado = false, TsplusEstadoDeteccion = TsplusDetectionState.NotEvaluated }
+    };
+    var assessmentInconcluso = DiagnosticCoverageAnalyzer.Analyze(inconcluso);
+    Equal("No consultado", assessmentInconcluso.Fuentes.Single(x => x.Fuente == "Logs TSplus Remote Access").Estado,
+        "Con detección inconclusa la cobertura de logs debe quedar NO EVALUADA.");
+    True(assessmentInconcluso.Limitaciones.Any(l => l.Contains("logs TSplus no fue evaluada", StringComparison.Ordinal)),
+        "La detección inconclusa no dejó la limitación de cobertura de logs.");
+    return Task.CompletedTask;
+}
+
+static async Task IncrementalCoverageCountsMissingExpectedSources()
+{
+    var dir = TempDir();
+    var stateRoot = TempDir();
+    var prior = Environment.GetEnvironmentVariable("TDM_STATE_ROOT");
+    try
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", stateRoot);
+        var install = Path.Combine(dir, "TSplus");
+        var cgi = Path.Combine(install, "Clients", "www", "cgi-bin");
+        Directory.CreateDirectory(cgi);
+        await File.WriteAllTextAsync(Path.Combine(cgi, "hb.log"), "ERROR portal down 1\n");
+
+        var collector = new IncrementalTsplusLogCollector();
+        collector.Prime(install);
+        var result = await collector.CollectAsync(new DiagnosticContext(Snapshot() with { TsplusRuta = install }, TimeSpan.FromHours(1)));
+
+        var coverage = result.Eventos.LastOrDefault(e => e.Tipo == "TSPLUS_INCREMENTAL_LOG_COVERAGE");
+        NotNull(coverage, "El collector incremental no emitió su evento de cobertura.");
+        static string Value(DiagnosticEvent e, string key)
+            => e.Evidencia?.FirstOrDefault(x => x.Clave.Equals(key, StringComparison.OrdinalIgnoreCase))?.Valor ?? "";
+        Equal("2", Value(coverage!, "Fuentes esperadas"),
+            "El denominador de la cobertura incremental no cuenta las fuentes base esperadas.");
+        Equal("1", Value(coverage!, "Fuentes esperadas disponibles"),
+            "La cobertura incremental no contabilizó la fuente base presente.");
+
+        var assessment = DiagnosticCoverageAnalyzer.Analyze(Report([coverage!], DateTimeOffset.Now));
+        var fuente = assessment.Fuentes.Single(x => x.Fuente == "Logs TSplus Remote Access");
+        Equal("Parcial", fuente.Estado,
+            "La ausencia de APSC.log dejó la cobertura incremental como Disponible.");
+        True(fuente.Detalle.Contains("esperadas ausentes=1", StringComparison.Ordinal),
+            "El detalle de cobertura no informa las fuentes esperadas ausentes.");
+
+        var root = FindRepoRoot();
+        NotNull(root, "No se localizó TDM.sln; gate de discovery no ejecutable.");
+        var discovery = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.TSplus", "TsplusLogDiscovery.cs"));
+        True(discovery.Split("optional: false", StringSplitOptions.None).Length - 1 >= 2,
+            "Los logs base hb.log/APSC.log dejaron de declararse no opcionales.");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", prior);
+        TryDelete(dir);
+        TryDelete(stateRoot);
+    }
 }
 
 static Task GuiRealtimeWiresIncrementalContinuousDiagnostics()

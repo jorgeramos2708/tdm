@@ -27,8 +27,8 @@ public static class TsplusLogDiscovery
 
         if (!string.IsNullOrWhiteSpace(installPath))
         {
-            AddFile(result, "Portal web", Path.Combine(installPath, "Clients", "www", "cgi-bin", "hb.log"));
-            AddFile(result, "Control de sesión", Path.Combine(installPath, "UserDesktop", "files", "APSC.log"));
+            AddFile(result, "Portal web", Path.Combine(installPath, "Clients", "www", "cgi-bin", "hb.log"), optional: false);
+            AddFile(result, "Control de sesión", Path.Combine(installPath, "UserDesktop", "files", "APSC.log"), optional: false);
             AddFile(result, "Load Balancing", Path.Combine(installPath, "UserDesktop", "files", "svcenterprise.log"));
             AddFile(result, "AdminTool", Path.Combine(installPath, "UserDesktop", "files", "AdminTool.log"));
             AddFile(result, "2FA", Path.Combine(installPath, "UserDesktop", "files", "TwoFactor.Admin.log"), DiagnosticLayer.Tsplus, TsplusProduct.TwoFactorAuthentication);

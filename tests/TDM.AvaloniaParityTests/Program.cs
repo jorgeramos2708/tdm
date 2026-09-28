@@ -521,6 +521,41 @@ internal static class Program
                 "La acción preventiva de disco ignoró el umbral configurado.");
         });
 
+        Run("Causality_UsesRealDiagnosticKinds", () =>
+        {
+            var causalSamples = new[]
+            {
+                new ObservabilitySample
+                {
+                    Timestamp = now.AddMinutes(-2),
+                    SampleKind = "service-monitor",
+                    CausalOrigin = "WINDOWS",
+                    Originator = "TermService"
+                },
+                new ObservabilitySample
+                {
+                    Timestamp = now.AddMinutes(-1),
+                    SampleKind = "diagnostic-avalonia",
+                    CausalOrigin = "TSPLUS",
+                    Originator = "TSplus.Application"
+                },
+                new ObservabilitySample
+                {
+                    Timestamp = now,
+                    SampleKind = "monitor",
+                    CausalOrigin = "WINDOWS",
+                    Originator = "Ignorado"
+                }
+            };
+            var vm = new CausalityDashboardViewModel();
+            vm.Apply(causalSamples);
+            Equal("TSPLUS", vm.CurrentOrigin);
+            Equal("1", vm.TsplusCount);
+            Equal("1", vm.WindowsCount);
+            True(vm.Originators.All(x => x.Name != "Ignorado"),
+                "Una muestra de monitoreo simple contaminó el panel de causalidad.");
+        });
+
 
 
         Run("TdmHealth_Parity", () =>

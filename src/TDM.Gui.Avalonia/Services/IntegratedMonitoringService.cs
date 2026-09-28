@@ -235,13 +235,13 @@ public sealed class IntegratedMonitoringService : IDisposable
 
             // Run anomaly detection on the report's metrics
             var resources = report.Eventos.LastOrDefault(e => e.Tipo.Equals("SYSTEM_RESOURCE_STATE", StringComparison.OrdinalIgnoreCase));
-            var cpu = resources?.Evidencia?.FirstOrDefault(e => e.Clave.Equals("CpuPercent"))?.Valor;
-            var memory = resources?.Evidencia?.FirstOrDefault(e => e.Clave.Equals("MemoryFreePercent"))?.Valor;
+            var cpu = ObservabilityStore.ParseCpu(resources);
+            var memory = ObservabilityStore.ParseMemory(resources);
 
             var anomalyFindings = new List<DiagnosticFinding>();
-            if (double.TryParse(cpu, out var cpuVal))
+            if (cpu is { } cpuVal)
                 AddAnomalyFinding(anomalyFindings, "system.cpu", cpuVal, "CPU del sistema", DateTimeOffset.Now);
-            if (double.TryParse(memory, out var memVal))
+            if (memory is { } memVal)
                 AddAnomalyFinding(anomalyFindings, "system.memory", memVal, "Memoria libre %", DateTimeOffset.Now);
             if (anomalyFindings.Count > 0)
                 report = report with { Hallazgos = [.. report.Hallazgos, .. anomalyFindings] };

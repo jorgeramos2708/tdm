@@ -53,7 +53,7 @@ public partial class PreventiveDashboardViewModel : ObservableObject
         MemoryCriticalThreshold = thresholds.MemoryUsedCritical;
         if (samples.Count == 0) { Reset(); return; }
         var latest = samples[^1];
-        var diagnosticLatest = samples.LastOrDefault(x => x.SampleKind.Equals("diagnostic", StringComparison.OrdinalIgnoreCase)) ?? latest;
+        var diagnosticLatest = samples.LastOrDefault(x => x.IsDiagnosticSample) ?? latest;
         var moduleLatest = samples.LastOrDefault(x => x.ModuleHealth.Count > 0) ?? diagnosticLatest;
         var cpuLatest = samples.LastOrDefault(x => x.CpuPercent.HasValue) ?? latest;
         var memoryLatest = samples.LastOrDefault(x => x.MemoryFreePercent.HasValue) ?? latest;

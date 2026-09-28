@@ -18,7 +18,7 @@ public partial class CausalityDashboardViewModel : ObservableObject
     public void Apply(IReadOnlyList<ObservabilitySample> samples)
     {
         var diagnostic = samples
-            .Where(x => x.SampleKind.Equals("diagnostic", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(x.CausalOrigin))
+            .Where(x => x.IsDiagnosticSample && !string.IsNullOrWhiteSpace(x.CausalOrigin))
             .ToList();
         var latest = diagnostic.LastOrDefault();
         CurrentOrigin = latest?.CausalOrigin ?? "INDETERMINADO";

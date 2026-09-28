@@ -14,7 +14,7 @@ public static class DiagnosticNarrativeBuilder
         var sb = new StringBuilder();
         sb.AppendLine($"Equipo: {report.Sistema.Equipo}");
         sb.AppendLine($"Sistema: {report.Sistema.SistemaOperativo} {report.Sistema.Version} (build {report.Sistema.Build}, {report.Sistema.Arquitectura})");
-        sb.AppendLine($"Remote Access: {(report.Sistema.TsplusDetectado ? $"Detectado ({report.Sistema.TsplusVersion ?? "versión N/D"})" : "No detectado")}");
+        sb.AppendLine($"Remote Access: {(report.Sistema.TsplusDetectado ? $"Detectado ({report.Sistema.TsplusVersion ?? "versión N/D"})" : report.Sistema.EstadoDeteccionTexto())}");
         var periodoInicio = report.PeriodoAnalizadoInicio == default ? report.Inicio - report.Lookback : report.PeriodoAnalizadoInicio;
         var periodoFin = report.PeriodoAnalizadoFin == default ? report.Inicio : report.PeriodoAnalizadoFin;
         var evidenceLookback = report.EvidenciaDisponibleLookback <= TimeSpan.Zero ? report.Lookback : report.EvidenciaDisponibleLookback;
@@ -89,7 +89,9 @@ public static class DiagnosticNarrativeBuilder
         sb.AppendLine("-----------------------");
         if (!report.Sistema.TsplusDetectado)
         {
-            sb.AppendLine("Remote Access no está detectado; TDM puede describir anomalías de Windows/productos complementarios, pero no atribuye una causa a Remote Access.");
+            sb.AppendLine(report.Sistema.DeteccionInconclusa()
+                ? "No fue posible evaluar la instalación de Remote Access (permisos insuficientes); TDM no concluye presencia ni ausencia y sólo describe anomalías de Windows/productos complementarios."
+                : "Remote Access no está detectado; TDM puede describir anomalías de Windows/productos complementarios, pero no atribuye una causa a Remote Access.");
         }
         else if (bestSupported is null)
         {

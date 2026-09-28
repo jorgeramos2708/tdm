@@ -193,6 +193,15 @@ public sealed record SystemSnapshot(
     string? TsplusVersion)
 {
     public TsplusDetectionState TsplusEstadoDeteccion { get; init; } = TsplusDetectado ? TsplusDetectionState.ConfirmedPresent : TsplusDetectionState.ConfirmedAbsent;
+
+    public string EstadoDeteccionTexto() => TsplusEstadoDeteccion switch
+    {
+        TsplusDetectionState.ConfirmedPresent => "Detectado",
+        TsplusDetectionState.NotEvaluated => "No evaluado",
+        _ => "No detectado"
+    };
+
+    public bool DeteccionInconclusa() => TsplusEstadoDeteccion == TsplusDetectionState.NotEvaluated;
 }
 
 public sealed record DiagnosticContext(

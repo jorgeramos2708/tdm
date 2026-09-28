@@ -589,7 +589,7 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
         var windowEnd = report.PeriodoAnalizadoFin == default ? report.Inicio : report.PeriodoAnalizadoFin;
         sb.AppendLine($"Equipo: {report.Sistema.Equipo}");
         sb.AppendLine($"Sistema: {report.Sistema.SistemaOperativo} {report.Sistema.Version} | build: {report.Sistema.Build} | arquitectura: {report.Sistema.Arquitectura}");
-        sb.AppendLine($"TSplus: {(report.Sistema.TsplusDetectado ? $"Detectado | versión: {report.Sistema.TsplusVersion ?? "N/D"}" : "No detectado")}");
+        sb.AppendLine($"TSplus: {(report.Sistema.TsplusDetectado ? $"Detectado | versión: {report.Sistema.TsplusVersion ?? "N/D"}" : report.Sistema.EstadoDeteccionTexto())}");
         sb.AppendLine($"Ventana: {windowStart.ToLocalTime():dd/MM HH:mm} – {windowEnd.ToLocalTime():dd/MM HH:mm}");
         sb.AppendLine($"Hallazgos: {report.Hallazgos.Count} | Eventos: {report.Eventos.Count}");
         if (report.ImpactoFuncional is not null)

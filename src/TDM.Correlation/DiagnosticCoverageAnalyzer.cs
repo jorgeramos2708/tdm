@@ -163,6 +163,18 @@ public static class DiagnosticCoverageAnalyzer
 
     private static void AddTsplusLogs(DiagnosticReport report, List<CoverageSourceAssessment> sources, List<string> limitations)
     {
+        if (!report.Sistema.TsplusDetectado)
+        {
+            var inconclusa = report.Sistema.DeteccionInconclusa();
+            sources.Add(new("Logs TSplus Remote Access",
+                inconclusa ? "No consultado" : "No aplica",
+                inconclusa
+                    ? "La instalación TSplus Remote Access no pudo evaluarse (permisos insuficientes); la cobertura de logs quedó NO EVALUADA."
+                    : "TSplus Remote Access no está detectado; no aplica cobertura de logs TSplus.",
+                false));
+            if (inconclusa) limitations.Add("Sin evaluación concluyente de TSplus Remote Access, la cobertura de logs TSplus no fue evaluada.");
+            return;
+        }
         var e = report.Eventos.LastOrDefault(x => x.Tipo == "TSPLUS_INCREMENTAL_LOG_COVERAGE")
                  ?? report.Eventos.LastOrDefault(x => x.Tipo == "TSPLUS_LOG_COVERAGE");
         if (e is null)
@@ -189,8 +201,11 @@ public static class DiagnosticCoverageAnalyzer
         var declared = e.Evidencia?.FirstOrDefault(x => x.Clave.Equals("Cobertura", StringComparison.OrdinalIgnoreCase))?.Valor ?? "Parcial";
         var readFailures = report.Eventos.Count(x => x.Tipo is "LOG_ACCESS_DENIED" or "LOG_READ_ERROR" or "TSPLUS_INCREMENTAL_SOURCE_UNAVAILABLE");
         var discoveryPartial = declared.Contains("Parcial", StringComparison.OrdinalIgnoreCase) || declared.Contains("No evalu", StringComparison.OrdinalIgnoreCase);
-        var status = total == 0 ? "Parcial" : readFailures > 0 || discoveryPartial ? "Parcial" : available == total ? "Disponible" : available > 0 ? "Parcial" : "No disponible";
-        sources.Add(new("Logs TSplus Remote Access", status, $"Fuentes conocidas/detectadas disponibles={available}/{total}; errores de lectura/pérdida={readFailures}; descubrimiento={declared}. La ausencia de logs opcionales no se interpreta como falla.", true));
+        var expected = IntEvidence(e, "Fuentes esperadas");
+        var expectedAvailable = IntEvidence(e, "Fuentes esperadas disponibles");
+        var expectedMissing = Math.Max(0, expected - expectedAvailable);
+        var status = total == 0 ? "Parcial" : readFailures > 0 || discoveryPartial || expectedMissing > 0 ? "Parcial" : available == total ? "Disponible" : available > 0 ? "Parcial" : "No disponible";
+        sources.Add(new("Logs TSplus Remote Access", status, $"Fuentes conocidas/detectadas disponibles={available}/{total}; fuentes esperadas ausentes={expectedMissing}; errores de lectura/pérdida={readFailures}; descubrimiento={declared}. La ausencia de logs opcionales no se interpreta como falla.", true));
         if (status != "Disponible") limitations.Add("Parte de los logs Remote Access no está disponible/habilitada o perdió acceso; TDM conserva la limitación sin declarar el módulo sano por ausencia de log.");
     }
 
