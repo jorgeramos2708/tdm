@@ -22,6 +22,7 @@ de corrección aplicadas sobre el árbol de trabajo de este repositorio.
 | Fase 4 | Críticos C1–C3 (cobertura, continuidad Event Viewer, cursor TSplus) | ✅ completada | `ab6d42e` |
 | Fase 5 | Altos H1/H2/H3/H8/H9/H11 (detección y cobertura) | ✅ completada | `d288174` |
 | Fase 6 | Altos H4/H5/H6/H7/H12–H15 + tests extremo-a-extremo de coherencia HTML | ✅ completada | `940e4b7` |
+| Fase 7 | Alto H10 (settings.js silenciado con versión desconocida) | ✅ completada | `797c7a4` |
 | — | Simulación de remediación sobre grafo inventado | ❌ descartada | — |
 
 ---
@@ -425,6 +426,25 @@ Ocho hallazgos altos de la auditoría:
    (ParityTests, 40/40). Gates: build 0/0, VERIFY 7/7, publish portable (138 820 807 bytes),
    lock files restaurados.
 
+## Fase 7 — Alto H10 (commit `797c7a4`)
+
+1. **H10 — la ausencia de `settings.js` quedaba silenciada con versión desconocida.**
+   `TsplusReleaseCatalog.cs:16-30` devuelve `Soportado=false` para versiones sin determinar o
+   fuera de 19.30/19.40/LTS 18/LTS 17, y `TsplusInternalConfigurationCollector.cs:529` usaba ese
+   flag como única puerta de `TSPLUS-WEB-SETTINGSJS-MISSING`: una instalación con `Clients\www`
+   presente y `settings.js` ausente no emitía ningún hallazgo ni evento, de modo que la
+   inconsistencia física no llegaba al informe. Fix: el `else if (enforceKnownFiles)` pasó a
+   `else` (parámetro renombrado a `supportedProfile`): el hallazgo se emite siempre que el árbol
+   Web esté disponible y el archivo falte, con severidad `Error` cuando el perfil está soportado
+   (texto clásico sin cambios) y `Advertencia` cuando no, con la evidencia
+   `Perfil de versión: Sin perfil soportado` y una razón adaptada que no declara el archivo
+   obligatorio para una rama desconocida (contrato del catálogo); los estados `-EMPTY`,
+   `-READ` y `-NOT-EVALUATED` (acceso denegado/E/S) no se tocaron.
+   Test: `UnknownTsplusVersionStillReportsMissingSettingsJs` (ausencia con versión `null` →
+   `Advertencia`, con `19.30` → `Error`, y presencia del archivo → sin hallazgo).
+2. **Tests**: ProductionTests 92/92, ParityTests 40/40. Gates: build 0/0, VERIFY 7/7,
+   publish portable (138 824 903 bytes), lock files restaurados.
+
 ### Anexo — tabla completa de hallazgos altos H1–H15 (persistida)
 
 | # | Hallazgo | file:line | Estado |
@@ -438,7 +458,7 @@ Ocho hallazgos altos de la auditoría:
 | H7 | `web.config` (y `balance.bin`/`settings.bin`) no están en el baseline SHA-256 ni en el catálogo `known` ⇒ ediciones de Web no generan deriva ni transición | `TsplusConfigurationDriftCollector.cs:44-50`, `TsplusConfigurationArtifactCatalog.cs:23-32` | ✅ Fase 6 |
 | H8 | Cobertura de logs TSplus se evalúa **aunque TSplus no esté detectado** (`AddTsplusLogs` fuera del `if (TsplusDetectado)`) ⇒ fuente crítica "No disponible" y penalización falsa del score en hosts sin TSplus | `DiagnosticCoverageAnalyzer.cs:22,192-194`, `TsplusLogDiscovery.cs:57-68` | ✅ Fase 5 |
 | H9 | Cobertura incremental usa como denominador los ficheros **observados**, no los esperados: si `hb.log`/`APSC.log` dejan de emitirse, todo sigue "Disponible" | `DiagnosticCoverageAnalyzer.cs:180-182`, `IncrementalTsplusLogCollector.cs:276` | ✅ Fase 5 |
-| H10 | Versión TSplus desconocida ⇒ `Soportado=false` ⇒ ausencia de `settings.js` deja de reportarse (`TSPLUS-WEB-SETTINGSJS-MISSING` silenciado) | `TsplusReleaseCatalog.cs:16-30`, `TsplusInternalConfigurationCollector.cs:529` | ⏳ sin fase asignada |
+| H10 | Versión TSplus desconocida ⇒ `Soportado=false` ⇒ ausencia de `settings.js` deja de reportarse (`TSPLUS-WEB-SETTINGSJS-MISSING` silenciado) | `TsplusReleaseCatalog.cs:16-30`, `TsplusInternalConfigurationCollector.cs:529` | ✅ Fase 7 |
 | H11 | `NotEvaluated` (permiso denegado al detectar) se comporta como `ConfirmedAbsent`: correlación sale (`RootCauseCorrelator.cs:27`) y el informe afirma "no está detectado" sin comunicar la limitación real | `TsplusInstallDiscovery.cs:30,75`, `DiagnosticModels.cs:181,195` | ✅ Fase 5 (texto del informe; la correlación ya sólo salía con `ConfirmedAbsent`) |
 | H12 | Consistencia: `Tensiones` (JSON/sanitizado) **no se renderiza en HTML ni GUI**, pese a que `ReportConsistencyAnalyzer` detecta "causa sin causa"/"impacto sin causa" — nadie lo ve | `DiagnosticWorkflow.cs:58`, `ReportConsistencyAnalyzer.cs:28-30` | ✅ Fase 6 |
 | H13 | Tarjetas contradictorias con los mismos datos: `ExecutiveState`="NO EVALUADO" junto a `CompactImpactState`="SALUDABLE"; narrativa "0 anomalías" junto a tabla poblada; tres números distintos de "fuentes bloqueadas" en un mismo HTML | `ReportExporter.cs:1042-1078,167-171,288,409-411`, `DiagnosticNarrativeBuilder.cs:320-328` | ✅ Fase 6 |
@@ -446,7 +466,8 @@ Ocho hallazgos altos de la auditoría:
 | H15 | Transiciones duplicadas: `TDM_MONITOR_STATE_TRANSITION` (con dedup) + `TDM_STATE_TRANSITION` **sin dedup** por el mismo `preRecordedResult` | `TdmWorker.cs:236`, `StateReportIntegrator.cs:73-91,166` | ✅ Fase 6 |
 
 Plan de fases: Fase 4 = C1–C3 (✅ `ab6d42e`); Fase 5 = H3/H1/H2/H11/H8/H9 (✅ `d288174`);
-Fase 6 = H4, H5, H6/H7, H12–H15 + tests extremo-a-extremo de coherencia HTML (✅ `940e4b7`).
+Fase 6 = H4, H5, H6/H7, H12–H15 + tests extremo-a-extremo de coherencia HTML (✅ `940e4b7`);
+Fase 7 = H10 (✅ `797c7a4`). C1–C3 y H1–H15 quedan todos remediados.
 
 ## Descartado — Simulación de remediación sobre grafo inventado
 
