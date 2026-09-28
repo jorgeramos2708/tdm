@@ -20,6 +20,7 @@ de corrección aplicadas sobre el árbol de trabajo de este repositorio.
 | Fase 2 | Paridad export ↔ GUI | ✅ completada | `ed22b9e` |
 | Fase 3 | Brechas de privacidad | ✅ completada | `ab52e62` |
 | Fase 4 | Críticos C1–C3 (cobertura, continuidad Event Viewer, cursor TSplus) | ✅ completada | `ab6d42e` |
+| Fase 5 | Altos H1/H2/H3/H8/H9/H11 (detección y cobertura) | ✅ completada | `d288174` |
 | — | Simulación de remediación sobre grafo inventado | ❌ descartada | — |
 
 ---
@@ -308,6 +309,80 @@ Los tres hallazgos críticos de la auditoría, con sus cadenas completas:
    sólo la línea nueva se emite), `WindowsEventGapRecoveryIsWiredInWorker` (C2: cableado en
    `TdmWorker` y campos en el collector). Gates: build 0/0, ProductionTests 75/75, ParityTests
    38/38, VERIFY 7/7, publish portable (138 779 847 bytes), lock files restaurados.
+
+## Fase 5 — Altos de detección/cobertura (commit `d288174`)
+
+Seis hallazgos altos de la auditoría:
+
+1. **H3 — `"Canal no disponible"` no contaba como parcial y `WINDOWS_EVENT_COVERAGE` nadie lo
+   consumía.** `WindowsEventCollector.cs:134` añadía el valor ante `EventLogNotFoundException`, pero
+   el chequeo de `partial` (`:157-160`) sólo comprobaba `Parcial`/`Sin permisos`/`No legible`, así que
+   la cobertura base emitía "La lectura base … se completó" con un canal caído; y aunque el evento
+   `WINDOWS_EVENT_COVERAGE` (`:167`) se emitía, sólo se renderizaba `WINDOWS_FORENSIC_COVERAGE`
+   (`ReportExporter.cs:806`). Fix: helper público `IsPartialCoverage` (añade el prefijo
+   "Canal no disponible"), call site `IsPartialCoverage(coverage.Skip(1))` y tabla "Cobertura base de
+   eventos Windows" en la tarjeta "Diagnóstico forense".
+2. **H1 — panel de causalidad siempre vacío.** `CausalityDashboardViewModel.cs:21` y
+   `PreventiveDashboardViewModel.cs:56` filtraban `SampleKind == "diagnostic"`, que ningún productor
+   escribe (GUI: `diagnostic-avalonia` en `DiagnosticExecutionService.cs:161,291`; servicio:
+   `service-monitor` en `TdmWorker.cs:314,440`; monitor: `avalonia-monitor`/`monitor`/
+   `monitor-summary`), y los fixtures Parity escribían `"diagnostic"` enmascarando el defecto. Fix:
+   predicado compartido `ObservabilitySample.IsDiagnosticSample` (acepta `diagnostic` legado,
+   `diagnostic-avalonia`, `service-monitor`; excluye kinds de muestreo) usado por ambos viewmodels.
+3. **H2 — anomalías CPU/memoria muertas en la GUI.** `IntegratedMonitoringService.cs:238-239` leía
+   `"CpuPercent"`/`"MemoryFreePercent"` mientras los collectors emiten
+   `ResourceMetricKeys.CpuPercent`/`MemoryFreePercent` (`Metric.Cpu.Percent`/`Metric.Memory.FreePercent`
+   en `ResourceMetricKeys.cs:10-11`). Fix: lectores públicos `ObservabilityStore.ParseCpu/ParseMemory`
+   (clave estable primero, texto legado como respaldo, sin parseo con cultura del proceso).
+4. **H11 — permiso denegado comunicado como ausencia TSplus.** Con `TsplusEstadoDeteccion ==
+   NotEvaluated` (`TsplusInstallDiscovery.cs:30,75`, propagado por `SystemSnapshotReader.cs:24`), la
+   narrativa (`DiagnosticNarrativeBuilder.cs:90-92`), el export (`ReportExporter.cs:251,924`) y la GUI
+   (`DiagnosticWorkspaceViewModel.cs:592`) afirmaban "no está detectado" sin comunicar la limitación.
+   Fix: `SystemSnapshot.EstadoDeteccionTexto()` (Detectado/No evaluado/No detectado) y
+   `DeteccionInconclusa()`; los cuatro textos distinguen el estado inconcluso. La correlación ya sólo
+   salía con `ConfirmedAbsent` (`RootCauseCorrelator.cs:27`), por lo que no se tocó.
+5. **H8 — cobertura de logs TSplus evaluada sin TSplus.** `DiagnosticCoverageAnalyzer.cs:22` llamaba
+   `AddTsplusLogs` fuera del `if (report.Sistema.TsplusDetectado)` (`:24`): un host sin TSplus recibía
+   la fuente crítica "Logs TSplus Remote Access = No disponible" y penalización falsa del score
+   (`:192-194`). Fix: sin detección → "No aplica" (excluida del score); con detección inconclusa →
+   "No consultado" + limitación; con TSplus detectado sin cobertura → "No disponible" (sin cambios).
+6. **H9 — denominador observado, no esperado.** `IncrementalTsplusLogCollector.cs:275` emitía
+   "Fuentes candidatas" (sólo ficheros existentes, `EnumerateCandidates` filtra `x.Existe`) y
+   `DiagnosticCoverageAnalyzer.cs:180-182` lo usaba como total: si `hb.log`/`APSC.log` dejaban de
+   existir desaparecían del censo y todo seguía "Disponible". Fix: `TsplusLogDiscovery` marca
+   `hb.log`/`APSC.log` como `optional: false` (`FuenteOpcional`, campo que no se usaba), el evento
+   incremental emite "Fuentes esperadas"/"Fuentes esperadas disponibles" y el analizador degrada a
+   "Parcial" con "fuentes esperadas ausentes=N" cuando N > 0 (eventos legados sin las claves: sin
+   cambios).
+7. **Tests**: `WindowsEventBaseCoverageCountsMissingChannelAsPartial`,
+   `ExportRendersBaseWindowsEventCoverage`, `DiagnosticSampleKindUnifiesProducers`,
+   `ResourceMetricReadersUseStableKeys`, `NotEvaluatedTsplusDetectionIsCommunicated`,
+   `TsplusLogCoverageNotEvaluatedWithoutDetection`, `IncrementalCoverageCountsMissingExpectedSources`
+   (ProductionTests, 82/82), `Causality_UsesRealDiagnosticKinds` (ParityTests, 39/39). Gates: build
+   0/0, VERIFY 7/7, publish portable (138 796 231 bytes), lock files restaurados.
+
+### Anexo — tabla completa de hallazgos altos H1–H15 (persistida)
+
+| # | Hallazgo | file:line | Estado |
+|---|---|---|---|
+| H1 | Panel de causalidad **siempre vacío**: filtra `SampleKind=="diagnostic"` pero ningún productor lo emite (escribe `avalonia-monitor`/`service-monitor`/`diagnostic-avalonia`/`monitor`/`monitor-summary`) | `CausalityDashboardViewModel.cs:21`, `ObservabilityStore.cs:247,678` | ✅ Fase 5 |
+| H2 | Anomalías CPU/memoria muertas en la GUI: lee claves `"CpuPercent"`/`"MemoryFreePercent"`, los collectors emiten `"Metric.Cpu.Percent"`/`"Metric.Memory.FreePercent"` | `IntegratedMonitoringService.cs:238-239` vs `ResourceMetricKeys.cs:10-11` | ✅ Fase 5 |
+| H3 | `"Canal no disponible"` no cuenta como parcial ⇒ la cobertura base de Event Log emite *"La lectura base … se completó"*; además `WINDOWS_EVENT_COVERAGE` se emite y **nadie lo consume** (solo se renderiza `WINDOWS_FORENSIC_COVERAGE`) | `WindowsEventCollector.cs:132-170,167`, `ReportExporter.cs:806` | ✅ Fase 5 |
+| H4 | En modo servicio, `RecordAsync` de canales forensic/integrity **se descarta el resultado** ⇒ los candidatos longitudinales de mayor puntaje (94/90) jamás se generan (solo la GUI los recupera) | `TdmWorker.cs:656` vs `DiagnosticExecutionService.cs:119-121`, `Longitudinal.cs:10` | ⏳ Fase 6 |
+| H5 | Observación con cobertura ≠"Disponible" no se persiste ⇒ un cambio real ocurrido en un ciclo con acceso denegado queda **permanentemente indetectable** | `StateSnapshotBuilder.cs:99-102`, `LocalStateStore.cs:195` | ⏳ Fase 6 |
+| H6 | Deriva de config: archivo presente-pero-ilegible cuenta como "eliminado" ⇒ falso `TSPLUS-CONFIG-DRIFT` y la baseline se reescribe sin él | `TsplusConfigurationDriftCollector.cs:60-64,86-87,156` | ⏳ Fase 6 |
+| H7 | `web.config` (y `balance.bin`/`settings.bin`) no están en el baseline SHA-256 ni en el catálogo `known` ⇒ ediciones de Web no generan deriva ni transición | `TsplusConfigurationDriftCollector.cs:44-50`, `TsplusConfigurationArtifactCatalog.cs:23-32` | ⏳ Fase 6 |
+| H8 | Cobertura de logs TSplus se evalúa **aunque TSplus no esté detectado** (`AddTsplusLogs` fuera del `if (TsplusDetectado)`) ⇒ fuente crítica "No disponible" y penalización falsa del score en hosts sin TSplus | `DiagnosticCoverageAnalyzer.cs:22,192-194`, `TsplusLogDiscovery.cs:57-68` | ✅ Fase 5 |
+| H9 | Cobertura incremental usa como denominador los ficheros **observados**, no los esperados: si `hb.log`/`APSC.log` dejan de emitirse, todo sigue "Disponible" | `DiagnosticCoverageAnalyzer.cs:180-182`, `IncrementalTsplusLogCollector.cs:276` | ✅ Fase 5 |
+| H10 | Versión TSplus desconocida ⇒ `Soportado=false` ⇒ ausencia de `settings.js` deja de reportarse (`TSPLUS-WEB-SETTINGSJS-MISSING` silenciado) | `TsplusReleaseCatalog.cs:16-30`, `TsplusInternalConfigurationCollector.cs:529` | ⏳ sin fase asignada |
+| H11 | `NotEvaluated` (permiso denegado al detectar) se comporta como `ConfirmedAbsent`: correlación sale (`RootCauseCorrelator.cs:27`) y el informe afirma "no está detectado" sin comunicar la limitación real | `TsplusInstallDiscovery.cs:30,75`, `DiagnosticModels.cs:181,195` | ✅ Fase 5 (texto del informe; la correlación ya sólo salía con `ConfirmedAbsent`) |
+| H12 | Consistencia: `Tensiones` (JSON/sanitizado) **no se renderiza en HTML ni GUI**, pese a que `ReportConsistencyAnalyzer` detecta "causa sin causa"/"impacto sin causa" — nadie lo ve | `DiagnosticWorkflow.cs:58`, `ReportConsistencyAnalyzer.cs:28-30` | ⏳ Fase 6 |
+| H13 | Tarjetas contradictorias con los mismos datos: `ExecutiveState`="NO EVALUADO" junto a `CompactImpactState`="SALUDABLE"; narrativa "0 anomalías" junto a tabla poblada; tres números distintos de "fuentes bloqueadas" en un mismo HTML | `ReportExporter.cs:1042-1078,167-171,288,409-411`, `DiagnosticNarrativeBuilder.cs:320-328` | ⏳ Fase 6 |
+| H14 | Umbral fuera de rango ⇒ **toda** la config del administrador revierte a defaults en silencio (`LoadAsync` nunca lanza, así que el `catch` de TdmWorker jamás dispara) | `SupportMonitoringSettings.cs:162-168` | ⏳ Fase 6 |
+| H15 | Transiciones duplicadas: `TDM_MONITOR_STATE_TRANSITION` (con dedup) + `TDM_STATE_TRANSITION` **sin dedup** por el mismo `preRecordedResult` | `TdmWorker.cs:236`, `StateReportIntegrator.cs:73-91,166` | ⏳ Fase 6 |
+
+Plan de fases: Fase 4 = C1–C3 (✅ `ab6d42e`); Fase 5 = H3/H1/H2/H11/H8/H9 (✅ `d288174`);
+Fase 6 = H4, H5, H6/H7, H12–H15 + tests extremo-a-extremo de coherencia HTML.
 
 ## Descartado — Simulación de remediación sobre grafo inventado
 
