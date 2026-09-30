@@ -1,8 +1,8 @@
 # Auditoría general de efectividad — cadena completa
 
-**Versión auditada**: TDM v1.0-rc18.21.0-FIX93, tras Fase 8 (`085e799`).
+**Versión auditada**: TDM v1.0-rc18.21.0-FIX93, tras Fase 9 (`85a64c8`).
 **Método**: 4 agentes de exploración (~50 hallazgos) sobre monitoreo → transiciones → detección → agrupación → correlación → ranking → causa raíz → impacto → dependencias → eventos → logs → configuración → consistencia → GUI; verificación manual de los hallazgos más graves (marcados ✅) y re-verificación de los hallazgos conocidos abiertos de la auditoría previa.
-**Gates vigentes**: build 0/0 · ProductionTests 98/98 · ParityTests 40/40 · VERIFY 7/7 · publish 138837191.
+**Gates vigentes**: build 0/0 · ProductionTests 106/106 · ParityTests 43/43 · VERIFY 7/7 · publish 138845383.
 
 ## 1. Monitoreo real (colectores/cadencia)
 
@@ -89,7 +89,7 @@
 3. Patrón dominante de *source-text gates* (tests leen el `.cs`, ej. `:875,:910,:1252`) — detectan cambios de texto, no de comportamiento.
 4. Cero tests de caminos de fallo de colectores (permisos, canales inexistentes, fuga de watchers).
 5. Reglas RCA `WindowsFarm` sin test de gating sintomático/temporal (no existe código que probar).
-6. `ReportDiffer` sin test de IDs duplicados; sin aserción de que `SERVICE_STATE`/procesos existan en el HTML ni de pies vs `Take()`.
+6. `ReportDiffer` sin test de IDs duplicados; sin aserción de que `SERVICE_STATE`/procesos existan en el HTML (pies vs `Take()` cubierto desde Fase 9).
 
 ## 12. Correcciones detectadas en esta ronda (no re-reportar)
 
@@ -99,6 +99,6 @@
 ## Prioridades para "~100% efectiva"
 
 - **P0 ✅ cerrado en Fase 8 (`085e799`)**: filtro del canal Security (§3 Alta) · start-mode antes de `Critico` en TSplus ligero (§1 H2) · gating sintomático+ventana en candidatos Windows estáticos (§7 Alta) · dreno del push collector (§1 Alta) · paridad GUI pre-record + margen −15 min + raíz de feedback (§10).
-- **P1**: `requiredNow` unificado · dos universos de incidentes (unificar o rotular) · contadores GUI · dedup de transiciones · recorte a `PeriodoAnalizado` en clusters y RCA · `N/D` del grafo SCM y verde de "No evaluado" · pies vs `Take()` · baseline fallida no persistida.
+- **P1 ✅ cerrado en Fase 9 (`85a64c8`)**: `requiredNow` unificado (`WindowsServiceCatalog.RequiredNow`/`StoppedSeverity` + depth≥1 con modo de inicio) · dos universos de incidentes (puente en `BuildSummary` + rótulo de alcance operativo en los dashboards) · contadores GUI CRÍTICOS/ERRORES sólo sobre hallazgos · dedup de transiciones (tolerancia 10 min + guardia de inversión intermedia) · recorte a `PeriodoAnalizado` en clusters y RCA (`DiagnosticTimeWindow.IsEventInside`; fallback histórico AD intacto) · `N/D` del grafo SCM (respaldo `Servicio origen`) y verde de "No evaluado" → `warn` · pies vs `Take()` (pie con el número real de ocultas sobre 120/60) · baseline fallida no persistida (`SCM_GRAPH_BASELINE_STALE`).
 - **P2**: parser de logs en español · telemetría de snapshot corrupto · `ConfigurationHistory` multi-generación · umbrales conectados a más paneles · secciones `SERVICE_STATE`+procesos en HTML · avisos de truncado en GUI · canal `diagnostic-avalonia`.
 - **P3**: bajos (IDs posicionales, `/60s`, ledger, `TakeLast(120)`, `es-MX`, UTF-16).
