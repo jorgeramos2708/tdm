@@ -128,7 +128,13 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("CorruptSnapshotIsTelemetered", CorruptSnapshotIsTelemetered),
     ("ConfigurationHistoryDiffWorksAcrossGenerations", ConfigurationHistoryDiffWorksAcrossGenerations),
     ("DiagnosticAvaloniaTransitionsReadAcrossChannels", DiagnosticAvaloniaTransitionsReadAcrossChannels),
-    ("ExportRendersServiceStateAndProcessSections", ExportRendersServiceStateAndProcessSections)
+    ("ExportRendersServiceStateAndProcessSections", ExportRendersServiceStateAndProcessSections),
+    ("ClusterIdsAreContentDerivedAndStable", ClusterIdsAreContentDerivedAndStable),
+    ("BurstCollapseReportsRealSpanAndSubjects", BurstCollapseReportsRealSpanAndSubjects),
+    ("IncidentWindowDeclaresSourceTruncation", IncidentWindowDeclaresSourceTruncation),
+    ("LedgerKindChangeCreatesNewIncident", LedgerKindChangeCreatesNewIncident),
+    ("TimestampParsingHasNoCulturalFallback", TimestampParsingHasNoCulturalFallback),
+    ("IncrementalReadsUtf16WithoutBom", IncrementalReadsUtf16WithoutBom)
 };
 
 var failed = 0;
@@ -513,6 +519,218 @@ static Task AssignedUsersAreSanitized()
     var values = sanitized.Hallazgos[0].Evidencia.Select(x => x.Valor).ToList();
     False(values.Any(x => x.Contains("jorge", StringComparison.OrdinalIgnoreCase) || x.Contains("Admins", StringComparison.OrdinalIgnoreCase)), "Identidades asignadas no fueron pseudonimizadas.");
     return Task.CompletedTask;
+}
+
+static Task ClusterIdsAreContentDerivedAndStable()
+{
+    var now = DateTimeOffset.Now;
+    static DiagnosticEvent Web(DateTimeOffset at) => new(at, "SCM", "Web Portal Service", DiagnosticLayer.Tsplus,
+        DiagnosticSeverity.Critico, "SERVICE_STATE", "Stopped",
+        Evidencia: [new EvidenceItem("Servicio", "WebPortalService"), new EvidenceItem("Estado", "Stopped")],
+        Producto: TsplusProduct.RemoteAccess);
+    static DiagnosticEvent Ad(DateTimeOffset at) => new(at, "Netlogon", "Active Directory", DiagnosticLayer.Windows,
+        DiagnosticSeverity.Error, "WINDOWS_AD_DOMAIN_CONNECTIVITY_FAILURE", "Secure channel failed");
+
+    var t0 = now.AddMinutes(-30);
+    var baseReport = Report([Web(t0), Ad(t0.AddSeconds(15))], now);
+    var run1 = IncidentClusterAnalyzer.Analyze(baseReport);
+    var run2 = IncidentClusterAnalyzer.Analyze(baseReport);
+    Equal(2, run1.Count, "Web/HTML5 y AD no formaron clústeres separados.");
+    for (var i = 0; i < run1.Count; i++)
+        Equal(run1[i].Id, run2[i].Id, $"El ID del clúster {i} no es determinista entre ejecuciones.");
+
+    var early = Web(now.AddMinutes(-50));
+    var shifted = IncidentClusterAnalyzer.Analyze(Report([early, Web(t0), Ad(t0.AddSeconds(15))], now));
+    Equal(3, shifted.Count, "El clúster temprano no generó un tercer grupo.");
+    Equal(run1[0].Id, shifted[1].Id, "El ID de un clúster cambió de posición al aparecer un clúster previo.");
+    Equal(run1[1].Id, shifted[2].Id, "El ID del segundo clúster cambió de posición al aparecer un clúster previo.");
+    True(!run1[0].Id.Equals(shifted[0].Id, StringComparison.Ordinal),
+        "Dos clústeres con el mismo dominio/identidad pero distinto primer evento compartieron ID.");
+    foreach (var cluster in run1.Concat(shifted))
+    {
+        True(cluster.Id.StartsWith("INC-GRP-", StringComparison.Ordinal), "El ID del clúster no usa el prefijo INC-GRP-.");
+        Equal(16, cluster.Id.Length, "El ID del clúster no tiene la longitud content-derived esperada (8+8).");
+        True(cluster.Id[8..].All(Uri.IsHexDigit), $"El ID del clúster no termina en 8 dígitos hexadecimales: {cluster.Id}");
+    }
+    return Task.CompletedTask;
+}
+
+static async Task BurstCollapseReportsRealSpanAndSubjects()
+{
+    var root = TempDir();
+    try
+    {
+        var store = new ObservabilityStore(root);
+        var t0 = DateTimeOffset.Now.AddMinutes(-10);
+        var users = new[] { "alice", "bob", "alice", "carol" };
+        var events = new List<DiagnosticEvent>();
+        for (var i = 0; i < 4; i++)
+        {
+            events.Add(new DiagnosticEvent(t0.AddSeconds(i * 50), "TSplus Log", "Remote Access", DiagnosticLayer.Tsplus,
+                DiagnosticSeverity.Error, "APPLICATION_CRASH", $"crash {i}",
+                Evidencia: [new EvidenceItem("RecordId", $"R{i}"), new EvidenceItem("Usuario", users[i])],
+                Producto: TsplusProduct.RemoteAccess));
+        }
+        var sample = await store.RecordAsync(Report(events, DateTimeOffset.Now), "monitor", new ObservabilityRuntimeState());
+
+        NotNull(sample.Incidents, "La muestra no conserva la colección de incidentes.");
+        Equal(1, sample.Incidents!.Count, "La ráfaga no colapsó en un solo incidente.");
+        Equal(0, sample.IncidentsDropped, "Una ráfaga colapsada declaró truncamiento falso en origen.");
+        var incident = sample.Incidents[0];
+        True(incident.Summary.Contains("ráfaga ×4", StringComparison.Ordinal),
+            $"El resumen no declara el conteo real de la ráfaga: {incident.Summary}");
+        True(incident.Summary.Contains(" en 2.5 min", StringComparison.Ordinal),
+            $"El resumen no declara el span real de la ráfaga (esperado ' en 2.5 min'): {incident.Summary}");
+        False(incident.Summary.Contains("/60s", StringComparison.Ordinal),
+            $"El resumen volvió al rótulo '/60s' que mentía sobre el span: {incident.Summary}");
+        Equal(t0.AddSeconds(150), incident.Timestamp, "La ráfaga colapsada no conservó el evento más reciente.");
+        Equal("R3", incident.EvidenceId ?? "", "La ráfaga no conservó el EvidenceId del evento más reciente.");
+        var subjects = (incident.Subject ?? string.Empty).Split(',', StringSplitOptions.TrimEntries);
+        Equal(3, subjects.Length, $"El Subject de la ráfaga no unió los distintos usuarios sin duplicados: '{incident.Subject}'");
+        True(subjects.Contains("alice") && subjects.Contains("bob") && subjects.Contains("carol"),
+            $"El Subject de la ráfaga perdió identidades previas (hereda sólo la del último): '{incident.Subject}'");
+    }
+    finally { TryDelete(root); }
+}
+
+static async Task IncidentWindowDeclaresSourceTruncation()
+{
+    var root = TempDir();
+    try
+    {
+        var store = new ObservabilityStore(root);
+        var now = DateTimeOffset.Now;
+        var events = new List<DiagnosticEvent>();
+        for (var i = 0; i < 130; i++)
+        {
+            events.Add(new DiagnosticEvent(now.AddSeconds(-(130 - i) * 90), "TSplus Log", "Remote Access", DiagnosticLayer.Tsplus,
+                DiagnosticSeverity.Error, "APPLICATION_CRASH", $"crash {i}",
+                Evidencia: [new EvidenceItem("RecordId", $"R{i}")],
+                Producto: TsplusProduct.RemoteAccess));
+        }
+        var sample = await store.RecordAsync(Report(events, now), "monitor", new ObservabilityRuntimeState());
+        NotNull(sample.Incidents, "La muestra no conserva la colección de incidentes.");
+        Equal(120, sample.Incidents!.Count, "El tope de 120 por muestra no se aplicó.");
+        Equal(10, sample.IncidentsDropped, "La muestra no declaró los incidentes descartados en el origen.");
+        Equal(0, new ObservabilitySample().IncidentsDropped,
+            "Muestras legadas sin el campo declararon truncamiento falso.");
+    }
+    finally { TryDelete(root); }
+}
+
+static async Task LedgerKindChangeCreatesNewIncident()
+{
+    var root = TempDir();
+    try
+    {
+        var at = DateTimeOffset.Now;
+        var ledger = new IncidentLedger(root);
+        var crash = new ObservabilityIncident(at, "APPLICATION_CRASH", "Remote Access", "Error", "crash 1");
+        var first = await ledger.ReconcileAsync([crash], at, SupportMonitoringSettings.Default);
+        Equal(1, first.Count, "El incidente inicial no entró al ledger.");
+        var crashId = first[0].Id;
+
+        var wer = new ObservabilityIncident(at.AddSeconds(5), "WER_REPORT", "Remote Access", "Error", "wer 1");
+        var second = await ledger.ReconcileAsync([wer], at.AddSeconds(5), SupportMonitoringSettings.Default);
+        Equal(2, second.Count, "El cambio de Kind no creó un incidente nuevo en el ledger.");
+        var werItem = second.Single(x => x.Kind.Equals("WER_REPORT", StringComparison.OrdinalIgnoreCase));
+        True(!werItem.Id.Equals(crashId, StringComparison.OrdinalIgnoreCase),
+            "El incidente con Kind distinto reutilizó el Id del incidente previo (contaminaría VerifiedHistory).");
+
+        var crashAgain = crash with { Timestamp = at.AddSeconds(10) };
+        var third = await ledger.ReconcileAsync([crashAgain], at.AddSeconds(10), SupportMonitoringSettings.Default);
+        var crashItem = third.Single(x => x.Kind.Equals("APPLICATION_CRASH", StringComparison.OrdinalIgnoreCase));
+        Equal(crashId, crashItem.Id, "El mismo Kind dentro del cooldown no reutilizó su incidente.");
+        Equal(2, crashItem.Occurrences, "El mismo Kind dentro del cooldown no incrementó su conteo.");
+        Equal(ManagedIncidentState.Persistent, crashItem.State, "El mismo Kind dentro del cooldown no elevó su estado a persistente.");
+    }
+    finally { TryDelete(root); }
+}
+
+static Task TimestampParsingHasNoCulturalFallback()
+{
+    var isoT = TsplusLogParser.TryParseTimestamp("2026-09-06T18:10:11 ERROR failed");
+    True(isoT.HasValue && isoT.Value.Year == 2026 && isoT.Value.Month == 9 && isoT.Value.Day == 6,
+        "El timestamp ISO con separador T dejó de reconocerse sin fallback cultural.");
+
+    var utc = TsplusLogParser.TryParseTimestamp("2026-09-06 18:10:11Z ERROR failed");
+    True(utc.HasValue && utc.Value.Offset == TimeSpan.Zero, "El sufijo Z no se conservó como UTC.");
+
+    var offset = TsplusLogParser.TryParseTimestamp("13/02/2026 10:00:00+01:00 ERROR failed");
+    True(offset.HasValue && offset.Value.Offset == TimeSpan.FromHours(1) && offset.Value.Month == 2 && offset.Value.Day == 13,
+        "La fecha con sufijo de zona +01:00 no se resolvió de forma inequívoca.");
+
+    False(TsplusLogParser.TryParseTimestamp("12/11/2026T10:00:00 ERROR failed").HasValue,
+        "Una fecha ambigua sin contexto de ventana se resolvió por una cultura de fallback.");
+
+    var local = new DateTime(2026, 4, 3, 12, 30, 0, DateTimeKind.Unspecified);
+    var end = new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local));
+    var context = new DiagnosticContext(Snapshot(), TimeSpan.FromHours(1), end);
+    var withT = TsplusLogParser.ParseLine("Remote Access", "x.log", "03/04/2026T12:00:00 ERROR failed to start application", 1, context);
+    NotNull(withT, "La fecha ambigua con separador T no se resolvió con la ventana de investigación.");
+    True(withT!.Timestamp is { Month: 4, Day: 3 },
+        "La fecha ambigua T no se resolvió como dd/MM dentro de la ventana de investigación.");
+
+    var withFraction = TsplusLogParser.ParseLine("Remote Access", "x.log", "03/04/2026 12:00:00,500 ERROR failed to start application", 1, context);
+    NotNull(withFraction, "La fecha con fracción con coma no se resolvió dentro de la ventana de investigación.");
+    True(withFraction!.Timestamp is { Month: 4, Day: 3 },
+        "La fecha con fracción con coma se resolvió con la interpretación equivocada.");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del parser no ejecutable.");
+    var parser = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.TSplus", "TsplusLogParser.cs"));
+    False(parser.Contains("\"es-MX\"", StringComparison.Ordinal), "El parser conservó el fallback cultural es-MX.");
+    False(parser.Contains("GetCultureInfo", StringComparison.Ordinal), "El parser siguió consultando una cultura de fallback.");
+    return Task.CompletedTask;
+}
+
+static async Task IncrementalReadsUtf16WithoutBom()
+{
+    var dir = TempDir();
+    var stateRoot = TempDir();
+    var prior = Environment.GetEnvironmentVariable("TDM_STATE_ROOT");
+    try
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", stateRoot);
+        var install = Path.Combine(dir, "TSplus");
+        var logDir = Path.Combine(install, "Clients", "www", "cgi-bin");
+        Directory.CreateDirectory(logDir);
+        var logPath = Path.Combine(logDir, "hb.log");
+        // La primera línea inicia con una grafía no-ASCII (“): con la detección previa de
+        // 4 bytes el byte alto rompía la comprobación de paridad y el archivo se leía como UTF-8.
+        var content = "“ERROR connection refused utf16-event\nERROR access denied utf16-second\n";
+        await File.WriteAllTextAsync(logPath, content, new System.Text.UnicodeEncoding(false, false));
+        var head = new byte[2];
+        await using (var fs = File.OpenRead(logPath))
+        {
+            await fs.ReadAsync(head.AsMemory(0, 2));
+        }
+        False(head[0] == 0xFF && head[1] == 0xFE, "El archivo de prueba no quedó sin BOM UTF-16.");
+
+        var creation = new FileInfo(logPath).CreationTimeUtc.Ticks;
+        var emptyHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Array.Empty<byte>())).ToLowerInvariant();
+        var cursor = new TsplusCursorFixture(new Dictionary<string, TsplusFileCursorFixture>
+        {
+            [logPath] = new TsplusFileCursorFixture(0, creation, string.Empty, emptyHash)
+        }, DateTimeOffset.Now);
+        True(CollectorCursorStore.TrySave("tsplus-log-cursors", cursor, out var saveError), "No se guardó el cursor TSplus: " + saveError);
+
+        var collector = new IncrementalTsplusLogCollector();
+        collector.Prime(install);
+        var result = await collector.CollectAsync(new DiagnosticContext(Snapshot() with { TsplusRuta = install }, TimeSpan.FromHours(1)));
+
+        var fromLog = result.Eventos.Where(e => e.Archivo == logPath).ToList();
+        True(fromLog.Any(e => e.Mensaje.Contains("utf16-event", StringComparison.Ordinal)),
+            "UTF-16 sin BOM no fue detectado: la línea inicial con grafía no-ASCII se perdió.");
+        True(fromLog.Any(e => e.Mensaje.Contains("utf16-second", StringComparison.Ordinal)),
+            "UTF-16 sin BOM no fue detectado: la segunda línea se perdió.");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", prior);
+        TryDelete(dir);
+        TryDelete(stateRoot);
+    }
 }
 
 static DiagnosticContext Context(TimeSpan lookback)

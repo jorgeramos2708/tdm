@@ -39,9 +39,16 @@ public partial class IncidentsDashboardViewModel : ObservableObject
         Errors = incidents.Count(x => x.Severity.Equals("Error", StringComparison.OrdinalIgnoreCase)).ToString();
         AffectedComponents = incidents.Select(x => x.Component).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count().ToString();
         Incidents = incidents.Take(60).Select(ToRow).ToList();
-        TruncationNotice = incidents.Count > 60
-            ? $"Mostrando 60 de {incidents.Count} incidentes en la línea de incidentes; el detalle y el informe conservan el conjunto completo."
-            : string.Empty;
+        var sourceDropped = DashboardRules.DroppedIncidents(samples);
+        TruncationNotice = string.Join(" ", new[]
+        {
+            incidents.Count > 60
+                ? $"Mostrando 60 de {incidents.Count} incidentes en la línea de incidentes; el detalle y el informe conservan el conjunto completo."
+                : string.Empty,
+            sourceDropped > 0
+                ? $"Se descartaron {sourceDropped} incidente(s) en el origen (tope de 120 por muestra); el informe conserva la evidencia completa."
+                : string.Empty
+        }.Where(x => x.Length > 0));
         _incidentsFullDetail = BuildIncidentsDetail(incidents);
         RefreshVisibleDetail();
     }

@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Text;
 using TDM.Core;
 using TDM.Models;
 
@@ -105,10 +107,10 @@ public static class IncidentClusterAnalyzer
                 groups[^1].Add(signal);
         }
 
-        return groups.Select((g, index) => BuildCluster(g, index + 1)).ToList();
+        return groups.Select(BuildCluster).ToList();
     }
 
-    private static DiagnosticIncidentCluster BuildCluster(IReadOnlyList<DiagnosticEvent> events, int index)
+    private static DiagnosticIncidentCluster BuildCluster(IReadOnlyList<DiagnosticEvent> events)
     {
         var domain = Domain(events[0]);
         var severity = events.Max(e => e.Severidad);
@@ -139,7 +141,11 @@ public static class IncidentClusterAnalyzer
             "OBSERVABILIDAD" => "Señales de observabilidad/WMI; afectan la capacidad de diagnóstico y no demuestran por sí solas una falla TSplus.",
             _ => "Grupo de señales relacionadas temporal y funcionalmente; no implica una causa común demostrada."
         };
-        var id = $"INC-GRP-{index:000}";
+        // D#6: el ID se deriva del contenido (dominio + identidad + primer evento), no de la
+        // posición: con numeración secuencial, la aparición o desaparición de un clúster previo
+        // reasignaba el significado de INC-GRP-NNN entre ejecuciones.
+        var idSeed = $"{domain}|{IdentityKey(events[0]) ?? string.Empty}|{events[0].Timestamp!.Value.ToUniversalTime():O}";
+        var id = "INC-GRP-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(idSeed)))[..8];
         return new DiagnosticIncidentCluster(id, domain, state, severity,
             events[0].Timestamp!.Value, events[^1].Timestamp!.Value, events.Count, operational,
             summary, componentNames, evidence);

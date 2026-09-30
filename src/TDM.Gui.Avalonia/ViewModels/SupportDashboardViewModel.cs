@@ -35,6 +35,7 @@ public partial class SupportDashboardViewModel : ObservableObject
     [ObservableProperty] private string _detailTitle = "Detalle";
     [ObservableProperty] private string _detailText = "Selecciona Ver detalle en una tarjeta.";
     [ObservableProperty] private bool _isDetailVisible;
+    [ObservableProperty] private string _truncationNotice = string.Empty;
     private string _servicesFullDetail = "Sin datos de servicios o dependencias.";
     private string _modulesFullDetail = "Sin datos de módulos TSplus.";
     private string _sessionsFullDetail = "Sin datos de sesiones.";
@@ -169,6 +170,11 @@ public partial class SupportDashboardViewModel : ObservableObject
             ? "Sin incidentes en la ventana"
             : string.Join(" · ", incidents.GroupBy(x => x.Kind, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).Take(2).Select(g => $"{g.Key}: {g.Count()}"));
 
+        var sourceDropped = DashboardRules.DroppedIncidents(samples);
+        TruncationNotice = sourceDropped > 0
+            ? $"Se descartaron {sourceDropped} incidente(s) en el origen (tope de 120 por muestra); el informe conserva la evidencia completa."
+            : string.Empty;
+
         _incidents = incidents;
         _sessionIncidents = sessionIncidents;
         _sessionsFullDetail = BuildSessionsDetail();
@@ -227,6 +233,11 @@ public partial class SupportDashboardViewModel : ObservableObject
     {
         var builder = new StringBuilder();
         builder.Append($"Total: {IncidentValue}. Críticos: {CriticalIncidents}. Error: {ErrorIncidents}. {IncidentSummary}");
+        if (TruncationNotice.Length > 0)
+        {
+            builder.AppendLine();
+            builder.Append(TruncationNotice);
+        }
         if (_incidents.Count == 0) return builder.ToString();
 
         var byKind = _incidents
@@ -287,6 +298,7 @@ public partial class SupportDashboardViewModel : ObservableObject
         SessionCoverage = "Cobertura: No evaluado";
         CriticalIncidents = ErrorIncidents = 0;
         IncidentSummary = "Sin incidentes en la ventana";
+        TruncationNotice = string.Empty;
         RefreshVisibleDetail();
     }
 }

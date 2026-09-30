@@ -177,25 +177,71 @@ public static partial class TsplusLogParser
     public static DateTimeOffset? TryParseTimestamp(string line, DiagnosticContext context)
         => TryParseTimestampCore(line, context);
 
+    private static readonly string[] AllTimestampFormats = BuildTimestampFormats(dayMonthFirst: false);
+    private static readonly string[] AmbiguousTimestampFormats = BuildTimestampFormats(dayMonthFirst: true);
+
+    // D#es-MX: formatos explícitos y deterministas que cubren todo lo que TimestampRegex
+    // puede emitir (separador [ T], fracción con . o , de 1 a 7 dígitos) sin depender de
+    // una cultura de fallback que resolvía fechas sin pasar por la ventana de investigación.
+    private static string[] BuildTimestampFormats(bool dayMonthFirst)
+    {
+        var orders = dayMonthFirst
+            ? new[] { "dd/MM/yyyy", "MM/dd/yyyy", "dd-MM-yyyy", "MM-dd-yyyy" }
+            : new[] { "yyyy-MM-dd", "yyyy/MM/dd", "dd/MM/yyyy", "MM/dd/yyyy", "dd-MM-yyyy", "MM-dd-yyyy" };
+        var times = new List<string> { "HH:mm:ss" };
+        for (var digits = 1; digits <= 7; digits++)
+        {
+            times.Add("HH:mm:ss." + new string('f', digits));
+            times.Add("HH:mm:ss," + new string('f', digits));
+        }
+        var formats = new List<string>();
+        foreach (var order in orders)
+            foreach (var separator in new[] { " ", "T" })
+                foreach (var time in times)
+                    formats.Add(order + separator + time);
+        return formats.ToArray();
+    }
+
     private static DateTimeOffset? TryParseTimestampCore(string line, DiagnosticContext? context)
     {
         var match = TimestampRegex().Match(line);
         if (!match.Success) return null;
         var value = match.Value.Trim('[', ']', '(', ')', ' ');
+        var offset = SplitTimestampOffset(value, out var core);
+        var parsed = ParseTimestampValue(core, context);
+        if (!parsed.HasValue || !offset.HasValue) return parsed;
+        return new DateTimeOffset(parsed.Value.DateTime, offset.Value);
+    }
 
+    private static TimeSpan? SplitTimestampOffset(string value, out string core)
+    {
+        core = value;
+        if (value.EndsWith('Z'))
+        {
+            core = value[..^1];
+            return TimeSpan.Zero;
+        }
+        var match = Regex.Match(value, @"(?<sign>[+-])(?<h>\d{2}):?(?<m>\d{2})$", RegexOptions.CultureInvariant);
+        if (!match.Success) return null;
+        if (!int.TryParse(match.Groups["h"].Value, out var hours) || !int.TryParse(match.Groups["m"].Value, out var minutes)) return null;
+        core = value[..^match.Length];
+        return TimeSpan.FromMinutes((match.Groups["sign"].Value == "-" ? -1 : 1) * (hours * 60 + minutes));
+    }
+
+    private static DateTimeOffset? ParseTimestampValue(string value, DiagnosticContext? context)
+    {
         // dd/MM y MM/dd son indistinguibles cuando ambos componentes están entre 1 y 12.
         // Si conocemos la ventana de diagnóstico, evaluamos ambas interpretaciones y aceptamos
         // únicamente la que cae de forma inequívoca dentro de esa ventana. Si ambas son plausibles,
         // no inventamos EventTime y la evidencia permanece como contexto no temporal.
-        var ambiguous = Regex.Match(value, @"^(?<a>\d{2})[/-](?<b>\d{2})[/-](?<y>\d{4})\s");
+        var ambiguous = Regex.Match(value, @"^(?<a>\d{2})[/-](?<b>\d{2})[/-](?<y>\d{4})[ T]");
         if (ambiguous.Success
             && int.TryParse(ambiguous.Groups["a"].Value, out var a)
             && int.TryParse(ambiguous.Groups["b"].Value, out var b)
             && a is >= 1 and <= 12 && b is >= 1 and <= 12 && a != b)
         {
             var candidates = new List<DateTimeOffset>();
-            foreach (var format in new[] { "dd/MM/yyyy HH:mm:ss.fff", "dd/MM/yyyy HH:mm:ss", "MM/dd/yyyy HH:mm:ss.fff", "MM/dd/yyyy HH:mm:ss",
-                                           "dd-MM-yyyy HH:mm:ss.fff", "dd-MM-yyyy HH:mm:ss", "MM-dd-yyyy HH:mm:ss.fff", "MM-dd-yyyy HH:mm:ss" })
+            foreach (var format in AmbiguousTimestampFormats)
             {
                 if (DateTimeOffset.TryParseExact(value, format, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var candidate)
                     && !candidates.Any(x => x == candidate))
@@ -208,25 +254,13 @@ public static partial class TsplusLogParser
             return inside.Count == 1 ? inside[0] : null;
         }
 
-        string[] formats =
-        [
-            "yyyy-MM-dd HH:mm:ss.fff", "yyyy-MM-dd HH:mm:ss",
-            "yyyy/MM/dd HH:mm:ss.fff", "yyyy/MM/dd HH:mm:ss",
-            "dd/MM/yyyy HH:mm:ss.fff", "dd/MM/yyyy HH:mm:ss",
-            "MM/dd/yyyy HH:mm:ss.fff", "MM/dd/yyyy HH:mm:ss",
-            "dd-MM-yyyy HH:mm:ss.fff", "dd-MM-yyyy HH:mm:ss",
-            "MM-dd-yyyy HH:mm:ss.fff", "MM-dd-yyyy HH:mm:ss",
-            "yyyy-MM-dd'T'HH:mm:ss.fffK", "yyyy-MM-dd'T'HH:mm:ssK"
-        ];
-
-        foreach (var format in formats)
+        foreach (var format in AllTimestampFormats)
         {
             if (DateTimeOffset.TryParseExact(value, format, CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeLocal, out var dto)) return dto;
         }
 
-        return DateTimeOffset.TryParse(value, CultureInfo.GetCultureInfo("es-MX"),
-            DateTimeStyles.AssumeLocal, out var parsed) ? parsed : null;
+        return null;
     }
 
     private static bool ContainsAny(string text, params string[] values) =>

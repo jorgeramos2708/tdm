@@ -943,6 +943,37 @@ internal static class Program
             sessionVm.ShowSessionsDetailCommand.Execute(null);
             True(sessionVm.DetailText.Contains("y 5 incidencia(s) más", StringComparison.Ordinal),
                 "El detalle de sesiones seguía acotado a 10 filas en lugar de las 30 visibles.");
+
+            // D#13: el tope de 120 por muestra debe declararse en los tres paneles.
+            var droppedSample = new ObservabilitySample
+            {
+                Timestamp = now,
+                Incidents = incidentRows,
+                IncidentsDropped = 7
+            };
+            var droppedIncidentVm = new IncidentsDashboardViewModel();
+            droppedIncidentVm.Apply([droppedSample]);
+            True(droppedIncidentVm.TruncationNotice.Contains("7 incidente(s)", StringComparison.Ordinal),
+                "El panel de incidentes no declara los incidentes descartados en el origen.");
+
+            var droppedSessionVm = new SessionsDashboardViewModel();
+            droppedSessionVm.Apply([droppedSample]);
+            True(droppedSessionVm.TruncationNotice.Contains("7 incidente(s)", StringComparison.Ordinal),
+                "El panel de sesiones no declara los incidentes descartados en el origen.");
+
+            var droppedSupportVm = new SupportDashboardViewModel();
+            droppedSupportVm.Apply([droppedSample]);
+            True(droppedSupportVm.TruncationNotice.Contains("7 incidente(s)", StringComparison.Ordinal),
+                "El centro de soporte no declara los incidentes descartados en el origen.");
+            droppedSupportVm.ShowIncidentsDetailCommand.Execute(null);
+            True(droppedSupportVm.DetailText.Contains("7 incidente(s)", StringComparison.Ordinal),
+                "El detalle de incidentes del soporte omite el aviso de truncamiento en origen.");
+
+            var repoRoot = FindRepoRoot();
+            True(repoRoot is not null, "No se localizó TDM.sln; gate del aviso de soporte no ejecutable.");
+            var supportView = File.ReadAllText(Path.Combine(repoRoot!, "src", "TDM.Gui.Avalonia", "Views", "SupportDashboardView.axaml"));
+            True(supportView.Contains("{Binding TruncationNotice}", StringComparison.Ordinal),
+                "La vista de soporte no enlaza el aviso de truncamiento en origen.");
         });
 
         try { if (Directory.Exists(stateRoot)) Directory.Delete(stateRoot, recursive: true); } catch { }

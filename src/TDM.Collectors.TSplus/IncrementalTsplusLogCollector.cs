@@ -475,13 +475,28 @@ namespace TDM.Collectors.TSplus;
         try
         {
             await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            var bom = new byte[4];
-            var n = await stream.ReadAsync(bom.AsMemory(0, 4), ct).ConfigureAwait(false);
+            // D#UTF16: leer 32 bytes y validar la paridad por pares; con sólo 4 bytes la
+            // detección sin BOM fallaba si la primera grafía no era ASCII (p. ej. “, — o ñ
+            // inicial en UTF-16LE: el byte alto rompía la comprobación de posiciones 1 y 3).
+            var bom = new byte[32];
+            var n = await stream.ReadAsync(bom.AsMemory(0, 32), ct).ConfigureAwait(false);
             if (n >= 2 && bom[0] == 0xFF && bom[1] == 0xFE) return Encoding.Unicode;
             if (n >= 2 && bom[0] == 0xFE && bom[1] == 0xFF) return Encoding.BigEndianUnicode;
             if (n >= 3 && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF) return new UTF8Encoding(false, false);
-            if (n >= 4 && bom[1] == 0 && bom[3] == 0) return Encoding.Unicode;
-            if (n >= 4 && bom[0] == 0 && bom[2] == 0) return Encoding.BigEndianUnicode;
+            if (n >= 4)
+            {
+                var pairs = n / 2;
+                var evenZeros = 0;
+                var oddZeros = 0;
+                for (var i = 0; i < pairs * 2; i++)
+                {
+                    if (bom[i] != 0) continue;
+                    if (i % 2 == 0) evenZeros++;
+                    else oddZeros++;
+                }
+                if (oddZeros * 4 >= pairs * 3 && evenZeros * 4 <= pairs) return Encoding.Unicode;
+                if (evenZeros * 4 >= pairs * 3 && oddZeros * 4 <= pairs) return Encoding.BigEndianUnicode;
+            }
         }
         catch { }
         return new UTF8Encoding(false, false);

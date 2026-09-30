@@ -67,6 +67,7 @@ public sealed record ObservabilitySample
     public IReadOnlyDictionary<string, string>? ServiceStates { get; init; }
     public IReadOnlyDictionary<string, string>? DependencyStates { get; init; }
     public IReadOnlyList<ObservabilityIncident>? Incidents { get; init; }
+    public int IncidentsDropped { get; init; }
     public double? TdmCpuPercent { get; init; }
     public int TdmHandleCount { get; init; }
     public int TdmThreadCount { get; init; }
@@ -115,6 +116,7 @@ public sealed class ObservabilityStore
     private static readonly TimeSpan FullResolutionWindow = TimeSpan.FromHours(1);
     private const int MaxSamples = 6_500;
     private const long CompactAfterBytes = 12L * 1024 * 1024;
+    private const int BurstSubjectLimit = 6;
 
     /// <summary>Ventana histórica máxima disponible para los dashboards.</summary>
     public static TimeSpan MaximumRetention => MaxWindow;
@@ -242,7 +244,7 @@ public sealed class ObservabilityStore
         var performance = report.RendimientoDiagnostico;
         var serviceStates = BuildServiceStates(report);
         var dependencyStates = BuildDependencyStates(report);
-        var incidents = BuildIncidents(report);
+        var (incidents, incidentsDropped) = BuildIncidents(report);
         var timestamp = report.PeriodoAnalizadoFin != default ? report.PeriodoAnalizadoFin : report.Fin;
         if (timestamp == default) timestamp = DateTimeOffset.Now;
 
@@ -287,6 +289,7 @@ public sealed class ObservabilityStore
             ServiceStates = serviceStates,
             DependencyStates = dependencyStates,
             Incidents = incidents,
+            IncidentsDropped = incidentsDropped,
             TdmCpuPercent = runtime.TdmCpuPercent,
             TdmHandleCount = Math.Max(0, runtime.TdmHandleCount),
             TdmThreadCount = Math.Max(0, runtime.TdmThreadCount),
@@ -359,7 +362,7 @@ public sealed class ObservabilityStore
         return dependencyState;
     }
 
-    private static IReadOnlyList<ObservabilityIncident> BuildIncidents(DiagnosticReport report)
+    private static (IReadOnlyList<ObservabilityIncident> Items, int Dropped) BuildIncidents(DiagnosticReport report)
     {
         var incidents = report.Eventos
             .Where(DiagnosticEventCatalog.IsFunctionalIncident)
@@ -384,20 +387,23 @@ public sealed class ObservabilityStore
                     IncidentSubject(e));
             })
             .ToList();
-        return CollapseBursts(ObservabilityIncidentPolicy.Normalize(incidents)
+        // D#13: el tope de 120 descartaba los más antiguos en silencio; se declara cuántos.
+        var collapsed = CollapseBursts(ObservabilityIncidentPolicy.Normalize(incidents)
             .OrderBy(x => x.Timestamp)
-            .ToList())
-            .TakeLast(120)
-            .ToList();
+            .ToList());
+        var kept = collapsed.TakeLast(120).ToList();
+        return (kept, collapsed.Count - kept.Count);
     }
 
     private static IReadOnlyList<ObservabilityIncident> CollapseBursts(IReadOnlyList<ObservabilityIncident> ordered)
     {
-        // P09: colapsa ráfagas del mismo (Kind, Componente) con hueco ≤60 s en un solo incidente:
-        // conserva el más reciente, la severidad máxima y el conteo en el resumen. Sin esto, una
-        // ráfaga (p. ej. RDP CoreTS con N eventos/segundo) genera N incidentes y TakeLast(120)
-        // descarta historial útil. La clave del Ledger (nodo|componente|kind) no usa el resumen.
+        // P09/D#7: colapsa ráfagas del mismo (Kind, Componente) con hueco ≤60 s en un solo incidente:
+        // conserva el más reciente, la severidad máxima, el conteo y el span REAL en el resumen
+        // (el encadenamiento por huecos puede abarcar minutos; el viejo rótulo "/60s" mentía).
+        // Sin esto, una ráfaga (p. ej. RDP CoreTS con N eventos/segundo) genera N incidentes y
+        // TakeLast(120) descarta historial útil. La clave del Ledger (nodo|componente|kind) no usa el resumen.
         var output = new List<ObservabilityIncident>();
+        var burstStart = DateTimeOffset.MinValue;
         foreach (var item in ordered)
         {
             var last = output.Count == 0 ? null : output[^1];
@@ -413,27 +419,60 @@ public sealed class ObservabilityStore
                 {
                     Timestamp = item.Timestamp,
                     Severity = MaxBurstSeverity(last.Severity, item.Severity),
-                    Summary = $"{StripBurstSuffix(item.Summary)} (ráfaga ×{count}/60s)",
+                    Summary = $"{StripBurstSuffix(item.Summary)} (ráfaga ×{count} en {BurstSpanLabel(item.Timestamp - burstStart)})",
                     EvidenceId = item.EvidenceId,
-                    Subject = item.Subject ?? last.Subject
+                    Subject = MergeBurstSubject(last.Subject, item.Subject)
                 };
             }
-            else output.Add(item);
+            else
+            {
+                output.Add(item);
+                burstStart = item.Timestamp;
+            }
         }
         return output;
+    }
+
+    private static string BurstSpanLabel(TimeSpan span)
+        => span < TimeSpan.FromSeconds(60)
+            ? $"{Math.Max(0, (int)span.TotalSeconds)} s"
+            : $"{span.TotalMinutes:0.#} min";
+
+    private static string? MergeBurstSubject(string? first, string? second)
+    {
+        // D#7: heredar sólo el Subject del último perdía las identidades previas de la ráfaga.
+        // Une los distintos en orden de llegada y acota con marcador de ocultos exacto.
+        var names = new List<string>();
+        var hidden = 0;
+        foreach (var raw in new[] { first, second })
+        {
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            var value = raw.Trim();
+            var marker = Regex.Match(value, @"\s*\(\+(?<n>\d+) más\)$", RegexOptions.CultureInvariant);
+            if (marker.Success)
+            {
+                if (int.TryParse(marker.Groups["n"].Value, out var n)) hidden += n;
+                value = value[..marker.Index].TrimEnd();
+            }
+            foreach (var name in value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                if (!names.Contains(name, StringComparer.OrdinalIgnoreCase)) names.Add(name);
+        }
+        if (names.Count == 0) return hidden > 0 ? $"(+{hidden} más)" : null;
+        if (names.Count <= BurstSubjectLimit) return $"{string.Join(", ", names)}{(hidden > 0 ? $" (+{hidden} más)" : string.Empty)}";
+        return $"{string.Join(", ", names.Take(BurstSubjectLimit))} (+{names.Count - BurstSubjectLimit + hidden} más)";
     }
 
     private static int BurstCount(string? summary)
     {
         if (string.IsNullOrWhiteSpace(summary)) return 1;
-        var match = Regex.Match(summary, @"\(ráfaga ×(\d+)/60s\)\s*$", RegexOptions.CultureInvariant);
+        var match = Regex.Match(summary, @"\(ráfaga ×(\d+)(?:/60s| en [^)]+)\)\s*$", RegexOptions.CultureInvariant);
         return match.Success && int.TryParse(match.Groups[1].Value, out var n) && n >= 1 ? n : 1;
     }
 
     private static string StripBurstSuffix(string? summary)
         => string.IsNullOrWhiteSpace(summary)
             ? string.Empty
-            : Regex.Replace(summary, @"\s*\(ráfaga ×\d+/60s\)\s*$", string.Empty, RegexOptions.CultureInvariant).Trim();
+            : Regex.Replace(summary, @"\s*\(ráfaga ×\d+(?:/60s| en [^)]+)\)\s*$", string.Empty, RegexOptions.CultureInvariant).Trim();
 
     private static int BurstSeverityRank(string? value) => value?.Trim().ToLowerInvariant() switch
     {

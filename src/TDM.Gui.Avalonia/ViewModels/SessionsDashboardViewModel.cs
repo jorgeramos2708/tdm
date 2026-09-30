@@ -49,9 +49,16 @@ public partial class SessionsDashboardViewModel : ObservableObject
             .Select(ToRow)
             .ToList();
         SessionIncidents = _sessionRows.Take(30).ToList();
-        TruncationNotice = _sessionRows.Count > 30
-            ? $"Mostrando 30 de {_sessionRows.Count} incidencias de sesión en la ventana; el detalle y el informe conservan el conjunto completo."
-            : string.Empty;
+        var sourceDropped = DashboardRules.DroppedIncidents(samples);
+        TruncationNotice = string.Join(" ", new[]
+        {
+            _sessionRows.Count > 30
+                ? $"Mostrando 30 de {_sessionRows.Count} incidencias de sesión en la ventana; el detalle y el informe conservan el conjunto completo."
+                : string.Empty,
+            sourceDropped > 0
+                ? $"Se descartaron {sourceDropped} incidente(s) en el origen (tope de 120 por muestra); el informe conserva la evidencia completa."
+                : string.Empty
+        }.Where(x => x.Length > 0));
         _sessionsFullDetail = BuildSessionsDetail(sessionSource, sessionsEvaluated);
         RefreshVisibleDetail();
     }

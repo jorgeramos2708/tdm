@@ -33,6 +33,9 @@ internal static class DashboardRules
             .OrderByDescending(x => x.Timestamp)
             .ToList();
 
+    public static int DroppedIncidents(IReadOnlyList<ObservabilitySample> samples)
+        => samples.Sum(s => Math.Max(0, s.IncidentsDropped));
+
     private static string DisplayIncidentKey(ObservabilityIncident incident)
     {
         var rawKey = $"incident|LOCAL|{incident.Component}|{incident.Kind}";

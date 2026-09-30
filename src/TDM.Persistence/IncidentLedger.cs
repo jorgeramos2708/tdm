@@ -94,26 +94,9 @@ foreach (var item in ObservabilityIncidentPolicy.Normalize(observed).OrderBy(x =
                         .FirstOrDefault(x => item.Timestamp - x.LastSeenAt <= cooldown)
                     : null;
 
-                // P1-02: Kind inmutable - si el Kind cambia, NO reutilizar el incidente existente.
-                // Esto evita contaminar VerifiedHistory con un Id que ahora representa otro tipo de fallo.
-                // Si el Kind cambió, forzar creación de nuevo incidente (candidate = null).
-                if (candidate is null && settings.EnableIncidentAntiNoise)
-                {
-                    var fallbackCandidate = existing.Values
-                        .Where(x => x.Node.Equals(node, StringComparison.OrdinalIgnoreCase)
-                                 && x.Component.Equals(item.Component, StringComparison.OrdinalIgnoreCase)
-                                 && x.State is ManagedIncidentState.Active or ManagedIncidentState.Persistent)
-                        .OrderByDescending(x => x.LastSeenAt)
-                        .FirstOrDefault(x => item.Timestamp - x.LastSeenAt <= cooldown);
-                    
-                    // Solo usar fallback si el Kind NO cambió
-                    if (fallbackCandidate is not null && fallbackCandidate.Kind.Equals(item.Kind, StringComparison.OrdinalIgnoreCase))
-                    {
-                        candidate = fallbackCandidate;
-                    }
-                    // Si el Kind cambió, candidate queda null y se creará nuevo incidente
-                }
-
+                // P1-02: Kind inmutable - la búsqueda primaria filtra por Kind, de modo que si el
+                // Kind cambió no hay candidato y se crea un incidente nuevo. Esto evita contaminar
+                // VerifiedHistory con un Id que ahora representa otro tipo de fallo.
                 if (candidate is null)
                 {
                     candidate = new ManagedIncident(id, item.Timestamp, item.Timestamp, null, null,
@@ -125,7 +108,7 @@ foreach (var item in ObservabilityIncidentPolicy.Normalize(observed).OrderBy(x =
                     candidate = candidate with
                     {
                         LastSeenAt = item.Timestamp,
-                        State = candidate.Occurrences >= 1 ? ManagedIncidentState.Persistent : ManagedIncidentState.Active,
+                        State = ManagedIncidentState.Persistent,
                         Severity = MaxSeverity(candidate.Severity, item.Severity),
                         Summary = item.Summary,
                         Classification = item.Classification ?? candidate.Classification,
