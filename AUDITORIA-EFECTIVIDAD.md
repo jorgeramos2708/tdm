@@ -1,8 +1,8 @@
 # Auditoría general de efectividad — cadena completa
 
-**Versión auditada**: TDM v1.0-rc18.21.0-FIX93, tras Fase 10 (`80fe6d4`).
+**Versión auditada**: TDM v1.0-rc18.21.0-FIX93, tras Fase 11 (`5894fc1`).
 **Método**: 4 agentes de exploración (~50 hallazgos) sobre monitoreo → transiciones → detección → agrupación → correlación → ranking → causa raíz → impacto → dependencias → eventos → logs → configuración → consistencia → GUI; verificación manual de los hallazgos más graves (marcados ✅) y re-verificación de los hallazgos conocidos abiertos de la auditoría previa.
-**Gates vigentes**: build 0/0 · ProductionTests 111/111 · ParityTests 45/45 · VERIFY 7/7 · publish 138927303.
+**Gates vigentes**: build 0/0 · ProductionTests 117/117 · ParityTests 45/45 · VERIFY 7/7 · publish 138939591.
 
 ## 1. Monitoreo real (colectores/cadencia)
 
@@ -35,7 +35,7 @@
 ## 4. Detección — logs Windows/TSplus
 
 - **Media ✅**: `TsplusLogParser` clasifica sólo con tokens en inglés (`fatal/error/...`, sin "falló/denegado/no se pudo") y descarta todo lo `Informativo` (`TsplusLogParser.cs:9-19,42`) → logs en español generan casi nada — **corregido en Fase 10** (tokens/prefijos/regex en español + resúmenes sanos, `TsplusLogParser.cs:9-21,81-102,107-128`).
-- Baja: UTF-16 sin BOM no detectado en el incremental (`IncrementalTsplusLogCollector.cs:479-480`); fallback cultural `es-MX` (`TsplusLogParser.cs:226`).
+- Baja: UTF-16 sin BOM no detectado en el incremental (`IncrementalTsplusLogCollector.cs:479-480`); fallback cultural `es-MX` (`TsplusLogParser.cs:226`) — **corregido en Fase 11** (paridad de bytes por pares sobre 32 bytes con comentario `D#UTF16`; formatos invariantes generados + `SplitTimestampOffset` para `Z`/`±HH:MM`, sin `es-MX` ni `GetCultureInfo`).
 
 ## 5. Configuración TSplus
 
@@ -49,7 +49,7 @@
 | Media | **Dos universos sin puente**: la GUI jamás lee `report.Incidentes` (HTML/narrativo sí) — métricas incompatibles sin explicación | D#5 |
 | Media | Señales de incidente no se recortan a `PeriodoAnalizado` (amplificado por candidatos con `IncidentTime=null`) | `IncidentClusterAnalyzer.cs:85-91` ✅ |
 | Media | Contrato de severidad ledger vs clusters divergente (B#16); sólo el logon-failure más antiguo genera candidato (B#23) | B#16,23 |
-| Baja | IDs posicionales `INC-GRP-NNN` cambian de significado entre ejecuciones (D#6); ráfaga etiquetada `/60s` abarca minutos y hereda `Subject` del último (D#7); `TakeLast(120)` sin aviso en los 3 dashboards (D#13); ramas muertas en `IncidentLedger` (D#8) | D#6-8,13 |
+| Baja | IDs posicionales `INC-GRP-NNN` cambian de significado entre ejecuciones (D#6); ráfaga etiquetada `/60s` abarca minutos y hereda `Subject` del último (D#7); `TakeLast(120)` sin aviso en los 3 dashboards (D#13); ramas muertas en `IncidentLedger` (D#8) — **corregido en Fase 11** (D#6 IDs content-derived con `SHA256(dominio|identidad|timestamp)`, D#7 span real + `MergeBurstSubject` con tope 6 y regex de legado, D#13 `ObservabilitySample.IncidentsDropped` + `DashboardRules.DroppedIncidents` en los 3 paneles, D#8 bloque muerto eliminado y constante `Persistent`) | D#6-8,13 |
 
 ## 7. Correlación → ranking → causa raíz
 
@@ -101,4 +101,4 @@
 - **P0 ✅ cerrado en Fase 8 (`085e799`)**: filtro del canal Security (§3 Alta) · start-mode antes de `Critico` en TSplus ligero (§1 H2) · gating sintomático+ventana en candidatos Windows estáticos (§7 Alta) · dreno del push collector (§1 Alta) · paridad GUI pre-record + margen −15 min + raíz de feedback (§10).
 - **P1 ✅ cerrado en Fase 9 (`85a64c8`)**: `requiredNow` unificado (`WindowsServiceCatalog.RequiredNow`/`StoppedSeverity` + depth≥1 con modo de inicio) · dos universos de incidentes (puente en `BuildSummary` + rótulo de alcance operativo en los dashboards) · contadores GUI CRÍTICOS/ERRORES sólo sobre hallazgos · dedup de transiciones (tolerancia 10 min + guardia de inversión intermedia) · recorte a `PeriodoAnalizado` en clusters y RCA (`DiagnosticTimeWindow.IsEventInside`; fallback histórico AD intacto) · `N/D` del grafo SCM (respaldo `Servicio origen`) y verde de "No evaluado" → `warn` · pies vs `Take()` (pie con el número real de ocultas sobre 120/60) · baseline fallida no persistida (`SCM_GRAPH_BASELINE_STALE`).
 - **P2 ✅ cerrado en Fase 10 (`80fe6d4`)**: parser de logs en español (`TsplusLogParser` tokens/prefijos/regex + `ClassifyType`) · telemetría de snapshot corrupto (`CorruptSnapshotReadCount`/`LastCorruptSnapshotPath` + `Trace.TraceWarning` + `LocalStoreStatus.CorruptSnapshotReads` + `RetentionState`) · `ConfigurationHistory` multi-generación (historial/generación/podado reales) · umbrales conectados a más paneles (`General`/`MultiServer`/`Preventive` desde `CurrentThresholds`) · secciones `SERVICE_STATE`+procesos en HTML (tabla en "Salud y dependencias" + tarjeta "Procesos afectados") · avisos de truncado en GUI (`TruncationNotice` + detalle de sesiones a 30) · canal `diagnostic-avalonia` en lecturas.
-- **P3**: bajos (IDs posicionales, `/60s`, ledger, `TakeLast(120)`, `es-MX`, UTF-16).
+- **P3 ✅ cerrado en Fase 11 (`5894fc1`)**: IDs de clúster content-derived (`INC-GRP-` + 8 hex de `SHA256(dominio|identidad|primer timestamp)`, sin posición) · ráfaga con span real (`(ráfaga ×N en 45 s|2.5 min)`) y `Subject` unido con tope 6 + `(+N más)` (regex acepta legado `/60s`) · aviso de `TakeLast(120)` (`ObservabilitySample.IncidentsDropped` + `DashboardRules.DroppedIncidents` en Incidentes, Sesiones y Soporte, detalle y axaml) · ramas muertas de `IncidentLedger` (bloque `fallbackCandidate` irrecorrible + constante `ManagedIncidentState.Persistent`) · parser sin `es-MX` (180 formatos invariantes generados, `SplitTimestampOffset` para `Z`/`±HH:MM`, ambigüedad exige ventana) · UTF-16 sin BOM (paridad por pares sobre 32 bytes). 6 tests nuevos (117/117) + `GuiDashboardsDeclareTruncatedRows` extendido (45/45).
