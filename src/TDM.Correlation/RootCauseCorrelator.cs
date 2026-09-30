@@ -1,3 +1,4 @@
+using TDM.Core;
 using TDM.KnowledgeBase;
 using TDM.Models;
 
@@ -95,6 +96,7 @@ public static partial class RootCauseCorrelator
         var states = report.Eventos
             .Where(e => e.Tipo.Equals("SERVICE_STATE", StringComparison.OrdinalIgnoreCase))
             .Where(e => e.Timestamp.HasValue)
+            .Where(e => DiagnosticTimeWindow.IsEventInside(report, e.Timestamp!.Value))
             .Where(e => e.Severidad is DiagnosticSeverity.Error or DiagnosticSeverity.Critico)
             .Where(e => e.Producto == TsplusProduct.RemoteAccess)
             .Where(e => string.Equals(EvidenceValue(e, "Estado"), "Stopped", StringComparison.OrdinalIgnoreCase)
@@ -198,6 +200,7 @@ public static partial class RootCauseCorrelator
     private static List<DiagnosticEvent> Relevant(DiagnosticReport report, DiagnosticLayer layer) =>
         report.Eventos
             .Where(e => e.Capa == layer && e.Timestamp.HasValue && e.Severidad != DiagnosticSeverity.Informativo)
+            .Where(e => DiagnosticTimeWindow.IsEventInside(report, e.Timestamp!.Value))
             // Fallas de lectura/estado de TDM son huecos o contexto de dependencia, no síntomas
             // del componente auditado. Las dependencias funcionales TSplus -> Windows se consumen
             // mediante reglas específicas y nunca se autocorrelacionan como "error TSplus/RDP".

@@ -3,6 +3,8 @@
              x:Class="TDM.Gui.Avalonia.Views.IncidentsDashboardView">
   <StackPanel Spacing="12">
     <TextBlock Text="INCIDENTES" FontSize="24" FontWeight="SemiBold" Foreground="#39D0FF" />
+    <TextBlock Text="Ámbito: incidentes operativos de la ventana de monitoreo continuo. Los incidentes agrupados del informe de diagnóstico se muestran en el resumen del workspace."
+               Classes="muted" FontSize="12" TextWrapping="Wrap" />
     <Border Classes="metric-strip">
       <Grid ColumnDefinitions="*,*,*,*">
         <Border Grid.Column="0" Classes="metric-cell"><StackPanel><TextBlock Classes="section-title" Text="TOTAL"/><TextBlock Text="{Binding Total}" FontSize="30" TextWrapping="Wrap"/></StackPanel></Border>

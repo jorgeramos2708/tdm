@@ -13,6 +13,15 @@ public static class DiagnosticTimeWindow
         "Fecha", "Último registro", "Hora del incidente", "Primer evento", "Último evento"
     ];
 
+    /// <summary>
+    /// Regla única para decidir si un evento fechado pertenece al periodo analizado del
+    /// reporte. Si el periodo no está declarado, el evento se conserva. Los eventos sin
+    /// timestamp se evalúan fuera de esta regla.
+    /// </summary>
+    public static bool IsEventInside(DiagnosticReport report, DateTimeOffset timestamp)
+        => (report.PeriodoAnalizadoInicio == default || timestamp >= report.PeriodoAnalizadoInicio)
+           && (report.PeriodoAnalizadoFin == default || timestamp <= report.PeriodoAnalizadoFin);
+
     public static bool IsFindingInside(DiagnosticFinding finding, DateTimeOffset start, DateTimeOffset end)
     {
         var timestamps = finding.Evidencia

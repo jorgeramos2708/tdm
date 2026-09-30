@@ -59,7 +59,7 @@
           <Grid ColumnDefinitions="*,Auto,24,Auto">
             <StackPanel>
               <TextBlock Classes="section-title" Text="INCIDENTES" />
-              <TextBlock Text="Ventana de investigación actual" Classes="kpi-caption" Margin="0,4,0,0" />
+              <TextBlock Text="Incidentes operativos · ventana de monitoreo (no son los incidentes agrupados del informe)" Classes="kpi-caption" Margin="0,4,0,0" TextWrapping="Wrap" />
               <Button Classes="detail" Content="Ver detalle" Command="{Binding ShowIncidentsDetailCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" />
             </StackPanel>
             <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center">

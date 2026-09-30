@@ -851,6 +851,46 @@ internal static class Program
                 "El hilo principal no corre con InvariantCulture.");
         });
 
+        Run("GuiSummaryBridgesReportUniverse", () =>
+        {
+            var snapshot = new SystemSnapshot(
+                "EQUIPO-PRUEBA", "Windows", "11", "22631", "x64", TimeSpan.FromHours(4), now,
+                TsplusDetectado: true, TsplusRuta: null, TsplusVersion: "prueba");
+            var report = new DiagnosticReport(snapshot, [], [], now.AddSeconds(-1), now);
+            var text = DiagnosticWorkspaceViewModel.BuildSummary(report);
+            True(text.Contains("Incidentes agrupados: 0 | Candidatos: 0 | Patrones: 0", StringComparison.Ordinal),
+                "El resumen de la GUI no puentea los conteos del universo de incidentes del informe.");
+        });
+
+        Run("GuiCriticalErrorCountsUseCuratedFindingsOnly", () =>
+        {
+            var snapshot = new SystemSnapshot(
+                "EQUIPO-PRUEBA", "Windows", "11", "22631", "x64", TimeSpan.FromHours(4), now,
+                TsplusDetectado: true, TsplusRuta: null, TsplusVersion: "prueba");
+            var critEvent = new DiagnosticEvent(now, "SRC", "Componente", DiagnosticLayer.Windows,
+                DiagnosticSeverity.Critico, "TEST_CRITICAL_EVENT", "evento crudo crítico");
+            var errFinding = new DiagnosticFinding("F-ERR", "Componente", DiagnosticSeverity.Error,
+                "hallazgo curado de error", "detalle", []);
+            var vm = new DiagnosticWorkspaceViewModel();
+            vm.ApplyReport(new DiagnosticReport(snapshot, [errFinding], [critEvent], now.AddSeconds(-1), now));
+            Equal(0, vm.CriticalCount);
+            Equal(1, vm.ErrorCount);
+        });
+
+        Run("GuiDashboardsLabelOperationalIncidentScope", () =>
+        {
+            var root = FindRepoRoot();
+            True(root is not null, "No se localizó TDM.sln; gate de rótulos de dashboard no ejecutable.");
+            var incidents = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "Views", "IncidentsDashboardView.axaml"));
+            True(incidents.Contains("incidentes operativos de la ventana de monitoreo", StringComparison.OrdinalIgnoreCase),
+                "El panel de incidentes no aclara que muestra el universo operativo de monitoreo.");
+            var support = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "Views", "SupportDashboardView.axaml"));
+            True(support.Contains("Incidentes operativos", StringComparison.Ordinal),
+                "El centro de soporte no rotula sus contadores como incidentes operativos.");
+            True(support.Contains("incidentes agrupados del informe", StringComparison.OrdinalIgnoreCase),
+                "El centro de soporte no distingue su universo de los incidentes agrupados del informe.");
+        });
+
         try { if (Directory.Exists(stateRoot)) Directory.Delete(stateRoot, recursive: true); } catch { }
 
         Console.WriteLine();
@@ -872,5 +912,16 @@ internal static class Program
     private static void True(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private static string? FindRepoRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "TDM.sln"))) return directory.FullName;
+            directory = directory.Parent;
+        }
+        return null;
     }
 }

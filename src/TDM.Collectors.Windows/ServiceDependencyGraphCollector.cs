@@ -121,7 +121,9 @@ public sealed class ServiceDependencyGraphCollector : IReadOnlyCollector
             var catalog = WindowsServiceCatalog.Find(serviceName);
             var complementary = product is TsplusProduct.AdvancedSecurity or TsplusProduct.ServerMonitoring or TsplusProduct.RemoteSupport or TsplusProduct.TwoFactorAuthentication;
             var startMode = WindowsServiceCatalog.ReadStartMode(serviceName);
-            var requiredNow = (catalog?.RequiredWhenTsplus == true && context.Sistema.TsplusDetectado) || (tsplus && !complementary);
+            var autoStart = startMode.Equals("Automático", StringComparison.OrdinalIgnoreCase);
+            var requiredNow = WindowsServiceCatalog.RequiredNow(
+                catalog?.RequiredWhenTsplus == true, context.Sistema.TsplusDetectado, tsplus, complementary, autoStart);
             var presentationState = WindowsServiceCatalog.PresentationState(status, startMode, requiredNow);
             // El grafo no redefine la semántica del estado: usa exactamente la misma
             // política que WindowsServiceCollector. Un servicio TSplus Manual/Trigger
@@ -130,7 +132,7 @@ public sealed class ServiceDependencyGraphCollector : IReadOnlyCollector
 
             events.Add(new DiagnosticEvent(
                 DateTimeOffset.Now, "Service Control Manager", display, layer,
-                serviceWarning ? (requiredNow ? DiagnosticSeverity.Critico : DiagnosticSeverity.Advertencia) : DiagnosticSeverity.Informativo,
+                serviceWarning ? WindowsServiceCatalog.StoppedSeverity(catalog?.RequiredWhenTsplus == true, requiredNow) : DiagnosticSeverity.Informativo,
                 "SERVICE_STATE", $"Estado actual: {status}",
                 Evidencia:
                 [
@@ -205,7 +207,7 @@ public sealed class ServiceDependencyGraphCollector : IReadOnlyCollector
                     ], Producto: product));
             }
 
-            TraverseDependencies(serviceName, 0, seen, events, coverage, ct);
+            TraverseDependencies(serviceName, 0, seen, events, coverage, context, ct);
             coverage.Add(new EvidenceItem(serviceName, $"{status}; dependencias={dependencies.Count}; dependientes={dependents.Count}"));
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.TimeoutException)
@@ -214,7 +216,7 @@ public sealed class ServiceDependencyGraphCollector : IReadOnlyCollector
         }
     }
 
-    private static void TraverseDependencies(string root, int depth, HashSet<string> seen, List<DiagnosticEvent> events, List<EvidenceItem> coverage, CancellationToken ct)
+    private static void TraverseDependencies(string root, int depth, HashSet<string> seen, List<DiagnosticEvent> events, List<EvidenceItem> coverage, DiagnosticContext context, CancellationToken ct)
     {
         if (depth >= MaxDepth)
         {
@@ -256,11 +258,24 @@ public sealed class ServiceDependencyGraphCollector : IReadOnlyCollector
             var state = ReadStatus(dep);
             var rootState = ReadStatus(root);
             if (!state.HasValue) coverage.Add(new EvidenceItem($"{root} → {dep}", "No evaluado: estado de dependencia no legible"));
+            var depStartMode = WindowsServiceCatalog.ReadStartMode(dep);
+            var depTsplus = TsplusServiceClassifier.IsRelatedIncludingImagePath(dep, dep, out var depImagePath);
+            var depProduct = depTsplus ? TsplusServiceClassifier.Classify(dep, dep, depImagePath) : TsplusProduct.Ninguno;
+            var depComplementary = depProduct is TsplusProduct.AdvancedSecurity or TsplusProduct.ServerMonitoring or TsplusProduct.RemoteSupport or TsplusProduct.TwoFactorAuthentication;
+            var depCatalog = WindowsServiceCatalog.Find(dep);
+            var depRequiredNow = WindowsServiceCatalog.RequiredNow(
+                depCatalog?.RequiredWhenTsplus == true, context.Sistema.TsplusDetectado, depTsplus, depComplementary,
+                depStartMode.Equals("Automático", StringComparison.OrdinalIgnoreCase));
+            var depSeverity = !state.HasValue
+                ? DiagnosticSeverity.Advertencia
+                : WindowsServiceCatalog.ShouldWarnWhenStopped(state.Value, depStartMode, depRequiredNow)
+                    ? WindowsServiceCatalog.StoppedSeverity(depCatalog?.RequiredWhenTsplus == true, depRequiredNow)
+                    : DiagnosticSeverity.Informativo;
             events.Add(new DiagnosticEvent(DateTimeOffset.Now, "Service Control Manager", $"{root} → {dep}",
-                DiagnosticLayer.Windows, state == ServiceControllerStatus.Running ? DiagnosticSeverity.Informativo : DiagnosticSeverity.Advertencia,
+                DiagnosticLayer.Windows, depSeverity,
                 "SERVICE_DEPENDENCY_STATE", $"Dependencia SCM nivel {depth + 1}: {dep} = {state?.ToString() ?? "NO EVALUADO"}.",
                 Evidencia: [new EvidenceItem("Servicio origen", root), new EvidenceItem("Estado servicio", rootState?.ToString() ?? "No evaluado"), new EvidenceItem("Dependencia", dep), new EvidenceItem("Profundidad", (depth + 1).ToString()), new EvidenceItem("Estado", state?.ToString() ?? "No evaluado")]));
-            TraverseDependencies(dep, depth + 1, seen, events, coverage, ct);
+            TraverseDependencies(dep, depth + 1, seen, events, coverage, context, ct);
             if (seen.Count >= MaxServices) break;
         }
     }

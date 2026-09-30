@@ -28,8 +28,8 @@ public sealed class WindowsServiceCollector : IReadOnlyCollector
                 var catalog = WindowsServiceCatalog.Find(name);
                 var startMode = WindowsServiceCatalog.ReadStartMode(name);
                 var autoStart = startMode.Equals("Automático", StringComparison.OrdinalIgnoreCase);
-                var requiredNow = (catalog?.RequiredWhenTsplus == true && context.Sistema.TsplusDetectado)
-                                  || (tsplusRelated && !complementary && autoStart);
+                var requiredNow = WindowsServiceCatalog.RequiredNow(
+                    catalog?.RequiredWhenTsplus == true, context.Sistema.TsplusDetectado, tsplusRelated, complementary, autoStart);
                 var presentationState = WindowsServiceCatalog.PresentationState(status, startMode, requiredNow);
                 var layer = name.Equals("TermService", StringComparison.OrdinalIgnoreCase) ||
                             name.Equals("UmRdpService", StringComparison.OrdinalIgnoreCase) ||
@@ -42,9 +42,7 @@ public sealed class WindowsServiceCollector : IReadOnlyCollector
                     : tsplusRelated ? DiagnosticLayer.Tsplus : catalog?.Area == "Red" ? DiagnosticLayer.Red : DiagnosticLayer.Windows;
 
                 var shouldWarn = WindowsServiceCatalog.ShouldWarnWhenStopped(status, startMode, requiredNow);
-                var stoppedSeverity = catalog?.RequiredWhenTsplus == true && requiredNow
-                    ? DiagnosticSeverity.Critico
-                    : DiagnosticSeverity.Advertencia;
+                var stoppedSeverity = WindowsServiceCatalog.StoppedSeverity(catalog?.RequiredWhenTsplus == true, requiredNow);
                 events.Add(new DiagnosticEvent(
                     DateTimeOffset.Now,
                     "Service Control Manager",

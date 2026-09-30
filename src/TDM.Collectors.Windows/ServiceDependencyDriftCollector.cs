@@ -51,6 +51,7 @@ public sealed class ServiceDependencyDriftCollector : IReadOnlyCollector
 
         var currentNodes = new Dictionary<string, ServiceNode>(StringComparer.OrdinalIgnoreCase);
         var coverage = new List<EvidenceItem>();
+        var readsFailed = false;
 
         try
         {
@@ -65,8 +66,11 @@ public sealed class ServiceDependencyDriftCollector : IReadOnlyCollector
                 var sc = new ServiceController(target.ServiceName);
                 var display = SafeDisplayName(sc);
                 var status = sc.Status;
-                var deps = ReadNames(() => sc.ServicesDependedOn).Names;
-                var dependents = ReadNames(() => sc.DependentServices).Names;
+                var dependencyRead = ReadNames(() => sc.ServicesDependedOn);
+                var dependentRead = ReadNames(() => sc.DependentServices);
+                if (!dependencyRead.Available || !dependentRead.Available) readsFailed = true;
+                var deps = dependencyRead.Names;
+                var dependents = dependentRead.Names;
                 var tsplus = TsplusServiceClassifier.IsRelatedIncludingImagePath(target.ServiceName, SafeDisplayName(target), out _);
                 var layer = target.ServiceName.Equals("TermService", StringComparison.OrdinalIgnoreCase) ||
                             target.ServiceName.Equals("UmRdpService", StringComparison.OrdinalIgnoreCase) ||
@@ -81,7 +85,22 @@ public sealed class ServiceDependencyDriftCollector : IReadOnlyCollector
                 var startMode = WindowsServiceCatalog.ReadStartMode(target.ServiceName);
                 currentNodes[target.ServiceName] = new ServiceNode(
                     SafeDisplayName(target), sc.Status, WindowsServiceCatalog.ReadStartMode(target.ServiceName),
-                    deps, ReadNames(() => sc.DependentServices).Names, target.ServiceName.StartsWith("TSplus", StringComparison.OrdinalIgnoreCase));
+                    deps, dependents, target.ServiceName.StartsWith("TSplus", StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (readsFailed)
+            {
+                events.Add(new DiagnosticEvent(
+                    DateTimeOffset.Now, "Service Control Manager", "Grafo SCM",
+                    DiagnosticLayer.Windows, DiagnosticSeverity.Advertencia, "SCM_GRAPH_BASELINE_STALE",
+                    "Una o más lecturas de dependencias fallaron; TDM conserva la línea base previa del grafo SCM sin actualizarla para no persistir listas vacías como si fueran reales.",
+                    Evidencia:
+                    [
+                        new EvidenceItem("Cobertura", "No evaluado"),
+                        new EvidenceItem("Nodos parciales", currentNodes.Count.ToString()),
+                        new EvidenceItem("Criterio", "La línea base sólo se actualiza con lecturas completas del SCM")
+                    ]));
+                return Task.FromResult(new CollectorResult(findings, events));
             }
 
             // Cargar baseline

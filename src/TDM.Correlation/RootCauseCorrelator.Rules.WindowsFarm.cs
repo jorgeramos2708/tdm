@@ -1,3 +1,4 @@
+using TDM.Core;
 using TDM.Models;
 
 namespace TDM.Correlation;
@@ -80,7 +81,7 @@ public static partial class RootCauseCorrelator
 
     private static DiagnosticEvent? RemoteSessionSymptom(DiagnosticReport report)
         => report.Eventos
-            .Where(e => e.Timestamp.HasValue)
+            .Where(e => e.Timestamp.HasValue && DiagnosticTimeWindow.IsEventInside(report, e.Timestamp!.Value))
             .Where(e => e.Tipo is "USER_LOGON_FAILURE" or "USER_NLA_PASSWORD_FAILURE"
                 or "KERBEROS_PREAUTH_FAILURE" or "WINDOWS_CREDENTIAL_VALIDATION_FAILURE"
                 || ((e.Capa == DiagnosticLayer.Rdp || e.Tipo.Equals("SERVICE_STATE", StringComparison.OrdinalIgnoreCase))

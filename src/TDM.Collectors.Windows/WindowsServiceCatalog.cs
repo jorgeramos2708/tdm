@@ -1,5 +1,6 @@
 using Microsoft.Win32;
 using System.ServiceProcess;
+using TDM.Models;
 
 namespace TDM.Collectors.Windows;
 
@@ -8,7 +9,7 @@ namespace TDM.Collectors.Windows;
 /// No pretende inventariar todos los servicios del sistema: concentra servicios con impacto
 /// directo o frecuente sobre sesión remota, autenticación, red, perfiles, impresión y tiempo.
 /// </summary>
-internal static class WindowsServiceCatalog
+public static class WindowsServiceCatalog
 {
     internal sealed record Target(string Name, string Area, bool RequiredWhenTsplus = false);
 
@@ -106,4 +107,20 @@ internal static class WindowsServiceCatalog
     internal static bool ShouldWarnWhenStopped(ServiceControllerStatus status, string startMode, bool requiredNow)
         => status != ServiceControllerStatus.Running &&
            (requiredNow || startMode.Equals("Automático", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Única regla de "requerido ahora" compartida por WindowsServiceCollector,
+    /// el grafo de dependencias y el recorrido a profundidad: un servicio TSplus
+    /// relacionado sólo se exige si no es complementario y su inicio es Automático.
+    /// </summary>
+    public static bool RequiredNow(bool catalogRequired, bool tsplusDetected, bool tsplusRelated, bool complementary, bool autoStart)
+        => (catalogRequired && tsplusDetected) || (tsplusRelated && !complementary && autoStart);
+
+    /// <summary>
+    /// Única regla de severidad de estado detenido: Crítico sólo cuando el catálogo
+    /// marca el servicio como requerido con TSplus y además está requerido ahora;
+    /// cualquier otro estado con advertencia se reporta como Advertencia.
+    /// </summary>
+    public static DiagnosticSeverity StoppedSeverity(bool catalogRequired, bool requiredNow)
+        => catalogRequired && requiredNow ? DiagnosticSeverity.Critico : DiagnosticSeverity.Advertencia;
 }

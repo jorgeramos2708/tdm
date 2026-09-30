@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using TDM.Core;
 using TDM.Models;
 
 namespace TDM.Correlation;
@@ -85,7 +86,7 @@ public static class IncidentClusterAnalyzer
     public static IReadOnlyList<DiagnosticIncidentCluster> Analyze(DiagnosticReport report)
     {
         var signals = report.Eventos
-            .Where(e => e.Timestamp.HasValue)
+            .Where(e => e.Timestamp.HasValue && DiagnosticTimeWindow.IsEventInside(report, e.Timestamp!.Value))
             .Where(IsIncidentSignal)
             .OrderBy(e => e.Timestamp)
             .ToList();

@@ -72,10 +72,10 @@ public static class StateReportIntegrator
 
             foreach (var transition in result.Transitions.Take(100))
             {
-                if (events.Any(e => SamePhysicalTransition(e, transition)))
-                    continue;
-                events.Add(new DiagnosticEvent(
-                    transition.Timestamp > anchor ? anchor : transition.Timestamp,
+            if (events.Any(e => SamePhysicalTransition(events, e, transition)))
+                continue;
+            events.Add(new DiagnosticEvent(
+                transition.Timestamp > anchor ? anchor : transition.Timestamp,
                     "TDM State Journal",
                     transition.Component,
                     ParseLayer(transition.Layer),
@@ -165,7 +165,7 @@ public static class StateReportIntegrator
             };
             // P05: dedup por cambio físico (timestamp+componente+anterior→actual) en cualquier
             // canal, no solo intra-tipo: service-monitor y forensic-monitor observan los mismos servicios.
-            if (events.Any(e => SamePhysicalTransition(e, transition)))
+            if (events.Any(e => SamePhysicalTransition(events, e, transition)))
                 continue;
             events.Add(new DiagnosticEvent(
                 transition.Timestamp,
@@ -223,7 +223,7 @@ public static class StateReportIntegrator
                     _ => "TDM_MONITOR_STATE_TRANSITION"
                 };
                 // P05: dedup cross-canal por cambio físico (ver SamePhysicalTransition).
-                if (events.Any(e => SamePhysicalTransition(e, transition)))
+                if (events.Any(e => SamePhysicalTransition(events, e, transition)))
                     continue;
 
                 var source = item.Channel switch
@@ -465,24 +465,57 @@ public static class StateReportIntegrator
         "TDM_INTEGRITY_STATE_TRANSITION"
     ];
 
+    private static readonly TimeSpan SamePhysicalTolerance = TimeSpan.FromMinutes(10);
+
     /// <summary>
     /// P05: dos eventos de transición de canales distintos representan el mismo cambio físico
     /// si coinciden timestamp, componente y valores anterior→actual. Evita duplicar en el
     /// historial un Running→Stopped visto por service-monitor y forensic-monitor.
     /// W2: el journal clampa el timestamp a `anchor` mientras el pre-record usa el CapturedAt
-    /// raw (difieren ms/s del mismo ciclo); se acepta |Δ|≤5 s. Un flapping real queda a ≥60 s
-    /// (cadencia de muestra), muy por encima de la tolerancia, así que no se colapsa.
+    /// raw (difieren ms/s del mismo ciclo); se acepta |Δ|≤10 min para no perder el mismo
+    /// cambio cuando los canales muestrean con distinta cadencia. Un ciclo distinto se
+    /// detecta por una transición opuesta intermedia (mismo componente, valores invertidos
+    /// y fechada estrictamente entre ambos): esa inversión marca un episodio nuevo y los dos
+    /// cambios no se colapsan.
     /// </summary>
-    private static bool SamePhysicalTransition(DiagnosticEvent existing, StateTransition transition)
+    private static bool SamePhysicalTransition(IReadOnlyList<DiagnosticEvent> events, DiagnosticEvent existing, StateTransition transition)
     {
         if (!MonitorTransitionTypes.Contains(existing.Tipo, StringComparer.OrdinalIgnoreCase)) return false;
         if (existing.Timestamp is not DateTimeOffset existingTs) return false;
-        if ((existingTs - transition.Timestamp).Duration() > TimeSpan.FromSeconds(5)) return false;
+        var delta = (existingTs - transition.Timestamp).Duration();
+        if (delta > SamePhysicalTolerance) return false;
         if (!existing.Componente.Equals(transition.Component, StringComparison.OrdinalIgnoreCase)) return false;
         var old = existing.Evidencia?.FirstOrDefault(e => e.Clave.Equals("Estado anterior", StringComparison.OrdinalIgnoreCase))?.Valor;
         var @new = existing.Evidencia?.FirstOrDefault(e => e.Clave.Equals("Estado actual", StringComparison.OrdinalIgnoreCase))?.Valor;
-        return string.Equals(old, transition.PreviousValue, StringComparison.Ordinal)
-            && string.Equals(@new, transition.CurrentValue, StringComparison.Ordinal);
+        if (!string.Equals(old, transition.PreviousValue, StringComparison.Ordinal) ||
+            !string.Equals(@new, transition.CurrentValue, StringComparison.Ordinal))
+            return false;
+        return !HasInterveningOppositeTransition(events, existingTs, transition.Timestamp, transition.Component,
+            transition.PreviousValue, transition.CurrentValue);
+    }
+
+    private static bool HasInterveningOppositeTransition(
+        IReadOnlyList<DiagnosticEvent> events,
+        DateTimeOffset left,
+        DateTimeOffset right,
+        string component,
+        string previousValue,
+        string currentValue)
+    {
+        var lo = left <= right ? left : right;
+        var hi = left <= right ? right : left;
+        foreach (var other in events)
+        {
+            if (!MonitorTransitionTypes.Contains(other.Tipo, StringComparer.OrdinalIgnoreCase)) continue;
+            if (other.Timestamp is not DateTimeOffset ts || ts <= lo || ts >= hi) continue;
+            if (!other.Componente.Equals(component, StringComparison.OrdinalIgnoreCase)) continue;
+            var old = other.Evidencia?.FirstOrDefault(e => e.Clave.Equals("Estado anterior", StringComparison.OrdinalIgnoreCase))?.Valor;
+            var @new = other.Evidencia?.FirstOrDefault(e => e.Clave.Equals("Estado actual", StringComparison.OrdinalIgnoreCase))?.Valor;
+            if (string.Equals(old, currentValue, StringComparison.Ordinal) &&
+                string.Equals(@new, previousValue, StringComparison.Ordinal))
+                return true;
+        }
+        return false;
     }
 
     private static DiagnosticLayer ParseLayer(string value)

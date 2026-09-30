@@ -886,20 +886,24 @@ public static async Task<ReportExportResult> ExportAsync(
         }
         if (scmDependencies.Count > 0 || scmDependents.Count > 0)
         {
+            var shownDependencies = scmDependencies.Where(IsRelevantDependencyRow).ToList();
+            var shownDependents = scmDependents.Where(IsRelevantDependencyRow).ToList();
             sb.Append("<h3>Relaciones reales del Service Control Manager</h3><table><tr><th>Servicio</th><th>Relación</th><th>Servicio relacionado</th><th>Estado</th></tr>");
-            foreach (var dep in scmDependencies.Where(IsRelevantDependencyRow).Take(120))
+            foreach (var dep in shownDependencies.Take(120))
             {
                 string V(string key) => dep.Evidencia?.FirstOrDefault(x => x.Clave == key)?.Valor ?? "N/D";
-                sb.Append($"<tr><td>{H(V("Servicio"))}</td><td>depende de</td><td>{H(V("Dependencia"))}</td><td>{H(V("Estado dependencia") != "N/D" ? V("Estado dependencia") : V("Estado"))}</td></tr>");
+                sb.Append($"<tr><td>{H(V("Servicio") != "N/D" ? V("Servicio") : V("Servicio origen"))}</td><td>depende de</td><td>{H(V("Dependencia"))}</td><td>{H(V("Estado dependencia") != "N/D" ? V("Estado dependencia") : V("Estado"))}</td></tr>");
             }
-            foreach (var dep in scmDependents.Where(IsRelevantDependencyRow).Take(60))
+            foreach (var dep in shownDependents.Take(60))
             {
                 string V(string key) => dep.Evidencia?.FirstOrDefault(x => x.Clave == key)?.Valor ?? "N/D";
                 sb.Append($"<tr><td>{H(V("Dependiente"))}</td><td>depende de</td><td>{H(V("Servicio"))}</td><td>{H(V("Estado dependiente"))}</td></tr>");
             }
             sb.Append("</table>");
-            if (scmDependencies.Count > 160 || scmDependents.Count > 80)
-                sb.Append($"<p class='muted'>La tabla muestra hasta 160 dependencias y 80 dependientes. El JSON conserva todas las relaciones recopiladas ({scmDependencies.Count + scmDependents.Count}).</p>");
+            var hiddenDependencies = Math.Max(0, shownDependencies.Count - 120);
+            var hiddenDependents = Math.Max(0, shownDependents.Count - 60);
+            if (hiddenDependencies > 0 || hiddenDependents > 0)
+                sb.Append($"<p class='muted'>La tabla muestra hasta 120 dependencias y 60 dependientes; {hiddenDependencies + hiddenDependents} relación(es) adicional(es) no visibles. El JSON conserva todas las relaciones recopiladas ({scmDependencies.Count + scmDependents.Count}).</p>");
         }
         sb.Append("</div>");
 
@@ -1220,7 +1224,7 @@ sb.Append("<div class='card'><h2>Hallazgos</h2>");
     {
         if (e.Producto == TsplusProduct.RemoteAccess) return true;
         string V(string key) => e.Evidencia?.FirstOrDefault(x => x.Clave.Equals(key, StringComparison.OrdinalIgnoreCase))?.Valor ?? string.Empty;
-        var text = $"{V("Servicio")} {V("Dependencia")} {V("Dependiente")} {e.Componente}";
+        var text = $"{V("Servicio")} {V("Servicio origen")} {V("Dependencia")} {V("Dependiente")} {e.Componente}";
         string[] markers = ["TSplus", "TermService", "Spooler", "RpcSs", "ProfSvc", "SessionEnv", "UmRdpService", "Netlogon", "W32Time", "Dnscache", "APSC", "HTML5", "WebPortal", "Remote Desktop"];
         return markers.Any(m => text.Contains(m, StringComparison.OrdinalIgnoreCase));
     }
@@ -1229,7 +1233,7 @@ sb.Append("<div class='card'><h2>Hallazgos</h2>");
     {
         var v = value ?? string.Empty;
         if (new[] { "Stopped", "Detenido", "No operativo", "Falla", "Failed", "Error", "No encontrado", "No disponible", "Missing", "Crítico", "Critico", "Critical", "Fatal" }.Any(x => v.Contains(x, StringComparison.OrdinalIgnoreCase))) return "critical";
-        if (new[] { "Unknown", "Desconoc", "Indeterminado", "Parcial", "Advertencia", "Ninguno identificado" }.Any(x => v.Contains(x, StringComparison.OrdinalIgnoreCase))) return "warn";
+        if (new[] { "Unknown", "Desconoc", "Indeterminado", "Parcial", "Advertencia", "Ninguno identificado", "No evaluado", "No identificado" }.Any(x => v.Contains(x, StringComparison.OrdinalIgnoreCase))) return "warn";
         return "ok";
     }
 

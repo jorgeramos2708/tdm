@@ -115,7 +115,15 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("ExportExecutiveCardsAndCountsAreCoherent", ExportExecutiveCardsAndCountsAreCoherent),
     ("NarrativeCountsTsplusFindingsAsInternalAnomalies", NarrativeCountsTsplusFindingsAsInternalAnomalies),
     ("SettingsLoadRepairsInvalidThresholdsPerGroup", SettingsLoadRepairsInvalidThresholdsPerGroup),
-    ("UnknownTsplusVersionStillReportsMissingSettingsJs", UnknownTsplusVersionStillReportsMissingSettingsJs)
+    ("UnknownTsplusVersionStillReportsMissingSettingsJs", UnknownTsplusVersionStillReportsMissingSettingsJs),
+    ("UnifiedServiceRequiredNowPolicyMatchesSeverity", UnifiedServiceRequiredNowPolicyMatchesSeverity),
+    ("StateTransitionDedupKeepsDistinctEpisodes", StateTransitionDedupKeepsDistinctEpisodes),
+    ("IncidentClustersClipToAnalyzedWindow", IncidentClustersClipToAnalyzedWindow),
+    ("StaleRemoteSymptomDoesNotConfirmCandidates", StaleRemoteSymptomDoesNotConfirmCandidates),
+    ("AnalysisWindowClipIsWiredAcrossRcaFeeds", AnalysisWindowClipIsWiredAcrossRcaFeeds),
+    ("ExportDependencyRowsShowOriginServiceAndWarnOnNotEvaluated", ExportDependencyRowsShowOriginServiceAndWarnOnNotEvaluated),
+    ("ExportFooterReportsHiddenDependencyRows", ExportFooterReportsHiddenDependencyRows),
+    ("ScmDriftBaselineSkipsFailedReads", ScmDriftBaselineSkipsFailedReads)
 };
 
 var failed = 0;
@@ -154,7 +162,7 @@ static Task ConcurrentIncidentsAreClusteredSeparately()
     var now = DateTimeOffset.Now;
     var web = new DiagnosticEvent(now, "SCM", "Web Portal Service", DiagnosticLayer.Tsplus, DiagnosticSeverity.Critico, "SERVICE_STATE", "Stopped", Evidencia: [new EvidenceItem("Servicio", "WebPortalService"), new EvidenceItem("Estado", "Stopped")], Producto: TsplusProduct.RemoteAccess);
     var ad = new DiagnosticEvent(now.AddSeconds(15), "Netlogon", "Active Directory", DiagnosticLayer.Windows, DiagnosticSeverity.Error, "WINDOWS_AD_DOMAIN_CONNECTIVITY_FAILURE", "Secure channel failed");
-    var report = Report([web, ad], now);
+    var report = Report([web, ad], now.AddSeconds(30));
     var clusters = IncidentClusterAnalyzer.Analyze(report);
     True(clusters.Count == 2, "Web/HTML5 y AD fueron mezclados en un solo incidente.");
     return Task.CompletedTask;
@@ -167,7 +175,7 @@ static Task SpanishUserEvidenceSplitsIdentityClusters()
         "WINDOWS_AD_DOMAIN_CONNECTIVITY_FAILURE", "Secure channel failed", Evidencia: [new EvidenceItem("Usuario", "alice")]);
     var bob = new DiagnosticEvent(now.AddSeconds(20), "Netlogon", "Active Directory", DiagnosticLayer.Windows, DiagnosticSeverity.Error,
         "WINDOWS_AD_DOMAIN_CONNECTIVITY_FAILURE", "Secure channel failed", Evidencia: [new EvidenceItem("Usuario", "bob")]);
-    var report = Report([alice, bob], now);
+    var report = Report([alice, bob], now.AddSeconds(30));
     var clusters = IncidentClusterAnalyzer.Analyze(report);
     True(clusters.Count == 2, "Dos identidades con evidencia 'Usuario' distinta se agruparon en un solo clúster.");
     return Task.CompletedTask;
@@ -2356,6 +2364,228 @@ static async Task UnknownTsplusVersionStillReportsMissingSettingsJs()
             "settings.js presente se reportó como ausente.");
     }
     finally { TryDelete(install); }
+}
+
+static Task UnifiedServiceRequiredNowPolicyMatchesSeverity()
+{
+    True(WindowsServiceCatalog.RequiredNow(true, true, false, false, false),
+        "El servicio requerido por catálogo con TSplus detectado dejó de estar requerido ahora.");
+    False(WindowsServiceCatalog.RequiredNow(true, false, false, false, false),
+        "Sin TSplus detectado un servicio de catálogo se declaró requerido ahora.");
+    True(WindowsServiceCatalog.RequiredNow(false, true, true, false, true),
+        "Un servicio TSplus relacionado Automático no complementario dejó de estar requerido ahora.");
+    False(WindowsServiceCatalog.RequiredNow(false, true, true, false, false),
+        "Un servicio TSplus relacionado Manual se declaró requerido ahora.");
+    False(WindowsServiceCatalog.RequiredNow(false, true, true, true, true),
+        "Un servicio TSplus complementario se declaró requerido ahora.");
+    Equal(DiagnosticSeverity.Critico, WindowsServiceCatalog.StoppedSeverity(true, true),
+        "Requerido por catálogo y requerido ahora dejó de ser Crítico.");
+    Equal(DiagnosticSeverity.Advertencia, WindowsServiceCatalog.StoppedSeverity(false, true),
+        "Sin requisito de catálogo el estado detenido escaló más allá de Advertencia.");
+    Equal(DiagnosticSeverity.Advertencia, WindowsServiceCatalog.StoppedSeverity(true, false),
+        "Requerido por catálogo pero no requerido ahora escaló a Crítico.");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de requiredNow no ejecutable.");
+    var collector = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsServiceCollector.cs"));
+    True(collector.Contains("WindowsServiceCatalog.RequiredNow(", StringComparison.Ordinal),
+        "El collector de servicios no usa la regla compartida RequiredNow.");
+    True(collector.Contains("WindowsServiceCatalog.StoppedSeverity(", StringComparison.Ordinal),
+        "El collector de servicios no usa la regla compartida de severidad detenida.");
+    var graph = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "ServiceDependencyGraphCollector.cs"));
+    True(graph.Contains("WindowsServiceCatalog.RequiredNow(", StringComparison.Ordinal),
+        "El grafo de dependencias no comparte la regla RequiredNow con el collector de servicios.");
+    True(graph.Contains("WindowsServiceCatalog.StoppedSeverity(", StringComparison.Ordinal),
+        "El grafo de dependencias no comparte la regla de severidad detenida.");
+    True(graph.Contains("ShouldWarnWhenStopped(state.Value, depStartMode, depRequiredNow)", StringComparison.Ordinal),
+        "La dependencia a profundidad no aplica el modo de inicio ni el requerido ahora de la dependencia.");
+    return Task.CompletedTask;
+}
+
+static Task StateTransitionDedupKeepsDistinctEpisodes()
+{
+    var now = DateTimeOffset.Now;
+    static DiagnosticEvent Transition(DateTimeOffset at, string component, string from, string to)
+        => new(at, "TDM Monitor Journal", component, DiagnosticLayer.Windows, DiagnosticSeverity.Informativo,
+            "TDM_MONITOR_STATE_TRANSITION", $"Cambio de estado observado por TDM: {from} → {to}",
+            Evidencia: [new EvidenceItem("Estado anterior", from), new EvidenceItem("Estado actual", to)]);
+
+    var stopped = Transition(now, "Web Portal Service", "Running", "Stopped");
+    var report = Report([stopped], now.AddMinutes(20));
+    var snapshot = new PersistentStateSnapshot(1, "test", now, "TEST", "Windows", "11", "22631", "x64", true, null, []);
+    var duplicate = new StateTransition(now.AddSeconds(60), "svc", "SERVICE_STATE", "Web Portal Service",
+        "Tsplus", "RemoteAccess", "Running", "Stopped", "Informativo", "Advertencia");
+    var result = new RecordResult(snapshot, [duplicate], [], "root", "history", "transitions", "latest", null);
+
+    var deduped = StateReportIntegrator.AddTransitionsFromRecordResult(report, result, "monitor");
+    Equal(1, deduped.Eventos.Count(e => e.Tipo == "TDM_MONITOR_STATE_TRANSITION"),
+        "El mismo cambio físico a 60 s se duplicó sin una transición opuesta intermedia.");
+
+    var recovered = Transition(now.AddSeconds(20), "Web Portal Service", "Stopped", "Running");
+    var episodic = Report([stopped, recovered], now.AddMinutes(20));
+    var kept = StateReportIntegrator.AddTransitionsFromRecordResult(episodic, result, "monitor");
+    Equal(3, kept.Eventos.Count(e => e.Tipo == "TDM_MONITOR_STATE_TRANSITION"),
+        "Una inversión intermedia marcó un episodio nuevo y el tercer cambio físico se colapsó igual.");
+    return Task.CompletedTask;
+}
+
+static Task IncidentClustersClipToAnalyzedWindow()
+{
+    var now = DateTimeOffset.Now;
+    static DiagnosticEvent Service(DateTimeOffset at) => new(at, "SCM", "Web Portal Service", DiagnosticLayer.Tsplus,
+        DiagnosticSeverity.Critico, "SERVICE_STATE", "Estado actual: Stopped",
+        Evidencia: [new EvidenceItem("Servicio", "WebPortalService"), new EvidenceItem("Estado", "Stopped")],
+        Producto: TsplusProduct.RemoteAccess);
+
+    var staleOnly = IncidentClusterAnalyzer.Analyze(Report([Service(now.AddDays(-2))], now));
+    Equal(0, staleOnly.Count, "Un estado fuera del periodo analizado formó un incidente agrupado.");
+
+    var fresh = Service(now.AddMinutes(-3));
+    var mixed = IncidentClusterAnalyzer.Analyze(Report([Service(now.AddDays(-2)), fresh], now));
+    Equal(1, mixed.Count, "La señal dentro del periodo no formó su incidente.");
+    Equal(fresh.Timestamp!.Value, mixed[0].Inicio,
+        "El clúster conservó la señal fechada antes del periodo analizado.");
+    Equal(fresh.Timestamp!.Value, mixed[0].Fin,
+        "El clúster arrastró evidencia fuera de la ventana a su ventana temporal.");
+    return Task.CompletedTask;
+}
+
+static Task StaleRemoteSymptomDoesNotConfirmCandidates()
+{
+    var now = DateTimeOffset.Now;
+    var policy = new DiagnosticFinding("WINDOWS-RDP-DISABLED-POLICY", "Windows Remote Desktop", DiagnosticSeverity.Advertencia,
+        "RDP deshabilitado por directiva.", "fDenyTSConnections activo impide nuevas conexiones.",
+        [new EvidenceItem("fDenyTSConnections", "1")], ConfidenceLevel.Alta, Capa: DiagnosticLayer.Windows);
+
+    static DiagnosticEvent Symptom(DateTimeOffset at)
+        => new(at, "TermService", "Remote Desktop Services", DiagnosticLayer.Rdp, DiagnosticSeverity.Error,
+            "RDP_SESSION_FAILURE", "La sesión RDP falló.");
+
+    var stale = RootCauseCorrelator.Analyze(Report([Symptom(now.AddDays(-3))], now, [policy]))
+        .FirstOrDefault(x => x.Id == "ROOT-WINDOWS-RDP-DISABLED-POLICY");
+    NotNull(stale, "El candidato de política RDP desapareció con síntoma fuera de la ventana.");
+    Equal(ConfidenceLevel.Media, stale!.Confianza,
+        "Un síntoma anterior al periodo analizado confirmó el candidato RDP.");
+    Equal(84, stale.Puntaje, "Un síntoma fuera de la ventana elevó el puntaje del candidato RDP.");
+
+    var fresh = RootCauseCorrelator.Analyze(Report([Symptom(now.AddMinutes(-4))], now, [policy]))
+        .FirstOrDefault(x => x.Id == "ROOT-WINDOWS-RDP-DISABLED-POLICY");
+    NotNull(fresh, "El candidato de política RDP desapareció con síntoma dentro de la ventana.");
+    Equal(ConfidenceLevel.Alta, fresh!.Confianza,
+        "El síntoma dentro de la ventana dejó de confirmar el candidato RDP.");
+    Equal(96, fresh.Puntaje, "El síntoma en ventana dejó de elevar el puntaje del candidato RDP.");
+    return Task.CompletedTask;
+}
+
+static Task AnalysisWindowClipIsWiredAcrossRcaFeeds()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de recorte a PeriodoAnalizado no ejecutable.");
+    var correlator = File.ReadAllText(Path.Combine(root!, "src", "TDM.Correlation", "RootCauseCorrelator.cs"));
+    True(correlator.Split("DiagnosticTimeWindow.IsEventInside").Length - 1 >= 2,
+        "Los síntomas RCA (feeds de correlación y estados directos) no se recortan al periodo analizado.");
+    var farm = File.ReadAllText(Path.Combine(root!, "src", "TDM.Correlation", "RootCauseCorrelator.Rules.WindowsFarm.cs"));
+    True(farm.Contains("DiagnosticTimeWindow.IsEventInside", StringComparison.Ordinal),
+        "El síntoma de sesión remota no se recorta al periodo analizado.");
+    var clusters = File.ReadAllText(Path.Combine(root!, "src", "TDM.Correlation", "IncidentClusterAnalyzer.cs"));
+    True(clusters.Contains("DiagnosticTimeWindow.IsEventInside", StringComparison.Ordinal),
+        "El agrupador de incidentes no recorta las señales al periodo analizado.");
+    var window = File.ReadAllText(Path.Combine(root!, "src", "TDM.Core", "DiagnosticTimeWindow.cs"));
+    True(window.Contains("public static bool IsEventInside(DiagnosticReport report, DateTimeOffset timestamp)", StringComparison.Ordinal),
+        "No existe la regla única de recorte de eventos al periodo analizado.");
+    return Task.CompletedTask;
+}
+
+static async Task ExportDependencyRowsShowOriginServiceAndWarnOnNotEvaluated()
+{
+    var dir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var health = new DiagnosticEvent(now, "TSplus", "Remote Access", DiagnosticLayer.Tsplus,
+            DiagnosticSeverity.Advertencia, "TSPLUS_DEPENDENCY_HEALTH", "Salud de dependencias TSplus",
+            Evidencia: [new EvidenceItem("Web Portal", "No evaluado")]);
+        var depthOne = new DiagnosticEvent(now, "Service Control Manager", "TermService → WebPortalService",
+            DiagnosticLayer.Windows, DiagnosticSeverity.Advertencia, "SERVICE_DEPENDENCY_STATE",
+            "Dependencia SCM nivel 1: WebPortalService = Stopped.",
+            Evidencia:
+            [
+                new EvidenceItem("Servicio origen", "TermService"),
+                new EvidenceItem("Estado servicio", "Running"),
+                new EvidenceItem("Dependencia", "WebPortalService"),
+                new EvidenceItem("Profundidad", "1"),
+                new EvidenceItem("Estado", "Stopped")
+            ], Producto: TsplusProduct.RemoteAccess);
+
+        var result = await ReportExporter.ExportAsync(Report([health, depthOne], now), dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("<td>TermService</td><td>depende de</td><td>WebPortalService</td>", StringComparison.Ordinal),
+            "La fila de dependencia a profundidad mostró N/D en lugar del servicio origen.");
+        False(html.Contains("<td>N/D</td><td>depende de</td>", StringComparison.Ordinal),
+            "El export mantuvo N/D en la columna Servicio de una relación real.");
+        True(html.Contains("<div class='dep warn'><strong>Web Portal</strong>", StringComparison.Ordinal),
+            "Un 'No evaluado' del mapa de dependencias se pintó como warn.");
+        False(html.Contains("<div class='dep ok'><strong>Web Portal</strong>", StringComparison.Ordinal),
+            "Un 'No evaluado' del mapa de dependencias quedó en verde.");
+    }
+    finally { TryDelete(dir); }
+}
+
+static async Task ExportFooterReportsHiddenDependencyRows()
+{
+    var dir = TempDir();
+    var quietDir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var many = new List<DiagnosticEvent>();
+        for (var i = 0; i < 125; i++)
+            many.Add(new DiagnosticEvent(now, "Service Control Manager", $"svc{i} → dep{i}",
+                DiagnosticLayer.Windows, DiagnosticSeverity.Informativo, "SERVICE_DEPENDENCY_STATE",
+                $"svc{i} depende de dep{i}; estado observado: Running.",
+                Evidencia:
+                [
+                    new EvidenceItem("Servicio", $"svc{i}"),
+                    new EvidenceItem("Dependencia", $"dep{i}"),
+                    new EvidenceItem("Estado dependencia", "Running")
+                ], Producto: TsplusProduct.RemoteAccess));
+        var result = await ReportExporter.ExportAsync(Report(many, now), dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("hasta 120 dependencias y 60 dependientes; 5 relación(es) adicional(es) no visibles", StringComparison.Ordinal),
+            "Con 125 filas relevantes el pie no informó las 5 ocultas realmente no mostradas.");
+
+        var quiet = new List<DiagnosticEvent>();
+        for (var i = 0; i < 200; i++)
+            quiet.Add(new DiagnosticEvent(now, "Service Control Manager", $"otro{i}",
+                DiagnosticLayer.Windows, DiagnosticSeverity.Informativo, "SERVICE_DEPENDENCY_STATE",
+                $"otro{i} declara una relación interna.",
+                Evidencia:
+                [
+                    new EvidenceItem("Servicio", $"interno-{i}"),
+                    new EvidenceItem("Dependencia", "interna-x"),
+                    new EvidenceItem("Estado dependencia", "Running")
+                ]));
+        var quietResult = await ReportExporter.ExportAsync(Report(quiet, now), quietDir, CancellationToken.None);
+        var quietHtml = await File.ReadAllTextAsync(quietResult.HtmlPath);
+        False(quietHtml.Contains("hasta 120 dependencias y 60 dependientes", StringComparison.Ordinal),
+            "Con 200 filas irrelevantes (0 mostradas) el pie afirmó que había relaciones ocultas.");
+    }
+    finally { TryDelete(dir); TryDelete(quietDir); }
+}
+
+static Task ScmDriftBaselineSkipsFailedReads()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de baseline SCM no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "ServiceDependencyDriftCollector.cs"));
+    True(text.Contains("if (!dependencyRead.Available || !dependentRead.Available) readsFailed = true;", StringComparison.Ordinal),
+        "La deriva SCM no marca las lecturas fallidas de dependencias/dependientes.");
+    True(text.Contains("SCM_GRAPH_BASELINE_STALE", StringComparison.Ordinal),
+        "La deriva SCM no declara cuándo la línea base quedó sin actualizar por lectura fallida.");
+    True(text.IndexOf("if (readsFailed)", StringComparison.Ordinal) <
+          text.IndexOf("CollectorCursorStore.TrySave(BaselineKey", StringComparison.Ordinal),
+        "La línea base del grafo SCM se guarda sin pasar por la guarda de lectura fallida.");
+    return Task.CompletedTask;
 }
 
 static DiagnosticEvent ServiceStateEvent(DateTimeOffset at, string state)

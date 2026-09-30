@@ -475,10 +475,8 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
         HasReport = true;
         FindingCount = report.Hallazgos.Count;
         EventCount = report.Eventos.Count;
-        CriticalCount = report.Hallazgos.Count(x => x.Severidad == DiagnosticSeverity.Critico) +
-                        report.Eventos.Count(x => x.Severidad == DiagnosticSeverity.Critico);
-        ErrorCount = report.Hallazgos.Count(x => x.Severidad == DiagnosticSeverity.Error) +
-                     report.Eventos.Count(x => x.Severidad == DiagnosticSeverity.Error);
+        CriticalCount = report.Hallazgos.Count(x => x.Severidad == DiagnosticSeverity.Critico);
+        ErrorCount = report.Hallazgos.Count(x => x.Severidad == DiagnosticSeverity.Error);
 
         SummaryText = BuildSummary(report);
         RootCauseText = BuildRootCause(report);
@@ -592,6 +590,7 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
         sb.AppendLine($"TSplus: {(report.Sistema.TsplusDetectado ? $"Detectado | versión: {report.Sistema.TsplusVersion ?? "N/D"}" : report.Sistema.EstadoDeteccionTexto())}");
         sb.AppendLine($"Ventana: {windowStart.ToLocalTime():dd/MM HH:mm} – {windowEnd.ToLocalTime():dd/MM HH:mm}");
         sb.AppendLine($"Hallazgos: {report.Hallazgos.Count} | Eventos: {report.Eventos.Count}");
+        sb.AppendLine($"Incidentes agrupados: {report.Incidentes.Count} | Candidatos: {report.CausasRaiz.Count} | Patrones: {report.PatronesFalla.Count}");
         if (report.ImpactoFuncional is not null)
             sb.AppendLine($"Impacto funcional: {report.ImpactoFuncional.EstadoGeneral} | detalle: {report.ImpactoFuncional.Resumen}");
         if (report.PrecisionDiagnostica is not null)
