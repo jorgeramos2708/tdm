@@ -24,64 +24,75 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
         "Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operational"
     ];
 
-    private readonly object _bufferLock = new();
-    private readonly Queue<DiagnosticEvent> _eventBuffer = new();
-    private readonly CancellationTokenSource _cts = new();
-    private readonly List<EventLogWatcher> _watchers = new();
+    private static readonly object SharedLock = new();
+    private static readonly Queue<DiagnosticEvent> SharedBuffer = new();
+    private static readonly List<EventLogWatcher> SharedWatchers = new();
+    private static readonly List<EvidenceItem> SharedCoverage = new();
+    private static bool _subscribed;
 
     public Task<CollectorResult> CollectAsync(DiagnosticContext context, CancellationToken cancellationToken = default)
     {
         var findings = new List<DiagnosticFinding>();
         var events = new List<DiagnosticEvent>();
-        var coverage = new List<EvidenceItem>();
+        List<EvidenceItem> coverage;
+        int subscribed;
+        int drained;
 
-        foreach (var channelName in PushChannels)
+        lock (SharedLock)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
+            EnsureSubscribed();
+            coverage = [.. SharedCoverage];
+            subscribed = SharedWatchers.Count;
+            drained = 0;
+            while (SharedBuffer.Count > 0)
             {
-                var query = new EventLogQuery(channelName, PathType.LogName, "*") { ReverseDirection = false };
-                var watcher = new EventLogWatcher(query);
-                watcher.EventRecordWritten += (s, e) => OnEventRecordWritten(e, channelName);
-                watcher.Enabled = true;
-                _watchers.Add(watcher);
-                coverage.Add(new EvidenceItem(channelName, "Suscripci�n activa"));
+                events.Add(SharedBuffer.Dequeue());
+                drained++;
             }
-            catch (EventLogNotFoundException)
-            {
-                coverage.Add(new EvidenceItem(channelName, "Canal no disponible en este SO"));
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                coverage.Add(new EvidenceItem(channelName, $"Sin permisos: {ex.Message}"));
-            }
-            catch (EventLogException ex)
-            {
-                coverage.Add(new EvidenceItem(channelName, $"Error suscripci�n: {ex.Message}"));
-            }
-        }
-
-        // Devolver eventos bufferizados al finalizar el contexto
-        // Nota: este collector se dise�a para vida larga; aqu� se devuelve lo acumulado hasta ahora
-        lock (_bufferLock)
-        {
-            events.AddRange(_eventBuffer.Take(MaxBufferSize));
-            _eventBuffer.Clear();
         }
 
         events.Add(new DiagnosticEvent(
             DateTimeOffset.Now, "TDM", "Push Event Subscription", DiagnosticLayer.Windows,
             DiagnosticSeverity.Informativo, "WINDOWS_PUSH_EVENT_COVERAGE",
-            $"Canales suscritos: {_watchers.Count}/{PushChannels.Length}. Eventos en buffer: {_eventBuffer.Count}.",
+            $"Canales suscritos: {subscribed}/{PushChannels.Length}. Eventos en buffer: {drained}.",
             Evidencia: coverage));
-
-        // Registrar cancelaci�n para limpiar watchers
-        cancellationToken.Register(() => StopWatchers());
 
         return Task.FromResult(new CollectorResult(findings, events));
     }
 
-    private void OnEventRecordWritten(EventRecordWrittenEventArgs e, string channelName)
+    private static void EnsureSubscribed()
+    {
+        if (_subscribed) return;
+        _subscribed = true;
+
+        foreach (var channelName in PushChannels)
+        {
+            try
+            {
+                var query = new EventLogQuery(channelName, PathType.LogName, "*") { ReverseDirection = false };
+                var watcher = new EventLogWatcher(query);
+                var channel = channelName;
+                watcher.EventRecordWritten += (s, e) => OnEventRecordWritten(e, channel);
+                watcher.Enabled = true;
+                SharedWatchers.Add(watcher);
+                SharedCoverage.Add(new EvidenceItem(channel, "Suscripción activa"));
+            }
+            catch (EventLogNotFoundException)
+            {
+                SharedCoverage.Add(new EvidenceItem(channelName, "Canal no disponible en este SO"));
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                SharedCoverage.Add(new EvidenceItem(channelName, $"Sin permisos: {ex.Message}"));
+            }
+            catch (EventLogException ex)
+            {
+                SharedCoverage.Add(new EvidenceItem(channelName, $"Error suscripción: {ex.Message}"));
+            }
+        }
+    }
+
+    private static void OnEventRecordWritten(EventRecordWrittenEventArgs e, string channelName)
     {
         try
         {
@@ -119,11 +130,11 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
                 Producto: TsplusProduct.Ninguno,
                 IngestedAt: DateTimeOffset.Now);
 
-            lock (_bufferLock)
+            lock (SharedLock)
             {
-                _eventBuffer.Enqueue(evt);
-                if (_eventBuffer.Count > MaxBufferSize)
-                    _eventBuffer.Dequeue(); // Ring buffer
+                SharedBuffer.Enqueue(evt);
+                if (SharedBuffer.Count > MaxBufferSize)
+                    SharedBuffer.Dequeue(); // Ring buffer
             }
         }
         catch (Exception ex)
@@ -160,12 +171,20 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
         }
     }
 
-    private void StopWatchers()
+    public static void StopWatchers()
     {
-        foreach (var watcher in _watchers)
+        List<EventLogWatcher> watchers;
+        lock (SharedLock)
+        {
+            watchers = [.. SharedWatchers];
+            SharedWatchers.Clear();
+            SharedBuffer.Clear();
+            SharedCoverage.Clear();
+            _subscribed = false;
+        }
+        foreach (var watcher in watchers)
         {
             try { watcher.Enabled = false; watcher.Dispose(); } catch { }
         }
-        _watchers.Clear();
     }
 }

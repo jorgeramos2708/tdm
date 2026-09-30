@@ -113,20 +113,36 @@ public async Task<DiagnosticReport> RunAsync(string period, CancellationToken ct
     // temporalmente con una falla posterior, sin convertir la muestra actual en causa.
     var monitorRoot = await ResolveMonitorRootAsync().ConfigureAwait(false);
     var diagnosticRoot = TdmDataPaths.ResolveWritableDefault();
-    var from = report.PeriodoAnalizadoInicio == default ? report.Inicio - lookback : report.PeriodoAnalizadoInicio;
+
+    RecordResult? preRecordedResult = null;
+    try
+    {
+        var preRecordedSnapshot = StateSnapshotBuilder.Build(report, ToolVersion);
+        preRecordedResult = await new LocalStateStore(diagnosticRoot)
+            .RecordAsync(preRecordedSnapshot, "diagnostic-avalonia", ct).ConfigureAwait(false);
+        report = StateReportIntegrator.AddTransitionsFromRecordResult(report, preRecordedResult, "diagnostic-avalonia");
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+        _logService.Write(LogLevel.Warning, "DIAGNOSTIC", "Historial", "Pre-registro de estado no disponible", ex);
+    }
+
+    var windowStart = report.PeriodoAnalizadoInicio == default ? report.Inicio - lookback : report.PeriodoAnalizadoInicio;
+    var transitionsFrom = windowStart - TimeSpan.FromMinutes(15);
     var to = report.PeriodoAnalizadoFin == default ? report.Fin : report.PeriodoAnalizadoFin;
     var primaryHistoryRoot = monitorRoot ?? diagnosticRoot;
-    report = await StateReportIntegrator.AddRecentMonitorTransitionsAsync(report, from, to, ct, primaryHistoryRoot).ConfigureAwait(false);
+    report = await StateReportIntegrator.AddRecentMonitorTransitionsAsync(report, transitionsFrom, to, ct, primaryHistoryRoot).ConfigureAwait(false);
     if (!Path.GetFullPath(primaryHistoryRoot).Equals(Path.GetFullPath(diagnosticRoot), StringComparison.OrdinalIgnoreCase))
-        report = await StateReportIntegrator.AddRecentMonitorTransitionsAsync(report, from, to, ct, diagnosticRoot).ConfigureAwait(false);
-    report = await StateReportIntegrator.AddHistoricalCoverageAsync(report, from, to, ct, primaryHistoryRoot, diagnosticRoot).ConfigureAwait(false);
+        report = await StateReportIntegrator.AddRecentMonitorTransitionsAsync(report, transitionsFrom, to, ct, diagnosticRoot).ConfigureAwait(false);
+    report = await StateReportIntegrator.AddHistoricalCoverageAsync(report, windowStart, to, ct, primaryHistoryRoot, diagnosticRoot).ConfigureAwait(false);
     // P0-aprendizaje: mismo historial verificado que usa el servicio (ventana 90 días).
     // Best-effort: sin archivo o sin acceso, el ranking usa solo evidencia actual.
     IReadOnlyDictionary<string, (int Confirmadas, int Descartadas, double Tasa)>? verifiedHitRates = null;
     try
     {
-        var feedback = await new DiagnosticFeedbackStore(diagnosticRoot)
-            .ReadAsync(from: DateTimeOffset.Now - TimeSpan.FromDays(90), ct: ct)
+        var feedback = await DiagnosticFeedbackStore.ReadFromRootsAsync(
+            [diagnosticRoot, TdmDataPaths.MachineRootPath],
+            from: DateTimeOffset.Now - TimeSpan.FromDays(90), ct: ct)
             .ConfigureAwait(false);
         if (feedback.Count > 0)
             verifiedHitRates = DiagnosticFeedbackStore.HitRateByCandidate(feedback);
@@ -160,7 +176,8 @@ public async Task<DiagnosticReport> RunAsync(string period, CancellationToken ct
             ct,
             channel: "diagnostic-avalonia",
             rootPath: diagnosticRoot,
-            baselineRootPath: monitorRoot).ConfigureAwait(false);
+            baselineRootPath: monitorRoot,
+            preRecordedResult: preRecordedResult).ConfigureAwait(false);
 
         // El diagnóstico completo contiene las métricas pesadas (procesos y discos).
         // Persistir una muestra de observabilidad permite que Rendimiento las muestre

@@ -7,6 +7,8 @@ public static partial class RootCauseCorrelator
     private static void AddWindowsCompatibilityCandidates(DiagnosticReport report, List<CandidateDraft> drafts)
     {
         // RC18.3.1: compatibilidad Windows documentada que puede afectar directamente a Remote Access.
+        var symptom = RemoteSessionSymptom(report);
+        var symptomEvidence = new EvidenceItem("Síntoma de sesión remota en la ventana", symptom?.Tipo ?? "No observado");
         var rdpPolicy = report.Hallazgos.FirstOrDefault(f => f.Id == "WINDOWS-RDP-DISABLED-POLICY");
         if (rdpPolicy is not null)
         {
@@ -14,13 +16,15 @@ public static partial class RootCauseCorrelator
                 "ROOT-WINDOWS-RDP-DISABLED-POLICY",
                 "Windows / política RDP",
                 DiagnosticLayer.Windows,
-                96,
-                ConfidenceLevel.Alta,
+                symptom is null ? 84 : 96,
+                symptom is null ? ConfidenceLevel.Media : ConfidenceLevel.Alta,
                 "Windows tiene RDP deshabilitado por configuración o directiva efectiva.",
-                "El estado fDenyTSConnections observado impide aceptar nuevas conexiones RDP. La condición está confirmada; TDM la eleva como causa del incidente sólo cuando el síntoma investigado requiere crear una sesión remota.",
-                rdpPolicy.Evidencia,
+                symptom is null
+                    ? "El estado fDenyTSConnections observado impide aceptar nuevas conexiones RDP. Sin un síntoma de sesión remota en la ventana, TDM conserva la condición como hipótesis de configuración y no la declara causa del incidente."
+                    : "El estado fDenyTSConnections observado impide aceptar nuevas conexiones RDP. La condición está confirmada y coincide con un síntoma de sesión remota en la ventana, por lo que TDM la eleva como causa del incidente.",
+                Merge(rdpPolicy.Evidencia, symptomEvidence),
                 null,
-                null,
+                symptom?.Timestamp,
                 "WINDOWS",
                 TsplusProduct.RemoteAccess));
         }
@@ -32,13 +36,15 @@ public static partial class RootCauseCorrelator
                 "ROOT-WINDOWS-RDS-ROLE-CONFLICT",
                 "Windows Server / roles RDS incompatibles",
                 DiagnosticLayer.Windows,
-                97,
-                ConfidenceLevel.Alta,
+                symptom is null ? 84 : 97,
+                symptom is null ? ConfidenceLevel.Media : ConfidenceLevel.Alta,
                 "La configuración de roles RDS de Windows es incompatible con los prerrequisitos documentados de TSplus Remote Access.",
-                "TDM observó roles RDS que TSplus indica que no deben coexistir con Remote Access. Este es un problema de configuración Windows y debe resolverse antes de modificar componentes TSplus.",
-                rdsConflict.Evidencia,
+                symptom is null
+                    ? "TDM observó roles RDS que TSplus indica que no deben coexistir con Remote Access. Sin un síntoma de sesión remota en la ventana, se conserva como hipótesis de configuración con confianza media y no se declara causa del incidente."
+                    : "TDM observó roles RDS que TSplus indica que no deben coexistir con Remote Access y la ventana contiene un síntoma de sesión remota. Este es un problema de configuración Windows y debe resolverse antes de modificar componentes TSplus.",
+                Merge(rdsConflict.Evidencia, symptomEvidence),
                 null,
-                null,
+                symptom?.Timestamp,
                 "WINDOWS",
                 TsplusProduct.RemoteAccess));
         }
@@ -71,6 +77,16 @@ public static partial class RootCauseCorrelator
 
 
     }
+
+    private static DiagnosticEvent? RemoteSessionSymptom(DiagnosticReport report)
+        => report.Eventos
+            .Where(e => e.Timestamp.HasValue)
+            .Where(e => e.Tipo is "USER_LOGON_FAILURE" or "USER_NLA_PASSWORD_FAILURE"
+                or "KERBEROS_PREAUTH_FAILURE" or "WINDOWS_CREDENTIAL_VALIDATION_FAILURE"
+                || ((e.Capa == DiagnosticLayer.Rdp || e.Tipo.Equals("SERVICE_STATE", StringComparison.OrdinalIgnoreCase))
+                    && e.Severidad is DiagnosticSeverity.Error or DiagnosticSeverity.Critico))
+            .OrderByDescending(e => e.Timestamp)
+            .FirstOrDefault();
 
     private static void AddDirectorySessionAndFarmCandidates(DiagnosticReport report, List<CandidateDraft> drafts, IReadOnlyList<DiagnosticEvent> tsplusErrors)
     {

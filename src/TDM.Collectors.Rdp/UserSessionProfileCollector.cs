@@ -343,6 +343,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
                         record.Id.ToString(),
                         Evidencia:
                         [
+                            new EvidenceItem("Log", "Security"),
                             new EvidenceItem("Usuario", V("TargetUserName")),
                             new EvidenceItem("Dominio", V("TargetDomainName")),
                             new EvidenceItem("Equipo originador", V("CallerComputerName")),
@@ -365,6 +366,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
                         record.Id.ToString(),
                         Evidencia:
                         [
+                            new EvidenceItem("Log", "Security"),
                             new EvidenceItem("Usuario", V("TargetUserName")),
                             new EvidenceItem("IP origen", V("IpAddress")),
                             new EvidenceItem("Código de falla", V("Status") != "N/D" ? V("Status") : V("FailureCode")),
@@ -391,6 +393,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
                         record.Id.ToString(),
                         Evidencia:
                         [
+                            new EvidenceItem("Log", "Security"),
                             new EvidenceItem("Usuario", V("TargetUserName")),
                             new EvidenceItem("Estación", V("Workstation")),
                             new EvidenceItem("Paquete de autenticación", V("PackageName") != "N/D" ? V("PackageName") : V("AuthenticationPackageName")),
@@ -433,6 +436,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
                     record.Id.ToString(),
                     Evidencia:
                     [
+                        new EvidenceItem("Log", "Security"),
                         new EvidenceItem("Usuario", V("TargetUserName")),
                         new EvidenceItem("Dominio", V("TargetDomainName")),
                         new EvidenceItem("LogonType", V("LogonType")),
@@ -738,6 +742,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
                     record.Id.ToString(),
                     Evidencia:
                     [
+                        new EvidenceItem("Log", "Security"),
                         new EvidenceItem("Originador específico", "Active Directory / Domain Controller / Netlogon"),
                         new EvidenceItem("Estado", state),
                         new EvidenceItem("Status", status),

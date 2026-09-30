@@ -243,8 +243,9 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
                         IReadOnlyDictionary<string, (int Confirmadas, int Descartadas, double Tasa)>? verifiedHitRates = null;
                         try
                         {
-                            var feedback = await new DiagnosticFeedbackStore(_root)
-                                .ReadAsync(from: DateTimeOffset.Now - TimeSpan.FromDays(90), ct: stoppingToken)
+                            var feedback = await DiagnosticFeedbackStore.ReadFromRootsAsync(
+                                [_root, TdmDataPaths.MachineRootPath],
+                                from: DateTimeOffset.Now - TimeSpan.FromDays(90), ct: stoppingToken)
                                 .ConfigureAwait(false);
                             if (feedback.Count > 0)
                                 verifiedHitRates = DiagnosticFeedbackStore.HitRateByCandidate(feedback);

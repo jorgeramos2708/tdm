@@ -1,4 +1,5 @@
 using System.ServiceProcess;
+using Microsoft.Win32;
 using TDM.Core;
 using TDM.Models;
 
@@ -35,6 +36,9 @@ public sealed class LightweightTsplusStateCollector : IReadOnlyCollector
             foreach (var item in services.Where(x => TsplusServiceClassifier.Classify(x.Key, x.Value.Display) == TsplusProduct.RemoteAccess))
             {
                 var isRunning = item.Value.Status.Equals("Running", StringComparison.OrdinalIgnoreCase);
+                var startMode = ReadStartMode(item.Key);
+                var requiredWhenTsplus = IsRequiredWhenTsplus(item.Key);
+                var requiredNow = requiredWhenTsplus || IsAutoStart(startMode);
                 var role = item.Value.Display.Contains("Web Portal", StringComparison.OrdinalIgnoreCase)
                     || item.Key.Contains("WebPortal", StringComparison.OrdinalIgnoreCase)
                     || item.Value.Display.Contains("HTML5", StringComparison.OrdinalIgnoreCase)
@@ -45,7 +49,7 @@ public sealed class LightweightTsplusStateCollector : IReadOnlyCollector
                     "Service Control Manager",
                     item.Value.Display,
                     DiagnosticLayer.Tsplus,
-                    isRunning ? DiagnosticSeverity.Informativo : DiagnosticSeverity.Critico,
+                    isRunning ? DiagnosticSeverity.Informativo : StoppedServiceSeverity(startMode, requiredWhenTsplus),
                     "SERVICE_STATE",
                     $"Estado actual: {item.Value.Status}",
                     Evidencia:
@@ -53,9 +57,10 @@ public sealed class LightweightTsplusStateCollector : IReadOnlyCollector
                         new EvidenceItem("Servicio", item.Key),
                         new EvidenceItem("Nombre visible", item.Value.Display),
                         new EvidenceItem("Estado", item.Value.Status),
+                        new EvidenceItem("Inicio", startMode),
                         new EvidenceItem("Proveedor", "TSplus/relacionado"),
                         new EvidenceItem("Rol", role),
-                        new EvidenceItem("Requerida ahora", "Sí"),
+                        new EvidenceItem("Requerida ahora", requiredNow ? "Sí" : "No"),
                         new EvidenceItem("Origen de lectura", "Service Control Manager")
                     ],
                     Producto: TsplusProduct.RemoteAccess));
@@ -91,6 +96,47 @@ public sealed class LightweightTsplusStateCollector : IReadOnlyCollector
         }
 
         return Task.FromResult(new CollectorResult([], events));
+    }
+
+    public static DiagnosticSeverity StoppedServiceSeverity(string startMode, bool requiredWhenTsplus)
+        => requiredWhenTsplus || IsAutoStart(startMode)
+            ? DiagnosticSeverity.Critico
+            : startMode.Equals("Manual", StringComparison.OrdinalIgnoreCase)
+                ? DiagnosticSeverity.Advertencia
+                : DiagnosticSeverity.Informativo;
+
+    public static bool IsAutoStart(string startMode)
+        => startMode.Equals("Automático", StringComparison.OrdinalIgnoreCase)
+           || startMode.Equals("Boot", StringComparison.OrdinalIgnoreCase)
+           || startMode.Equals("System", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsRequiredWhenTsplus(string serviceName)
+        => serviceName.Equals("TermService", StringComparison.OrdinalIgnoreCase)
+           || serviceName.Equals("TSplus-HTML5Service", StringComparison.OrdinalIgnoreCase)
+           || serviceName.Equals("TSplus-WebPortal", StringComparison.OrdinalIgnoreCase)
+           || serviceName.Equals("TSplus-WebServer", StringComparison.OrdinalIgnoreCase);
+
+    private static string ReadStartMode(string serviceName)
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{serviceName}", writable: false);
+            var start = key?.GetValue("Start");
+            var value = start is int i ? i : start is not null && int.TryParse(start.ToString(), out var parsed) ? parsed : -1;
+            return value switch
+            {
+                0 => "Boot",
+                1 => "System",
+                2 => "Automático",
+                3 => "Manual",
+                4 => "Deshabilitado",
+                _ => "N/D"
+            };
+        }
+        catch
+        {
+            return "N/D";
+        }
     }
 
     private static ProbeResult<IReadOnlyDictionary<string, (string Display, string Status)>> SnapshotRelevantServices()

@@ -17,7 +17,6 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
         var timeClause = DiagnosticWindow.EventLogTimeClause(context);
         var maxEvents = context.Options?.MaxEvents;
         var remainingEvents = maxEvents ?? int.MaxValue;
-        var xpath = $"*[System[(Level=1 or Level=2) and {timeClause}]]";
 
         coverage.Add(new EvidenceItem("Ventana solicitada", $"{window.Start:O} → {window.End:O}"));
 
@@ -31,6 +30,7 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
 
             var relevantLimit = Math.Min(ResolveRelevantLimit(context.Lookback, maxEvents), remainingEvents);
             var scanLimit = Math.Max(relevantLimit * 8, 2_000);
+            var xpath = ResolveEventQuery(log, timeClause);
             try
             {
                 var q = new EventLogQuery(log, PathType.LogName, xpath)
@@ -50,7 +50,7 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
                     {
                         scanned++;
                         var provider = ev.ProviderName ?? "Desconocido";
-                        if (!IsRelevant(provider, ev.Id))
+                        if (!IsRelevant(provider, ev.Id, log))
                         {
                             if (scanned >= scanLimit) { limited = true; break; }
                             continue;
@@ -177,6 +177,11 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
             x.Valor.StartsWith("No legible", StringComparison.OrdinalIgnoreCase) ||
             x.Valor.StartsWith("Canal no disponible", StringComparison.OrdinalIgnoreCase));
 
+    public static string ResolveEventQuery(string log, string timeClause)
+        => log.Equals("Security", StringComparison.OrdinalIgnoreCase)
+            ? $"*[System[(EventID=4625 or EventID=4740 or EventID=4771 or EventID=4776) and {timeClause}]]"
+            : $"*[System[(Level=1 or Level=2) and {timeClause}]]";
+
     public static int ResolveRelevantLimit(TimeSpan lookback, int? maxEvents)
     {
         var lookbackLimit = lookback.TotalHours switch
@@ -190,7 +195,7 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
         return lookbackLimit;
     }
 
-    private static bool IsRelevant(string provider, int id)
+    private static bool IsRelevant(string provider, int id, string log)
     {
         string[] tokens =
         [
@@ -199,7 +204,8 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
         ];
         return tokens.Any(t => provider.Contains(t, StringComparison.OrdinalIgnoreCase))
             // P17: fallos de arranque SCM coherentes con IsCausalSignal y el canal incremental.
-            || id is 41 or 51 or 55 or 1000 or 1001 or 1026 or 7000 or 7001 or 7009 or 7011 or 7023 or 7024 or 7031 or 7034;
+            || id is 41 or 51 or 55 or 1000 or 1001 or 1026 or 7000 or 7001 or 7009 or 7011 or 7023 or 7024 or 7031 or 7034
+            || (log.Equals("Security", StringComparison.OrdinalIgnoreCase) && id is 4625 or 4740 or 4771 or 4776);
     }
 
     private static DiagnosticLayer ClassifyLayer(string provider)

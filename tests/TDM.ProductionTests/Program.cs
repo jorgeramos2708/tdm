@@ -72,6 +72,12 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("FlappingThresholdHonorsConfiguredOptions", FlappingThresholdHonorsConfiguredOptions),
     ("EwmaAnomaliesSurfaceAsReportFindings", EwmaAnomaliesSurfaceAsReportFindings),
     ("WindowsEventCollectorHonorsMaxEventsOption", WindowsEventCollectorHonorsMaxEventsOption),
+    ("SecurityLogTargetsAuditEventIdsAndAlignsDedupKeys", SecurityLogTargetsAuditEventIdsAndAlignsDedupKeys),
+    ("LightweightTsplusStoppedSeverityHonorsStartMode", LightweightTsplusStoppedSeverityHonorsStartMode),
+    ("StaticWindowsConfigCandidatesNeedRemoteSessionSymptom", StaticWindowsConfigCandidatesNeedRemoteSessionSymptom),
+    ("WindowsPushSubscriptionIsSharedAcrossInstances", WindowsPushSubscriptionIsSharedAcrossInstances),
+    ("GuiPrerecordsStateAndReadsFeedbackFromBothRoots", GuiPrerecordsStateAndReadsFeedbackFromBothRoots),
+    ("FeedbackReadMergesRootsAndDeduplicates", FeedbackReadMergesRootsAndDeduplicates),
     ("TestsRunUnderPinnedInvariantCulture", TestsRunUnderPinnedInvariantCulture),
     ("ContinuousMergerKeepsWindowStateAndAnchoredEvents", ContinuousMergerKeepsWindowStateAndAnchoredEvents),
     ("ContinuousRunReplansSeedWhenWindowGrows", ContinuousRunReplansSeedWhenWindowGrows),
@@ -911,6 +917,230 @@ static Task WindowsEventCollectorHonorsMaxEventsOption()
     True(text.Contains("context.Options?.MaxEvents", StringComparison.Ordinal),
         "El collector de eventos Windows ignora DiagnosticOptions.MaxEvents.");
     return Task.CompletedTask;
+}
+
+static Task SecurityLogTargetsAuditEventIdsAndAlignsDedupKeys()
+{
+    var time = "TimeCreated[@SystemTime >= '2026-01-01T00:00:00Z']";
+    var security = WindowsEventCollector.ResolveEventQuery("Security", time);
+    True(security.Contains("EventID=4625", StringComparison.Ordinal), "La consulta Security dejó de leer 4625.");
+    True(security.Contains("EventID=4740", StringComparison.Ordinal), "La consulta Security dejó de leer 4740.");
+    True(security.Contains("EventID=4771", StringComparison.Ordinal), "La consulta Security dejó de leer 4771.");
+    True(security.Contains("EventID=4776", StringComparison.Ordinal), "La consulta Security dejó de leer 4776.");
+    True(security.Contains(time, StringComparison.Ordinal), "La consulta Security perdió la ventana temporal.");
+    False(security.Contains("Level=1", StringComparison.OrdinalIgnoreCase),
+        "La consulta Security sigue filtrando por nivel y omite los eventos de auditoría Level=0.");
+    var system = WindowsEventCollector.ResolveEventQuery("System", time);
+    True(system.Contains("Level=1 or Level=2", StringComparison.Ordinal) && system.Contains(time, StringComparison.Ordinal),
+        "La consulta System dejó de filtrar errores/críticos dentro de la ventana.");
+    var application = WindowsEventCollector.ResolveEventQuery("Application", time);
+    True(application.Contains("Level=1 or Level=2", StringComparison.Ordinal) && application.Contains(time, StringComparison.Ordinal),
+        "La consulta Application dejó de filtrar errores/críticos dentro de la ventana.");
+
+    var now = DateTimeOffset.Now;
+    var baseEvent = new DiagnosticEvent(now, "Microsoft-Windows-Security-Auditing",
+        "Microsoft-Windows-Security-Auditing", DiagnosticLayer.Windows, DiagnosticSeverity.Informativo,
+        "WINDOWS_EVENT", "registro 4740", "4740",
+        Evidencia:
+        [
+            new EvidenceItem("Log", "Security"),
+            new EvidenceItem("EventId", "4740"),
+            new EvidenceItem("RecordId", "12345")
+        ]);
+    var profileEvent = new DiagnosticEvent(now, "Microsoft-Windows-Security-Auditing",
+        "Cuenta de usuario bloqueada", DiagnosticLayer.Seguridad, DiagnosticSeverity.Advertencia,
+        "ACCOUNT_LOCKOUT", "registro 4740", "4740",
+        Evidencia:
+        [
+            new EvidenceItem("Log", "Security"),
+            new EvidenceItem("Usuario", "alice"),
+            new EvidenceItem("RecordId", "12345")
+        ]);
+    Equal(DiagnosticEventIdentity.Resolve(baseEvent) ?? string.Empty, DiagnosticEventIdentity.Resolve(profileEvent) ?? string.Empty,
+        "Las emisiones base y de perfil del mismo registro 4740 no comparten clave de deduplicación.");
+    True(DiagnosticEventIdentity.Resolve(baseEvent)?.StartsWith("EVT|Security|", StringComparison.Ordinal) == true,
+        "La clave del evento Security no queda anclada al canal Security.");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de Security no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Rdp", "UserSessionProfileCollector.cs"));
+    var logEvidenceCount = text.Split("new EvidenceItem(\"Log\", \"Security\")", StringSplitOptions.None).Length - 1;
+    True(logEvidenceCount >= 5,
+        $"Los eventos Security de UserSessionProfileCollector no declaran la evidencia Log=Security ({logEvidenceCount}/5).");
+    return Task.CompletedTask;
+}
+
+static Task LightweightTsplusStoppedSeverityHonorsStartMode()
+{
+    Equal(DiagnosticSeverity.Critico,
+        LightweightTsplusStateCollector.StoppedServiceSeverity("Automático", false),
+        "Un servicio TSplus con arranque automático detenido dejó de ser Crítico.");
+    Equal(DiagnosticSeverity.Critico,
+        LightweightTsplusStateCollector.StoppedServiceSeverity("Boot", false),
+        "Un servicio en arranque Boot detenido dejó de ser Crítico.");
+    Equal(DiagnosticSeverity.Critico,
+        LightweightTsplusStateCollector.StoppedServiceSeverity("Manual", true),
+        "Un servicio requerido por catálogo TSplus dejó de ser Crítico.");
+    Equal(DiagnosticSeverity.Advertencia,
+        LightweightTsplusStateCollector.StoppedServiceSeverity("Manual", false),
+        "Un servicio Manual detenido sigue escalando más allá de Advertencia.");
+    Equal(DiagnosticSeverity.Informativo,
+        LightweightTsplusStateCollector.StoppedServiceSeverity("Deshabilitado", false),
+        "Un servicio Deshabilitado detenido se contó como incidencia.");
+    Equal(DiagnosticSeverity.Informativo,
+        LightweightTsplusStateCollector.StoppedServiceSeverity("N/D", false),
+        "Sin modo de inicio conocido el evento dejó de ser Informativo.");
+    True(LightweightTsplusStateCollector.IsAutoStart("Automático"), "Automático dejó de contarse como arranque automático.");
+    False(LightweightTsplusStateCollector.IsAutoStart("Manual"), "Manual se contó como arranque automático.");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del TSplus ligero no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.TSplus", "LightweightTsplusStateCollector.cs"));
+    False(text.Contains("isRunning ? DiagnosticSeverity.Informativo : DiagnosticSeverity.Critico", StringComparison.Ordinal),
+        "El TSplus ligero vuelve a declarar Critico sin consultar el modo de inicio.");
+    True(text.Contains("StoppedServiceSeverity(startMode, requiredWhenTsplus)", StringComparison.Ordinal),
+        "El TSplus ligero no decide la severidad detenida con el modo de inicio.");
+    True(text.Contains("new EvidenceItem(\"Inicio\", startMode)", StringComparison.Ordinal),
+        "El evento SERVICE_STATE del TSplus ligero no expone el modo de inicio.");
+    return Task.CompletedTask;
+}
+
+static Task StaticWindowsConfigCandidatesNeedRemoteSessionSymptom()
+{
+    string Evidence(RootCauseCandidate c, string key) => c.Evidencia.FirstOrDefault(e => e.Clave == key)?.Valor ?? "N/D";
+    var now = DateTimeOffset.Now;
+    var policy = new DiagnosticFinding("WINDOWS-RDP-DISABLED-POLICY", "Windows Remote Desktop", DiagnosticSeverity.Advertencia,
+        "RDP deshabilitado por directiva.", "fDenyTSConnections activo impide nuevas conexiones.",
+        [new EvidenceItem("fDenyTSConnections", "1")], ConfidenceLevel.Alta, Capa: DiagnosticLayer.Windows);
+    var rds = new DiagnosticFinding("WINDOWS-RDS-ROLE-CONFLICT", "Windows Server RDS", DiagnosticSeverity.Advertencia,
+        "Roles RDS incompatibles.", "Roles RDS no deben coexistir con TSplus.",
+        [new EvidenceItem("Roles", "RDS Session Host")], ConfidenceLevel.Alta, Capa: DiagnosticLayer.Windows);
+
+    var quiet = RootCauseCorrelator.Analyze(Report([], now, [policy, rds]));
+    var quietRdp = quiet.FirstOrDefault(x => x.Id == "ROOT-WINDOWS-RDP-DISABLED-POLICY");
+    var quietRds = quiet.FirstOrDefault(x => x.Id == "ROOT-WINDOWS-RDS-ROLE-CONFLICT");
+    NotNull(quietRdp, "El candidato de política RDP desapareció sin síntoma de sesión remota.");
+    NotNull(quietRds, "El candidato de roles RDS desapareció sin síntoma de sesión remota.");
+    Equal(ConfidenceLevel.Media, quietRdp!.Confianza, "La política RDP se declaró Alta sin síntoma de sesión remota.");
+    Equal(84, quietRdp.Puntaje, "La política RDP mantuvo el puntaje dominante sin síntoma.");
+    Equal(ConfidenceLevel.Media, quietRds!.Confianza, "Los roles RDS se declararon Alta sin síntoma de sesión remota.");
+    Equal(84, quietRds.Puntaje, "Los roles RDS mantuvieron el puntaje dominante sin síntoma.");
+    Equal("No observado", Evidence(quietRdp, "Síntoma de sesión remota en la ventana"),
+        "La ausencia de síntoma no quedó registrada en la evidencia.");
+    True(quietRdp.HoraIncidente is null, "Sin síntoma el candidato de política RDP recibió hora de incidente.");
+
+    var symptom = new DiagnosticEvent(now.AddMinutes(-4), "TermService", "Remote Desktop Services",
+        DiagnosticLayer.Rdp, DiagnosticSeverity.Error, "RDP_SESSION_FAILURE", "La sesión RDP falló.");
+    var symptomatic = RootCauseCorrelator.Analyze(Report([symptom], now, [policy, rds]));
+    var fullRdp = symptomatic.FirstOrDefault(x => x.Id == "ROOT-WINDOWS-RDP-DISABLED-POLICY");
+    var fullRds = symptomatic.FirstOrDefault(x => x.Id == "ROOT-WINDOWS-RDS-ROLE-CONFLICT");
+    NotNull(fullRdp, "El candidato de política RDP desapareció con síntoma presente.");
+    NotNull(fullRds, "El candidato de roles RDS desapareció con síntoma presente.");
+    Equal(ConfidenceLevel.Alta, fullRdp!.Confianza, "Con síntoma la política RDP dejó de ser Alta.");
+    Equal(96, fullRdp.Puntaje, "Con síntoma el puntaje de la política RDP cambió.");
+    Equal(ConfidenceLevel.Alta, fullRds!.Confianza, "Con síntoma los roles RDS dejaron de ser Alta.");
+    Equal(97, fullRds.Puntaje, "Con síntoma el puntaje de los roles RDS cambió.");
+    True(fullRdp.HoraIncidente == symptom.Timestamp, "El síntoma no ancló la hora de incidente del candidato.");
+    Equal("RDP_SESSION_FAILURE", Evidence(fullRdp, "Síntoma de sesión remota en la ventana"),
+        "El síntoma observado no quedó registrado en la evidencia.");
+    return Task.CompletedTask;
+}
+
+static async Task WindowsPushSubscriptionIsSharedAcrossInstances()
+{
+    try
+    {
+        WindowsPushEventCollector.StopWatchers();
+        var first = await new WindowsPushEventCollector().CollectAsync(Context(TimeSpan.FromHours(1)));
+        var second = await new WindowsPushEventCollector().CollectAsync(Context(TimeSpan.FromHours(1)));
+        var coverage1 = first.Eventos.FirstOrDefault(e => e.Tipo == "WINDOWS_PUSH_EVENT_COVERAGE");
+        var coverage2 = second.Eventos.FirstOrDefault(e => e.Tipo == "WINDOWS_PUSH_EVENT_COVERAGE");
+        NotNull(coverage1, "La primera llamada push no emitió cobertura.");
+        NotNull(coverage2, "La segunda llamada push no emitió cobertura.");
+        var head1 = coverage1!.Mensaje.Split('.')[0];
+        var head2 = coverage2!.Mensaje.Split('.')[0];
+        True(head1.StartsWith("Canales suscritos: ", StringComparison.Ordinal),
+            "El mensaje de cobertura push cambió de formato.");
+        Equal(head1, head2, "La suscripción push no es estable entre instancias del collector.");
+
+        WindowsPushEventCollector.StopWatchers();
+        var third = await new WindowsPushEventCollector().CollectAsync(Context(TimeSpan.FromHours(1)));
+        var coverage3 = third.Eventos.FirstOrDefault(e => e.Tipo == "WINDOWS_PUSH_EVENT_COVERAGE");
+        NotNull(coverage3, "Tras detener watchers la suscripción no volvió a establecerse.");
+        Equal(head1, coverage3!.Mensaje.Split('.')[0],
+            "La re-suscripción tras StopWatchers cambió el número de canales suscritos.");
+    }
+    finally
+    {
+        WindowsPushEventCollector.StopWatchers();
+    }
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del push collector no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsPushEventCollector.cs"));
+    False(text.Contains("cancellationToken.Register", StringComparison.Ordinal),
+        "El push collector sigue amarrando la suscripción al token de cada llamada.");
+    True(text.Contains("EnsureSubscribed()", StringComparison.Ordinal),
+        "El push collector no idempotencia la suscripción a canales.");
+    True(text.Contains("private static bool _subscribed", StringComparison.Ordinal),
+        "El push collector no mantiene el estado de suscripción compartido por proceso.");
+}
+
+static Task GuiPrerecordsStateAndReadsFeedbackFromBothRoots()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de paridad GUI no ejecutable.");
+    var gui = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "Services", "DiagnosticExecutionService.cs"));
+    True(gui.Contains("preRecordedResult", StringComparison.Ordinal),
+        "El diagnóstico GUI no pre-graba el estado antes de correlacionar causas.");
+    True(gui.Contains("AddTransitionsFromRecordResult(", StringComparison.Ordinal),
+        "El diagnóstico GUI no integra las transiciones del pre-record antes de Analyze.");
+    True(gui.Contains("- TimeSpan.FromMinutes(15)", StringComparison.Ordinal),
+        "El diagnóstico GUI no replica el margen de 15 min del servicio para transiciones.");
+    True(gui.Contains("preRecordedResult: preRecordedResult", StringComparison.Ordinal),
+        "RecordAndEnrichAsync de la GUI no reutiliza el pre-registro del ciclo.");
+    True(gui.Contains("ReadFromRootsAsync(", StringComparison.Ordinal),
+        "El diagnóstico GUI lee feedback de una sola raíz de estado.");
+    var preIndex = gui.IndexOf("preRecordedResult", StringComparison.Ordinal);
+    var analyzeIndex = gui.IndexOf("DiagnosticWorkflow.Analyze(", StringComparison.Ordinal);
+    True(preIndex >= 0 && analyzeIndex > preIndex,
+        "El pre-record de estado ocurre después de DiagnosticWorkflow.Analyze en la GUI.");
+    var worker = File.ReadAllText(Path.Combine(root!, "src", "TDM.Service", "TdmWorker.cs"));
+    True(worker.Contains("ReadFromRootsAsync(", StringComparison.Ordinal),
+        "El servicio lee feedback de una sola raíz de estado.");
+    return Task.CompletedTask;
+}
+
+static async Task FeedbackReadMergesRootsAndDeduplicates()
+{
+    var rootA = TempDir();
+    var rootB = TempDir();
+    try
+    {
+        var storeA = new DiagnosticFeedbackStore(rootA);
+        var onlyA = await storeA.RecordAsync("ROOT-MERGE-A", "Comp A", 90, "Alta", FeedbackVerdict.Confirmada);
+        var storeB = new DiagnosticFeedbackStore(rootB);
+        Directory.CreateDirectory(Path.Combine(rootB, "state"));
+        File.Copy(storeA.Path, Path.Combine(rootB, "state", "diagnostic-feedback.jsonl"), overwrite: true);
+        var onlyB = await storeB.RecordAsync("ROOT-MERGE-B", "Comp B", 70, "Media", FeedbackVerdict.Descartada);
+
+        var merged = await DiagnosticFeedbackStore.ReadFromRootsAsync([rootA, rootB, rootA]);
+        Equal(2, merged.Count, "La lectura multi-raíz duplicó o perdió registros.");
+        True(merged.Any(x => x.Id == onlyA.Id), "El registro de la raíz A no llegó a la fusión.");
+        True(merged.Any(x => x.Id == onlyB.Id), "El registro de la raíz B no llegó a la fusión.");
+
+        var rates = DiagnosticFeedbackStore.HitRateByCandidate(merged);
+        Equal(1.0, rates["ROOT-MERGE-A"].Tasa, "La tasa de A se contaminó con la copia duplicada.");
+        Equal(0.0, rates["ROOT-MERGE-B"].Tasa, "La tasa de B cambió al fusionar raíces.");
+
+        var future = await DiagnosticFeedbackStore.ReadFromRootsAsync(
+            [rootA, rootB], from: DateTimeOffset.Now + TimeSpan.FromMinutes(1));
+        Equal(0, future.Count, "El filtro from no se aplicó en la lectura multi-raíz.");
+
+        var empty = await DiagnosticFeedbackStore.ReadFromRootsAsync([]);
+        Equal(0, empty.Count, "Una lista de raíces vacía debería devolver vacío.");
+    }
+    finally { TryDelete(rootA); TryDelete(rootB); }
 }
 
 static Task TestsRunUnderPinnedInvariantCulture()

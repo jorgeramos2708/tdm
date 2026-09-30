@@ -109,6 +109,32 @@ public sealed class DiagnosticFeedbackStore
     }
 
     /// <summary>
+    /// Lee y fusiona el feedback de varias raíces de estado (p.ej. la raíz del diagnóstico
+    /// y la raíz de máquina), deduplicando por Id para que una copia del mismo archivo en
+    /// dos raíces no doble la evidencia del ranking.
+    /// </summary>
+    public static async Task<IReadOnlyList<DiagnosticFeedback>> ReadFromRootsAsync(
+        IReadOnlyList<string> roots,
+        DateTimeOffset? from = null,
+        DateTimeOffset? to = null,
+        CancellationToken ct = default)
+    {
+        var merged = new List<DiagnosticFeedback>();
+        if (roots is null || roots.Count == 0) return merged;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in roots.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(root)) continue;
+            var items = await new DiagnosticFeedbackStore(root).ReadAsync(from, to, ct).ConfigureAwait(false);
+            foreach (var item in items)
+            {
+                if (seen.Add(item.Id)) merged.Add(item);
+            }
+        }
+        return merged.OrderBy(x => x.Timestamp).ToList();
+    }
+
+    /// <summary>
     /// Tasa de acierto por ID de candidato (confirmadas / (confirmadas + descartadas)).
     /// Base futura para ponderar patrones por historial verificado. Null sin datos.
     /// </summary>
