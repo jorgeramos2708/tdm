@@ -242,7 +242,7 @@ internal static class Program
         Run("Support_ServiceRatio", () =>
         {
             var vm = new SupportDashboardViewModel(); vm.Apply(samples);
-            Equal("3/4", vm.ServiceValue);
+            Equal("1/4", vm.ServiceValue);
             Equal(0.25d, vm.ServiceFraction);
             Equal("1 detenido", vm.ServiceDetail);
             Equal("Servicios 2/3 · Dependencias 1/1", vm.ServiceExtra);
@@ -259,7 +259,7 @@ internal static class Program
                 }
             };
             vm.Apply(new[] { refreshed });
-            Equal("3/4", vm.ServiceValue);
+            Equal("1/4", vm.ServiceValue);
             True(vm.DetailText.Contains("Saludables/neutrales: 3/4", StringComparison.Ordinal), "El detalle abierto no se actualizó con el mismo snapshot de la tarjeta.");
 
             var services = new ServicesDashboardViewModel(); services.Apply(samples);
@@ -275,6 +275,50 @@ internal static class Program
             Equal("Detenido", services.Services.Single(x => x.Name.Equals("TSplusGateway", StringComparison.OrdinalIgnoreCase)).Status);
             Equal("Complementario", services.Services.Single(x => x.Name.Equals("RemoteSupportUnattended-Service", StringComparison.OrdinalIgnoreCase)).Status);
             Equal("En ejecución", services.Dependencies.Single(x => x.Name.Equals("RemoteSupportUnattended-Service → RPCSS", StringComparison.OrdinalIgnoreCase)).Status);
+        });
+
+        Run("Support_DonutRepresentsAffectedShareOnly", () =>
+        {
+            // P4/§10: el centro mide exactamente lo mismo que el arco y que el donut de
+            // módulos (afectados/total). Antes el centro contaba "sanos" —incluyendo
+            // "No requerido"—, el arco afectados y el aro siempre estaba verde.
+            var vm = new SupportDashboardViewModel(); vm.Apply(samples);
+            Equal("1/4", vm.ServiceValue);
+            Equal(0.25d, vm.ServiceFraction);
+
+            var healthyVm = new SupportDashboardViewModel();
+            healthyVm.Apply(new[]
+            {
+                latest with
+                {
+                    ServiceStates = new Dictionary<string, string>
+                    {
+                        ["TermService"] = "Running",
+                        ["TSplusGateway"] = "Running"
+                    },
+                    DependencyStates = new Dictionary<string, string>()
+                }
+            });
+            Equal("0/2", healthyVm.ServiceValue);
+            Equal(0d, healthyVm.ServiceFraction);
+
+            var allStoppedVm = new SupportDashboardViewModel();
+            allStoppedVm.Apply(new[]
+            {
+                latest with
+                {
+                    ServiceStates = new Dictionary<string, string>
+                    {
+                        ["TermService"] = "Stopped",
+                        ["TSplusGateway"] = "Stopped"
+                    },
+                    DependencyStates = new Dictionary<string, string>()
+                }
+            });
+            Equal("2/2", allStoppedVm.ServiceValue);
+            Equal(1d, allStoppedVm.ServiceFraction);
+            True(!ReferenceEquals(allStoppedVm.ServiceHealthyAccent, healthyVm.ServiceHealthyAccent),
+                "El aro saludable quedó verde con todos los elementos caídos.");
         });
 
         Run("Support_TsplusModuleErrors", () =>
@@ -447,6 +491,29 @@ internal static class Program
             True(vm.Actions.Count > 0, "No se generaron acciones preventivas.");
         });
 
+        Run("Preventive_ScoreUsesTsplusReachableSubgraph", () =>
+        {
+            // P4/§10: gpsvc viene detenido en la muestra pero está fuera del subgrafo TSplus
+            // (Soporte y Servicios no lo muestran); el score tampoco debe contarlo.
+            var vm = new PreventiveDashboardViewModel(); vm.Apply(samples);
+            True(vm.Signals.All(x => !x.Name.Contains("gpsvc", StringComparison.OrdinalIgnoreCase)),
+                "El score preventivo emitió una señal de un servicio ajeno al subgrafo TSplus.");
+            True(vm.StabilityRows.All(x => !x.Name.Contains("gpsvc", StringComparison.OrdinalIgnoreCase)),
+                "La inestabilidad preventiva listó un servicio ajeno al subgrafo TSplus.");
+
+            // TermService sí es alcanzable desde TSplus: detenido debe reportarse.
+            var inside = new PreventiveDashboardViewModel();
+            inside.Apply(new[]
+            {
+                latest with
+                {
+                    ServiceStates = new Dictionary<string, string> { ["TermService"] = "Stopped" }
+                }
+            });
+            True(inside.Signals.Any(x => x.Name.Contains("TermService", StringComparison.OrdinalIgnoreCase)),
+                "El score preventivo ignoró un servicio detenido dentro del subgrafo TSplus.");
+        });
+
         Run("Preventive_FIX91_LocalizesVisibleOperationalStates", () =>
         {
             var vm = new PreventiveDashboardViewModel(); vm.Apply(samples);
@@ -468,7 +535,9 @@ internal static class Program
                 MemoryFreePercent = 48 - i * 3,
                 DiskFreePercent = new Dictionary<string, double> { ["C:"] = 30 - i * 2 },
                 ServiceStates = new Dictionary<string, string> { ["TSplusGateway"] = i % 2 == 0 ? "Running" : "Stopped" },
-                DependencyStates = new Dictionary<string, string> { ["RPCSS"] = i % 3 == 0 ? "Stopped" : "Running" },
+                // P4/§10: clave con relación real "origen → dependencia" dentro del subgrafo
+                // TSplus (una clave SCM cruda ajena ya no la muestran Soporte ni Servicios).
+                DependencyStates = new Dictionary<string, string> { ["TSplusGateway → RPCSS"] = i % 3 == 0 ? "Stopped" : "Running" },
                 ModuleHealth = new Dictionary<string, string> { ["RDP / Remote Access Core"] = "Saludable" }
             }).ToArray();
 

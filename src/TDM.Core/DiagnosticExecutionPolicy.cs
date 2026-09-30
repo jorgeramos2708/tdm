@@ -56,6 +56,16 @@ public sealed record DiagnosticExecutionPolicy(
         return Positive(deep ? DeepCollectorTimeout : DefaultCollectorTimeout, TimeSpan.FromSeconds(25));
     }
 
+    /// <summary>
+    /// P4/A#10: ¿queda presupuesto del ciclo para la fase longitudinal (forensic + integrity)?
+    /// El gate previo era un fijo de 45 s que congelaba los canales longitudinales en
+    /// máquinas lentas aunque el ciclo aún tuviera casi todo su presupuesto global.
+    /// </summary>
+    /// <param name="elapsed">Tiempo consumido en el ciclo desde su inicio.</param>
+    /// <param name="collectorAllowance">Coste máximo de la propia fase longitudinal.</param>
+    public bool HasBudgetForLongitudinal(TimeSpan elapsed, TimeSpan collectorAllowance)
+        => elapsed + collectorAllowance <= OverallTimeout;
+
     public DiagnosticExecutionPolicy Normalize()
         => this with
         {

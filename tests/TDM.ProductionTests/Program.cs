@@ -134,7 +134,12 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("IncidentWindowDeclaresSourceTruncation", IncidentWindowDeclaresSourceTruncation),
     ("LedgerKindChangeCreatesNewIncident", LedgerKindChangeCreatesNewIncident),
     ("TimestampParsingHasNoCulturalFallback", TimestampParsingHasNoCulturalFallback),
-    ("IncrementalReadsUtf16WithoutBom", IncrementalReadsUtf16WithoutBom)
+    ("IncrementalReadsUtf16WithoutBom", IncrementalReadsUtf16WithoutBom),
+    ("ReportDifferHandlesDuplicateFindingIdsAndUndatedReports", ReportDifferHandlesDuplicateFindingIdsAndUndatedReports),
+    ("ExportKeepsDiffCardWithDuplicateFindingIds", ExportKeepsDiffCardWithDuplicateFindingIds),
+    ("EmergencySamplePersistsJournalTransitionsAndLongitudinal", EmergencySamplePersistsJournalTransitionsAndLongitudinal),
+    ("LongitudinalPhaseBudgetGateRejectsFixed45Seconds", LongitudinalPhaseBudgetGateRejectsFixed45Seconds),
+    ("ServiceDependencyGraphIsolatesServiceFailures", ServiceDependencyGraphIsolatesServiceFailures)
 };
 
 var failed = 0;
@@ -731,6 +736,123 @@ static async Task IncrementalReadsUtf16WithoutBom()
         TryDelete(dir);
         TryDelete(stateRoot);
     }
+}
+
+static Task ReportDifferHandlesDuplicateFindingIdsAndUndatedReports()
+{
+    var now = DateTimeOffset.Now;
+    static DiagnosticFinding Finding(string id, DiagnosticSeverity severity)
+        => new(id, "App", severity, "resumen " + id, "causa " + id, [new EvidenceItem("Evidencia", id)]);
+
+    // IDs duplicados en ambos reportes: ToDictionary lanzaba ArgumentException y el
+    // exportador tragaba el error, borrando la tarjeta de diff sin rastro.
+    var previous = Report([], now.AddMinutes(-10), [Finding("DUP-1", DiagnosticSeverity.Advertencia), Finding("DUP-1", DiagnosticSeverity.Critico)]);
+    var current = Report([], now, [Finding("DUP-1", DiagnosticSeverity.Informativo), Finding("DUP-1", DiagnosticSeverity.Advertencia)]);
+    var diff = ReportDiffer.Compute(previous, current);
+    NotNull(diff, "El diff con IDs de hallazgo duplicados no debió descartarse.");
+    True(diff!.Changes.Any(c => c.Category == "Hallazgo" && c.Key == "DUP-1" && c.Kind == ReportDiffer.DiffKind.Changed),
+        "El hallazgo duplicado no produjo el cambio de severidad con last-wins.");
+
+    // Reportes sin ventana analizada: la tarjeta nunca debe mostrar 01/01/0001.
+    var undatedPrevious = previous with { PeriodoAnalizadoFin = default };
+    var undatedCurrent = current with { PeriodoAnalizadoFin = default };
+    var undated = ReportDiffer.Compute(undatedPrevious, undatedCurrent);
+    NotNull(undated, "El diff de reportes sin ventana analizada no debió descartarse.");
+    True(undated!.PreviousTimestamp != default && undated.CurrentTimestamp != default,
+        "El diff conservó timestamps sin fecha para un reporte sin ventana analizada.");
+    Equal(previous.Fin, undated.PreviousTimestamp, "El fallback de fecha anterior no usó Fin del reporte.");
+    Equal(current.Fin, undated.CurrentTimestamp, "El fallback de fecha actual no usó Fin del reporte.");
+    var card = ReportDiffer.ToHtmlCard(undated);
+    True(card.Contains("Cambios desde el reporte anterior", StringComparison.Ordinal), "La tarjeta de diff no se generó.");
+    True(!card.Contains("01/01/0001", StringComparison.Ordinal), "La tarjeta de diff mostró la fecha por defecto 01/01/0001.");
+    return Task.CompletedTask;
+}
+
+static async Task ExportKeepsDiffCardWithDuplicateFindingIds()
+{
+    var now = DateTimeOffset.Now;
+    static DiagnosticFinding Finding(string id, DiagnosticSeverity severity)
+        => new(id, "App", severity, "resumen " + id, "causa " + id, [new EvidenceItem("Evidencia", id)]);
+
+    var previous = Report([], now.AddMinutes(-20), [Finding("DUP-1", DiagnosticSeverity.Advertencia), Finding("DUP-1", DiagnosticSeverity.Critico)])
+        with { PeriodoAnalizadoFin = default };
+    var current = Report([], now, [Finding("DUP-1", DiagnosticSeverity.Advertencia), Finding("ALT-1", DiagnosticSeverity.Error)]);
+    var dir = TempDir();
+    try
+    {
+        var result = await ReportExporter.ExportAsync(current, dir, default, previous);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("Cambios desde el reporte anterior", StringComparison.Ordinal),
+            "La tarjeta de diff desapareció del HTML con IDs duplicados en el reporte previo.");
+        True(!html.Contains("01/01/0001", StringComparison.Ordinal),
+            "El HTML del reporte de diff mostró la fecha por defecto 01/01/0001.");
+    }
+    finally { TryDelete(dir); }
+}
+
+static Task EmergencySamplePersistsJournalTransitionsAndLongitudinal()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de la muestra de emergencia no ejecutable.");
+    var worker = File.ReadAllText(Path.Combine(root!, "src", "TDM.Service", "TdmWorker.cs"));
+    var start = worker.IndexOf("private async Task RunEmergencySampleAsync", StringComparison.Ordinal);
+    var end = worker.IndexOf("private IReadOnlyList<AlertSignal> BuildSignals", StringComparison.Ordinal);
+    True(start > 0 && end > start, "No se localizó el cuerpo de RunEmergencySampleAsync en TdmWorker.");
+    var body = worker[start..end];
+    True(body.Contains("StateSnapshotBuilder.Build(report, TdmProductInfo.Version)", StringComparison.Ordinal),
+        "La muestra de emergencia no pre-registra el estado en el journal service-monitor.");
+    True(body.Contains("AddTransitionsFromRecordResult", StringComparison.Ordinal),
+        "La muestra de emergencia no incorpora las transiciones del pre-registro al reporte.");
+    True(body.Contains("AddRecentMonitorTransitionsAsync", StringComparison.Ordinal),
+        "La muestra de emergencia no añade las transiciones recientes de los canales.");
+    True(body.Contains("RecordAndEnrichAsync", StringComparison.Ordinal),
+        "La muestra de emergencia no enriquece ni persiste el reporte enriquecido.");
+    True(body.Contains("CaptureLongitudinalStateIfDueAsync", StringComparison.Ordinal),
+        "La muestra de emergencia no despacha la auditoría longitudinal cuando los timers vencen.");
+    True(body.Contains("cycleStarted", StringComparison.Ordinal),
+        "La muestra de emergencia no recibe el inicio del ciclo para el gate de presupuesto longitudinal.");
+    return Task.CompletedTask;
+}
+
+static Task LongitudinalPhaseBudgetGateRejectsFixed45Seconds()
+{
+    var policy = DiagnosticExecutionPolicy.ProductionDefault;
+    // 50 s: el gate previo (fijo de 45 s) omitía la auditoría aunque el ciclo aún tuviera
+    // casi todo su presupuesto de 180 s.
+    True(policy.HasBudgetForLongitudinal(TimeSpan.FromSeconds(50), TimeSpan.FromSeconds(23)),
+        "Con 50 s consumidos aún debe haber presupuesto para la fase longitudinal.");
+    True(policy.HasBudgetForLongitudinal(TimeSpan.FromSeconds(157), TimeSpan.FromSeconds(23)),
+        "157 s + 23 s = 180 s caben exactamente en el presupuesto del ciclo.");
+    False(policy.HasBudgetForLongitudinal(TimeSpan.FromSeconds(158), TimeSpan.FromSeconds(23)),
+        "158 s + 23 s exceden los 180 s: la fase longitudinal debe omitirse.");
+    False(policy.HasBudgetForLongitudinal(TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(23)),
+        "Un ciclo ya fuera de presupuesto no debe estirarse con la auditoría longitudinal.");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del presupuesto longitudinal no ejecutable.");
+    var worker = File.ReadAllText(Path.Combine(root!, "src", "TDM.Service", "TdmWorker.cs"));
+    True(worker.Contains("HasBudgetForLongitudinal(now - cycleStarted, LongitudinalAllowance)", StringComparison.Ordinal),
+        "El worker no evalúa el presupuesto restante del ciclo para la auditoría longitudinal.");
+    False(worker.Contains("(now - cycleStarted > TimeSpan.FromSeconds(45))", StringComparison.Ordinal),
+        "El gate fijo de 45 s sigue en el worker.");
+    return Task.CompletedTask;
+}
+
+static Task ServiceDependencyGraphIsolatesServiceFailures()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del grafo SCM no ejecutable.");
+    var graph = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "ServiceDependencyGraphCollector.cs"));
+    var isolationSites = graph.Split("when (ex is not OperationCanceledException)", StringSplitOptions.None).Length - 1;
+    True(isolationSites >= 4,
+        $"El grafo SCM sólo aísla {isolationSites} lecturas; se esperaban las 4 (inventario SCM, por servicio, profundidad y nombres).");
+    True(graph.Contains("foreach (var service in all) service.Dispose()", StringComparison.Ordinal),
+        "El inventario de ServiceController del ciclo no se libera.");
+    True(graph.Contains("finally { foreach (var value in values) value.Dispose(); }", StringComparison.Ordinal),
+        "Las lecturas de nombres de ServiceController no se liberan.");
+    True(graph.Contains("using var sc = new ServiceController(serviceName)", StringComparison.Ordinal),
+        "El ServiceController por servicio no se libera con using.");
+    return Task.CompletedTask;
 }
 
 static DiagnosticContext Context(TimeSpan lookback)

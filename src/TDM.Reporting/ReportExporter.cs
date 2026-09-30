@@ -53,7 +53,13 @@ public static async Task<ReportExportResult> ExportAsync(
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
             {
-                _ = ex;
+                // P4/D#12: el diff jamás tumba la exportación, pero su ausencia tampoco
+                // debe pasar en silencio: se deja constancia en el HTML en vez de perder
+                // la tarjeta "Cambios desde el reporte anterior" sin rastro.
+                html = html.Replace("</body>",
+                    "<div class='card diff-card'><h2>Cambios desde el reporte anterior</h2><p class='muted'>El diff no pudo calcularse (" +
+                    WebUtility.HtmlEncode(ex.Message) + "). El reporte actual está completo.</p></div></body>",
+                    StringComparison.Ordinal);
             }
         }
         await File.WriteAllTextAsync(htmlPath, html, new UTF8Encoding(false), ct);

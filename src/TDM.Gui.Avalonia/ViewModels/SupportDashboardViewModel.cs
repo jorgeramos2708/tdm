@@ -90,7 +90,11 @@ public partial class SupportDashboardViewModel : ObservableObject
                 .Select(x => $"Dependencia {DashboardRules.SanitizeVisibleText(x.Key)} ({DescribeState(x.Value)})"))
             .ToList();
 
-        ServiceValue = total == 0 ? "N/D" : $"{healthy}/{total}";
+        // P4/§10: el centro mide exactamente lo mismo que el arco y que el donut de módulos
+        // (afectados/total). Antes el centro mostraba "sanos" —incluyendo "No requerido"—,
+        // el arco afectados y el aro siempre verde: tres medidas distintas que se
+        // contradecían con el panel Servicios sobre el mismo dato.
+        ServiceValue = total == 0 ? "N/D" : $"{affected}/{total}";
         ServiceFraction = total == 0 ? 0d : affected / (double)total;
         ServiceDetail = total == 0 ? "sin datos"
             : affected == 0 ? "sin incidencias"
@@ -101,7 +105,10 @@ public partial class SupportDashboardViewModel : ObservableObject
             ? string.Empty
             : $"Servicios {healthyServices}/{services.Count} · Dependencias {healthyDependencies}/{dependencies.Count}";
         ServiceAccent = total == 0 ? DashboardPalette.Muted : stopped > 0 ? DashboardPalette.Warn : review > 0 ? DashboardPalette.Warn : DashboardPalette.Good;
-        ServiceHealthyAccent = total == 0 ? DashboardPalette.Muted : DashboardPalette.Good;
+        // P4/§10: el tramo "no afectado" del aro sólo es verde si hay elementos realmente
+        // sanos/neutrales; con todo afectado o sin evaluar, el aro queda gris (antes siempre
+        // verde, incluso al 100 % de elementos caídos).
+        ServiceHealthyAccent = total == 0 || healthy == 0 ? DashboardPalette.Muted : DashboardPalette.Good;
         _servicesFullDetail = total == 0
             ? "Sin datos de servicios o dependencias."
             : $"Saludables/neutrales: {healthy}/{total}. Servicios: {healthyServices}/{services.Count}; detenidos: {stoppedServices}; revisar: {reviewServices}. " +

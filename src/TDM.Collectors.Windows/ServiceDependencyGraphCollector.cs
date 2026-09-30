@@ -27,7 +27,9 @@ public sealed class ServiceDependencyGraphCollector : IReadOnlyCollector
         {
             all = ServiceController.GetServices();
         }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        // P4/C#5: cualquier fallo del SCM (no sólo InvalidOperationException/Win32) se declara
+        // NO EVALUADA en vez de tumbar el collector; la cancelación sí se propaga.
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             findings.Add(new DiagnosticFinding(
                 "SERVICE-GRAPH-NOT-EVALUATED", "Dependencias de servicios", DiagnosticSeverity.Advertencia,
@@ -210,7 +212,9 @@ public sealed class ServiceDependencyGraphCollector : IReadOnlyCollector
             TraverseDependencies(serviceName, 0, seen, events, coverage, context, ct);
             coverage.Add(new EvidenceItem(serviceName, $"{status}; dependencias={dependencies.Count}; dependientes={dependents.Count}"));
         }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.TimeoutException)
+        // P4/C#5: aislamiento por servicio con cualquier tipo de error (un SecurityException
+        // en el servicio #5 ya no aborta el recorrido de los demás); la cancelación se propaga.
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             coverage.Add(new EvidenceItem(serviceName, "No evaluado: " + ex.Message));
         }
@@ -235,7 +239,9 @@ public sealed class ServiceDependencyGraphCollector : IReadOnlyCollector
             sc = new ServiceController(root);
             read = ReadNames(() => sc.ServicesDependedOn);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.TimeoutException)
+        // P4/C#5: mismo aislamiento que a profundidad 0; el error se reporta como cobertura
+        // parcial y el resto del grafo sigue recorriéndose (el ServiceController se libera abajo).
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             coverage.Add(new EvidenceItem($"{root} / profundidad {depth + 1}", "No evaluado: " + ex.Message));
             sc?.Dispose();
@@ -293,7 +299,9 @@ public sealed class ServiceDependencyGraphCollector : IReadOnlyCollector
             }
             finally { foreach (var value in values) value.Dispose(); }
         }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.TimeoutException)
+        // P4/C#5: cualquier fallo al leer nombres (no sólo los tres tipos anteriores) deja la
+        // relación como NO EVALUADA sin perder las demás lecturas del recorrido.
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new ServiceNamesRead([], false, ex.Message);
         }

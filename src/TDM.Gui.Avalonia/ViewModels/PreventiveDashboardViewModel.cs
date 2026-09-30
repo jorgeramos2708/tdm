@@ -60,6 +60,12 @@ public partial class PreventiveDashboardViewModel : ObservableObject
         var resourceLatest = samples.LastOrDefault(x => x.DiskFreePercent.Count > 0 || x.TcpEphemeralUsagePercent.HasValue) ?? latest;
         var lastServiceStates = DashboardRules.TargetServiceStates(samples.LastOrDefault(x => x.ServiceStates is { Count: > 0 })?.ServiceStates);
         var lastDependencyStates = samples.LastOrDefault(x => x.DependencyStates is { Count: > 0 })?.DependencyStates;
+        // P4/§10: el score evalúa el MISMO subgrafo TSplus que los paneles Soporte y Servicios;
+        // con el diccionario SCM crudo, un servicio sin relación con TSplus penalizaba aquí
+        // aunque el resto de paneles ni siquiera lo mostrara.
+        var operational = DashboardRules.TsplusOperationalStates(lastServiceStates, lastDependencyStates);
+        lastServiceStates = operational.Services;
+        lastDependencyStates = operational.Dependencies;
         var scoringLatest = diagnosticLatest with
         {
             CpuPercent = cpuLatest.CpuPercent,
@@ -372,10 +378,14 @@ public partial class PreventiveDashboardViewModel : ObservableObject
         var recent = samples.Where(x => x.Timestamp >= end - TimeSpan.FromHours(2)).ToList();
         if (recent.Count < 3) recent = samples.TakeLast(Math.Min(30, samples.Count)).ToList();
 
+        // P4/§10: mismas reglas de subgrafo TSplus que el resto de paneles; el diccionario
+        // SCM crudo listaba inestabilidades de servicios sin relación con TSplus y el score
+        // las contaba. El filtro gobierna los nombres; los valores crudos por muestra son
+        // idénticos (sólo se eliminan claves fuera del subgrafo).
         var dictionaries = recent
-            .Select(x => dependency ? x.DependencyStates : x.ServiceStates)
-            .Where(x => x is not null && x.Count > 0)
-            .Cast<IReadOnlyDictionary<string, string>>()
+            .Select(x => DashboardRules.TsplusOperationalStates(x.ServiceStates, x.DependencyStates))
+            .Select(op => dependency ? op.Dependencies : op.Services)
+            .Where(x => x.Count > 0)
             .ToList();
         if (dictionaries.Count == 0) return Array.Empty<SignalRow>();
 

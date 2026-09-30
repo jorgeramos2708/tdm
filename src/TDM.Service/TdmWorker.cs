@@ -22,6 +22,8 @@ public sealed class TdmWorker : BackgroundService
     private static readonly TimeSpan SnapshotTimeout = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan ForensicStateInterval = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan IntegrityStateInterval = TimeSpan.FromMinutes(10);
+    // P4/A#10: coste máximo reservado de la propia fase longitudinal (forensic 8 s + integrity 15 s).
+    private static readonly TimeSpan LongitudinalAllowance = TimeSpan.FromSeconds(23);
 
     private readonly ILogger<TdmWorker> _logger;
     private readonly string _root = TdmDataPaths.MachineRootPath;
@@ -134,7 +136,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
                         {
                             try
                             {
-                                await RunEmergencySampleAsync(observabilityStore, settingsStore, ledger, dispatcher, stoppingToken).ConfigureAwait(false);
+                                await RunEmergencySampleAsync(observabilityStore, settingsStore, ledger, dispatcher, cycleStarted, stoppingToken).ConfigureAwait(false);
                             }
                             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
                             {
@@ -375,9 +377,12 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
 
     /// <summary>
     /// Muestra mínima bajo presión: solo los readers incrementales (Windows + TSplus),
-    /// con timeout corto y sin fase pesada ni longitudinal. Reutiliza el mismo pipeline
-    /// de persistencia/ledger/dispatch para que paros y crashes sigan generando incidentes
-    /// y alertas aunque el ciclo normal esté aplazado. Usa el último snapshot conocido;
+    /// con timeout corto y sin fase pesada. Reutiliza el mismo pipeline de
+    /// persistencia/ledger/dispatch para que paros y crashes sigan generando incidentes
+    /// y alertas aunque el ciclo normal esté aplazado. P4/A#9: además escribe el journal
+    /// (pre-registro + enriquecimiento), las transiciones recientes y —si los temporizadores
+    /// vencieron— la auditoría longitudinal, para que la ventana PROTECTED no deje los
+    /// canales congelados mientras dure la carga. Usa el último snapshot conocido;
     /// sin snapshot aún, no hay contexto válido y se omite.
     /// </summary>
     private async Task RunEmergencySampleAsync(
@@ -385,6 +390,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
         SupportMonitoringSettingsStore settingsStore,
         IncidentLedger ledger,
         NotificationDispatcher dispatcher,
+        DateTimeOffset cycleStarted,
         CancellationToken ct)
     {
         var snapshot = _snapshot;
@@ -429,7 +435,23 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
             policy,
             _circuitBreaker);
         var report = await engine.RunAsync(context, ct).ConfigureAwait(false);
+
+        // P4/A#9: espeja el ciclo normal para que la ventana PROTECTED no pierda el journal
+        // ni las transiciones. El estado se registra antes de correlacionar (la transición
+        // reciente participa en el RCA de esta misma muestra) y las transiciones recientes
+        // de los canales se añaden antes de Analize.
+        var stateStore = new LocalStateStore(_root);
+        var preRecordedSnapshot = StateSnapshotBuilder.Build(report, TdmProductInfo.Version);
+        var preRecordedResult = await stateStore.RecordAsync(preRecordedSnapshot, "service-monitor", ct).ConfigureAwait(false);
+        report = StateReportIntegrator.AddTransitionsFromRecordResult(report, preRecordedResult, "service-monitor");
+        var transitionsFrom = (report.PeriodoAnalizadoInicio == default ? report.Inicio : report.PeriodoAnalizadoInicio) - TimeSpan.FromMinutes(15);
+        var transitionsTo = report.PeriodoAnalizadoFin == default ? report.Fin : report.PeriodoAnalizadoFin;
+        report = await StateReportIntegrator.AddRecentMonitorTransitionsAsync(report, transitionsFrom, transitionsTo, ct, _root).ConfigureAwait(false);
+
         report = DiagnosticWorkflow.Analyze(report, includeGuidedResolution: false);
+        report = await StateReportIntegrator.RecordAndEnrichAsync(
+            report, TdmProductInfo.Version, ct, channel: "service-monitor", rootPath: _root,
+            preRecordedResult: preRecordedResult).ConfigureAwait(false);
         var processMetrics = CaptureSelfMetrics();
         var runtime = new ObservabilityRuntimeState
         {
@@ -448,6 +470,11 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
         var signals = BuildSignals(report, managed, includeHeavy: false, settings.Thresholds);
         var emitted = await dispatcher.DispatchAsync(signals, sample.Timestamp, ct).ConfigureAwait(false);
         _completedSamples++;
+        // P4/A#9: con el ciclo normal aplazado, los temporizadores forensic/integrity siguen
+        // venciendo en PROTECTED; si la emergencia no los despacha, los canales longitudinales
+        // quedan congelados el tiempo que dure la carga. El gate de presupuesto y los propios
+        // temporizadores acotan el coste (forensic 8 s + integrity 15 s sólo al vencer).
+        await CaptureLongitudinalStateIfDueAsync(snapshot, cycleStarted, ct).ConfigureAwait(false);
         _logger.LogWarning("Muestra de emergencia completada tras {Deferred} aplazamientos consecutivos: {Managed} gestionados, {Emitted} señales.",
             _consecutiveDefers, managed.Count, emitted.Count);
     }
@@ -596,12 +623,15 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
     private async Task CaptureLongitudinalStateIfDueAsync(SystemSnapshot snapshot, DateTimeOffset cycleStarted, CancellationToken ct)
     {
         var now = DateTimeOffset.Now;
-        // Q5: la auditoría longitudinal (forensic 8 s + integrity 15 s secuenciales) no debe
-        // estirar el ciclo más allá de la cadencia: si el monitor ya consumió el presupuesto,
-        // se omite este ciclo (los temporizadores conservan su cadencia y reintentan).
-        if (now - cycleStarted > TimeSpan.FromSeconds(45))
+        // Q5/P4-A#10: la auditoría longitudinal (forensic 8 s + integrity 15 s secuenciales) no
+        // debe estirar el ciclo más allá de su presupuesto: se omite sólo cuando el tiempo ya
+        // consumido más el coste de la propia fase exceden el presupuesto global del ciclo
+        // (3 min, mismo ProductionDefault que arma el engine). El gate previo de 45 s era
+        // fijo y congelaba los canales longitudinales en máquinas lentas aunque el ciclo
+        // aún tuviera casi todo su presupuesto.
+        if (!DiagnosticExecutionPolicy.ProductionDefault.HasBudgetForLongitudinal(now - cycleStarted, LongitudinalAllowance))
         {
-            _logger.LogWarning("Se omite la auditoría longitudinal de este ciclo para preservar la cadencia de monitoreo.");
+            _logger.LogWarning("Se omite la auditoría longitudinal de este ciclo: el presupuesto restante no cubre forensic + integrity.");
             return;
         }
         if (now >= _nextForensicStateAt)

@@ -99,9 +99,14 @@ public static class ReportDiffer
             }
 }
 
-        // Findings: by Id
-        var prevFindings = previous.Hallazgos.ToDictionary(f => f.Id, StringComparer.OrdinalIgnoreCase);
-        var currFindings = current.Hallazgos.ToDictionary(f => f.Id, StringComparer.OrdinalIgnoreCase);
+        // Findings: by Id (P4/D#12: un Id duplicado no puede tumbar el diff; como en las
+        // causas, el último hallazgo del mismo Id es el que prevalece).
+        var prevFindings = previous.Hallazgos
+            .GroupBy(f => f.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Last(), StringComparer.OrdinalIgnoreCase);
+        var currFindings = current.Hallazgos
+            .GroupBy(f => f.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Last(), StringComparer.OrdinalIgnoreCase);
 
         foreach (var kv in currFindings)
         {
@@ -163,8 +168,8 @@ public static class ReportDiffer
         }
 
 return new DiffResult(
-            previous.PeriodoAnalizadoFin,
-            current.PeriodoAnalizadoFin,
+            EffectiveTimestamp(previous),
+            EffectiveTimestamp(current),
             changes.OrderBy(c => c.Category).ThenBy(c => c.Key).ToList(),
             previous.Hallazgos.Count,
             current.Hallazgos.Count,
@@ -175,6 +180,14 @@ return new DiffResult(
             prevImpact,
             currImpact);
     }
+
+    // P4/D#12: un reporte guardado sin ventana analizada no debe producir "01/01/0001"
+    // en la tarjeta ni en el JSON; se cae a la vida real del reporte (Fin/Inicio) y, en el
+    // peor de los casos, la tarjeta declara la fecha como no declarada.
+    private static DateTimeOffset EffectiveTimestamp(DiagnosticReport report)
+        => report.PeriodoAnalizadoFin != default ? report.PeriodoAnalizadoFin
+            : report.Fin != default ? report.Fin
+            : report.Inicio;
 
     private static string StableCauseKey(RootCauseCandidate c)
         => $"{c.Componente}|{c.Capa}|{c.OrigenClasificado}";
@@ -195,10 +208,11 @@ return new DiffResult(
     {
         ArgumentNullException.ThrowIfNull(diff);
         static string H(string? value) => WebUtility.HtmlEncode(value ?? "");
+        static string Stamp(DateTimeOffset value) => value == default ? "Fecha no declarada" : value.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
         var sb = new StringBuilder();
         sb.Append("<div class='card diff-card'><h2>Cambios desde el reporte anterior</h2>");
-        sb.Append("<p class='muted'>Anterior: " + diff.PreviousTimestamp.ToLocalTime().ToString("dd/MM/yyyy HH:mm") +
-            " | Actual: " + diff.CurrentTimestamp.ToLocalTime().ToString("dd/MM/yyyy HH:mm") +
+        sb.Append("<p class='muted'>Anterior: " + Stamp(diff.PreviousTimestamp) +
+            " | Actual: " + Stamp(diff.CurrentTimestamp) +
             " | Hallazgos: " + diff.PreviousFindings + " -&gt; " + diff.CurrentFindings +
             " | Causas: " + diff.PreviousCauses + " -&gt; " + diff.CurrentCauses + "</p><ul>");
         foreach (var change in diff.Changes.Take(40))
