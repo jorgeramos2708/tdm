@@ -51,7 +51,7 @@ public partial class PreventiveDashboardViewModel : ObservableObject
         CpuCriticalThreshold = thresholds.CpuCritical;
         MemoryWarningThreshold = thresholds.MemoryUsedWarning;
         MemoryCriticalThreshold = thresholds.MemoryUsedCritical;
-        if (samples.Count == 0) { Reset(); return; }
+        if (samples.Count == 0) { Reset(thresholds); return; }
         var latest = samples[^1];
         var diagnosticLatest = samples.LastOrDefault(x => x.IsDiagnosticSample) ?? latest;
         var moduleLatest = samples.LastOrDefault(x => x.ModuleHealth.Count > 0) ?? diagnosticLatest;
@@ -554,7 +554,7 @@ public partial class PreventiveDashboardViewModel : ObservableObject
         return $"{minutes / 60d:0.0} h";
     }
 
-    private void Reset()
+    private void Reset(SupportThresholds thresholds)
     {
         Transitions = BaselineDrift = CrashLoops = "0";
         ModuleHealth = "NO EVALUADO";
@@ -572,7 +572,6 @@ public partial class PreventiveDashboardViewModel : ObservableObject
         Signals = StabilityRows = Actions = Array.Empty<SignalRow>();
         CpuSeries = MemoryUsedSeries = Array.Empty<double>();
         CpuValue = MemoryValue = "N/D";
-        var thresholds = SupportMonitoringSettings.Default.Thresholds;
         CpuWarningThreshold = thresholds.CpuWarning;
         CpuCriticalThreshold = thresholds.CpuCritical;
         MemoryWarningThreshold = thresholds.MemoryUsedWarning;

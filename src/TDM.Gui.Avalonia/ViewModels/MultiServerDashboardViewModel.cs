@@ -18,9 +18,11 @@ public partial class MultiServerDashboardViewModel : ObservableObject
     [ObservableProperty] private bool _isDetailVisible;
     private string _nodesFullDetail = "Sin datos de nodos en la granja.";
     private IReadOnlyList<FederationNodeStatus> _statuses = [];
+    private SupportThresholds _thresholds = SupportMonitoringSettings.Default.Thresholds;
 
-    public void Apply(string coordinator, IReadOnlyList<FederationNodeStatus> statuses)
+    public void Apply(string coordinator, IReadOnlyList<FederationNodeStatus> statuses, SupportThresholds? thresholds = null)
     {
+        _thresholds = thresholds ?? SupportMonitoringSettings.Default.Thresholds;
         Coordinator = string.IsNullOrWhiteSpace(coordinator) ? Environment.MachineName : coordinator;
         _statuses = statuses;
         Total = statuses.Count.ToString();
@@ -62,7 +64,7 @@ public partial class MultiServerDashboardViewModel : ObservableObject
     private string BuildNodesDetail()
     {
         if (_statuses.Count == 0) return "Sin nodos configurados en la granja.";
-        var thresholds = SupportMonitoringSettings.Default.Thresholds;
+        var thresholds = _thresholds;
         var builder = new StringBuilder();
         builder.Append($"Nodos: {Total} · En línea: {Online} · Degradados: {Degraded} · Sin datos: {Offline}.");
         builder.AppendLine();

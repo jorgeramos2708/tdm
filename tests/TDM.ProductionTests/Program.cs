@@ -123,7 +123,12 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("AnalysisWindowClipIsWiredAcrossRcaFeeds", AnalysisWindowClipIsWiredAcrossRcaFeeds),
     ("ExportDependencyRowsShowOriginServiceAndWarnOnNotEvaluated", ExportDependencyRowsShowOriginServiceAndWarnOnNotEvaluated),
     ("ExportFooterReportsHiddenDependencyRows", ExportFooterReportsHiddenDependencyRows),
-    ("ScmDriftBaselineSkipsFailedReads", ScmDriftBaselineSkipsFailedReads)
+    ("ScmDriftBaselineSkipsFailedReads", ScmDriftBaselineSkipsFailedReads),
+    ("TsplusSpanishLogLinesClassify", TsplusSpanishLogLinesClassify),
+    ("CorruptSnapshotIsTelemetered", CorruptSnapshotIsTelemetered),
+    ("ConfigurationHistoryDiffWorksAcrossGenerations", ConfigurationHistoryDiffWorksAcrossGenerations),
+    ("DiagnosticAvaloniaTransitionsReadAcrossChannels", DiagnosticAvaloniaTransitionsReadAcrossChannels),
+    ("ExportRendersServiceStateAndProcessSections", ExportRendersServiceStateAndProcessSections)
 };
 
 var failed = 0;
@@ -2586,6 +2591,174 @@ static Task ScmDriftBaselineSkipsFailedReads()
           text.IndexOf("CollectorCursorStore.TrySave(BaselineKey", StringComparison.Ordinal),
         "La línea base del grafo SCM se guarda sin pasar por la guarda de lectura fallida.");
     return Task.CompletedTask;
+}
+
+static Task TsplusSpanishLogLinesClassify()
+{
+    var context = Context(TimeSpan.FromHours(1));
+    var denied = TsplusLogParser.ParseLine("Remote Access", "x.log",
+        "No se pudo iniciar la aplicación: acceso denegado", 1, context);
+    NotNull(denied, "Una línea de error en español no generó evento.");
+    Equal(DiagnosticSeverity.Error, denied!.Severidad, "La línea de error en español no se clasificó como Error.");
+    Equal("ACCESS_DENIED", denied.Tipo, "La denegación en español no se clasificó como ACCESS_DENIED.");
+
+    var warning = TsplusLogParser.ParseLine("Remote Access", "x.log",
+        "ADVERTENCIA: tiempo agotado al conectar con el portal", 1, context);
+    NotNull(warning, "Una advertencia en español no generó evento.");
+    Equal(DiagnosticSeverity.Advertencia, warning!.Severidad, "El prefijo ADVERTENCIA no se interpretó como Advertencia.");
+
+    var critical = TsplusLogParser.ParseLine("Remote Access", "x.log",
+        "CRÍTICO: fallo del servicio de publicación", 1, context);
+    NotNull(critical, "Una línea crítica en español no generó evento.");
+    Equal(DiagnosticSeverity.Critico, critical!.Severidad, "El prefijo CRÍTICO no se interpretó como Crítico.");
+
+    var healthy = TsplusLogParser.ParseLine("Remote Access", "x.log",
+        "Sin errores en la última hora", 1, context);
+    True(healthy is null, "Un resumen sano en español se clasificó como falla.");
+    return Task.CompletedTask;
+}
+
+static async Task CorruptSnapshotIsTelemetered()
+{
+    var root = TempDir();
+    try
+    {
+        var store = new LocalStateStore(root);
+        await store.SaveBaselineAsync(StateSnapshotBuilder.Build(
+            Report([], DateTimeOffset.Now), "1.0.0"), replace: true);
+        File.WriteAllText(store.BaselinePath, "{\"schemaVersion\": ");
+        var before = LocalStateStore.CorruptSnapshotReadCount;
+        var loaded = await store.LoadBaselineAsync();
+        True(loaded is null, "Un snapshot de línea base corrupto no devolvió null.");
+        True(LocalStateStore.CorruptSnapshotReadCount > before,
+            "La lectura de snapshot corrupto no se telemetrizó con el contador.");
+        True(store.BaselinePath == LocalStateStore.LastCorruptSnapshotPath,
+            "El telemetro de snapshot corrupto no conserva la ruta leída.");
+        var status = await store.GetStatusAsync();
+        True(status.CorruptSnapshotReads > before,
+            "El estado local no expone la lectura de snapshot corrupto.");
+    }
+    finally { TryDelete(root); }
+}
+
+static Task ConfigurationHistoryDiffWorksAcrossGenerations()
+{
+    var stateRoot = TempDir();
+    var prior = Environment.GetEnvironmentVariable("TDM_STATE_ROOT");
+    try
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", stateRoot);
+        var store = ConfigurationHistoryStore.Instance;
+        var genA = new ConfigBaselineState(
+            new Dictionary<string, string> { ["a.ini"] = "hash-a" },
+            DateTimeOffset.UtcNow.AddDays(-2),
+            new Dictionary<string, Dictionary<string, List<string>>>
+            {
+                ["a.ini"] = new() { ["appsettings"] = ["Port=443"] }
+            });
+        var genB = new ConfigBaselineState(
+            new Dictionary<string, string> { ["a.ini"] = "hash-a", ["b.ini"] = "hash-b" },
+            DateTimeOffset.UtcNow.AddDays(-1),
+            new Dictionary<string, Dictionary<string, List<string>>>
+            {
+                ["a.ini"] = new() { ["appsettings"] = ["Port=443"] },
+                ["b.ini"] = new() { ["appsettings"] = ["Mode=web"] }
+            });
+        var genC = new ConfigBaselineState(
+            new Dictionary<string, string> { ["a.ini"] = "hash-a2", ["b.ini"] = "hash-b" },
+            DateTimeOffset.UtcNow,
+            new Dictionary<string, Dictionary<string, List<string>>>
+            {
+                ["a.ini"] = new() { ["appsettings"] = ["Port=8443"] },
+                ["b.ini"] = new() { ["appsettings"] = ["Mode=web"] }
+            });
+        store.SaveAsync(genA);
+        store.SaveAsync(genB);
+        store.SaveAsync(genC);
+
+        var latest = store.GetLatestAsync();
+        NotNull(latest, "La última generación no se persistió.");
+        Equal(genC.SavedAt, latest!.SavedAt, "La línea base latest no corresponde a la última generación guardada.");
+        var previous = store.GetGenerationAsync(1);
+        NotNull(previous, "La generación anterior no se recuperó del historial.");
+        Equal(genB.SavedAt, previous!.SavedAt, "La generación anterior no es la inmediatamente previa a la última.");
+        var twoBack = store.GetGenerationAsync(2);
+        NotNull(twoBack, "La segunda generación anterior no se recuperó del historial.");
+        Equal(genA.SavedAt, twoBack!.SavedAt, "La segunda generación anterior no corresponde a la primera generación guardada.");
+
+        var diff = store.DiffAgainstGenerationAsync(genC, 1);
+        True(diff.Count > 0, "El diff contra la generación anterior quedó vacío pese a cambios reales.");
+        var summary = store.GetMultiGenDiffSummaryAsync(genC, 5);
+        True(summary.Contains("Gen -1", StringComparison.Ordinal),
+            "El resumen multi-generación no detalla la generación inmediatamente previa.");
+        True(summary.Contains("Gen -2", StringComparison.Ordinal),
+            "El resumen multi-generación no detalla la segunda generación previa.");
+
+        store.SaveAsync(new ConfigBaselineState(
+            new Dictionary<string, string> { ["z.ini"] = "hash-z" }, DateTimeOffset.UtcNow.AddDays(-45)));
+        True(store.GetHistoryAsync().All(x => x.SavedAt >= DateTimeOffset.UtcNow.AddDays(-30)),
+            "Una generación fuera de la retención de 30 días sobrevivió al podado.");
+        return Task.CompletedTask;
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", prior);
+        TryDelete(stateRoot);
+    }
+}
+
+static async Task DiagnosticAvaloniaTransitionsReadAcrossChannels()
+{
+    var root = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var store = new LocalStateStore(root);
+        await store.RecordAsync(StateSnapshotBuilder.Build(
+            Report([ServiceStateEvent(now, "Running")], now), "1.0.0"), "diagnostic-avalonia");
+        var second = await store.RecordAsync(StateSnapshotBuilder.Build(
+            Report([ServiceStateEvent(now.AddSeconds(5), "Stopped")], now.AddSeconds(5)), "1.0.0"), "diagnostic-avalonia");
+        Equal(1, second.Transitions.Count, "precondición: el canal diagnostic-avalonia debe producir la transición Running→Stopped.");
+
+        var report = await StateReportIntegrator.AddRecentMonitorTransitionsAsync(
+            Report([], now.AddSeconds(5)), now.AddSeconds(-1), now.AddSeconds(10), rootPath: root);
+        var readBack = report.Eventos.Count(e => e.Tipo == "TDM_MONITOR_STATE_TRANSITION"
+            && e.Componente.Equals("Spooler", StringComparison.OrdinalIgnoreCase));
+        Equal(1, readBack, "La lectura cruzada ignoró las transiciones pre-grabadas por la GUI en diagnostic-avalonia.");
+    }
+    finally { TryDelete(root); }
+}
+
+static async Task ExportRendersServiceStateAndProcessSections()
+{
+    var dir = TempDir();
+    var quietDir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var crash = new DiagnosticEvent(now.AddMinutes(-5), "Windows Error Reporting", "sql.exe",
+            DiagnosticLayer.Windows, DiagnosticSeverity.Error, "APPLICATION_CRASH",
+            "La aplicación sql.exe terminó inesperadamente.");
+        var result = await ReportExporter.ExportAsync(
+            Report([ServiceStateEvent(now, "Stopped"), crash], now), dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("Estado de servicios Windows/TSplus", StringComparison.Ordinal),
+            "El HTML no incluye la sección de estado de servicios.");
+        True(html.Contains("<td>Spooler</td>", StringComparison.Ordinal),
+            "La sección de estado de servicios no muestra el servicio observado.");
+        True(html.Contains("Procesos afectados", StringComparison.Ordinal),
+            "El HTML no incluye la sección de procesos afectados.");
+        True(html.Contains("<td>sql.exe</td>", StringComparison.Ordinal),
+            "La sección de procesos afectados no muestra el proceso caído.");
+
+        var quiet = await ReportExporter.ExportAsync(Report([], now), quietDir, CancellationToken.None);
+        var quietHtml = await File.ReadAllTextAsync(quiet.HtmlPath);
+        False(quietHtml.Contains("Estado de servicios Windows/TSplus", StringComparison.Ordinal),
+            "Un informe sin eventos de servicio aun así renderizó la sección de servicios.");
+        False(quietHtml.Contains("Procesos afectados", StringComparison.Ordinal),
+            "Un informe sin caídas aun así renderizó la sección de procesos afectados.");
+    }
+    finally { TryDelete(dir); TryDelete(quietDir); }
 }
 
 static DiagnosticEvent ServiceStateEvent(DateTimeOffset at, string state)

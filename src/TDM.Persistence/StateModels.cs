@@ -52,7 +52,8 @@ public sealed record LocalStoreStatus(
     DateTimeOffset? BaselineCapturedAt,
     int RetentionDays,
     int HistoryFileCount,
-    int TransitionFileCount);
+    int TransitionFileCount,
+    long CorruptSnapshotReads = 0);
 
 public sealed record RecordResult(
     PersistentStateSnapshot Snapshot,

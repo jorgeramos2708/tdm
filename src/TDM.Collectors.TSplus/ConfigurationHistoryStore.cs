@@ -37,8 +37,7 @@ public sealed class ConfigurationHistoryStore
         CollectorCursorStore.TrySave(historyKey, baseline, out _);
         CollectorCursorStore.TrySave("tsplus-config-baseline", baseline, out _);
 
-        // Prune old entries
-        PruneOldEntriesAsync(ct).GetAwaiter().GetResult();
+        PruneOldEntries();
     }
 
     /// <summary>
@@ -52,34 +51,39 @@ public sealed class ConfigurationHistoryStore
     }
 
     /// <summary>
-    /// Gets all historical baselines within the retention period.
+    /// Gets all historical baselines within the retention period, newest first.
     /// </summary>
     public IReadOnlyList<ConfigBaselineState> GetHistoryAsync(int retentionDays = DefaultRetentionDays, CancellationToken ct = default)
     {
-        var results = new List<ConfigBaselineState>();
         var cutoff = DateTimeOffset.UtcNow.AddDays(-retentionDays);
+        var results = new List<ConfigBaselineState>();
+        foreach (var key in CollectorCursorStore.ListKeys(HistoryKeyPrefix))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (CollectorCursorStore.TryLoad<ConfigBaselineState>(key, out var entry, out _) && entry is not null && entry.SavedAt >= cutoff)
+                results.Add(entry);
+        }
 
-        // Since we can't easily list keys in CollectorCursorStore, we try known pattern
-        // For now, we return just the latest. Full history listing would require
-        // a different storage mechanism (e.g., directory of files).
-        // TODO: Implement full history listing with file-based storage.
-        var latest = GetLatestAsync(ct);
-        if (latest is not null && latest.SavedAt >= cutoff)
-            results.Add(latest);
-
-        return results;
+        return results
+            .OrderByDescending(x => x.SavedAt)
+            .Take(MaxHistoryEntries)
+            .ToList();
     }
 
-/// <summary>
+    /// <summary>
     /// Gets a baseline from a specific generation ago (1 = previous, 2 = two gens ago, etc.)
+    /// relative to the latest saved baseline.
     /// </summary>
     public ConfigBaselineState? GetGenerationAsync(int generationsAgo, CancellationToken ct = default)
     {
         if (generationsAgo <= 0) return GetLatestAsync(ct);
-        
-        // For now, we only have single baseline. Full multi-gen requires file-based history.
-        // TODO: Implement full history with file-based storage.
-        return null;
+
+        var latest = GetLatestAsync(ct);
+        var previous = GetHistoryAsync(DefaultRetentionDays, ct)
+            .Where(x => latest is null || x.SavedAt != latest.SavedAt)
+            .ToList();
+        if (previous.Count == 0) return latest;
+        return generationsAgo <= previous.Count ? previous[generationsAgo - 1] : null;
     }
 
     /// <summary>
@@ -124,12 +128,21 @@ public sealed class ConfigurationHistoryStore
             : string.Join(" | ", summaries);
     }
 
-    private async Task PruneOldEntriesAsync(CancellationToken ct)
+    private void PruneOldEntries()
     {
-        // Since we can't easily list all keys in CollectorCursorStore,
-        // we rely on TTL-based cleanup in the store itself or a separate process.
-        // For now, we just keep the latest. Full pruning would require
-        // enumerating keys in the store.
-        await Task.CompletedTask;
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-DefaultRetentionDays);
+        var entries = new List<(string Key, DateTimeOffset SavedAt)>();
+        foreach (var key in CollectorCursorStore.ListKeys(HistoryKeyPrefix))
+        {
+            if (CollectorCursorStore.TryLoad<ConfigBaselineState>(key, out var entry, out _) && entry is not null)
+                entries.Add((key, entry.SavedAt));
+        }
+
+        var ordered = entries.OrderByDescending(x => x.SavedAt).ToList();
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            if (ordered[i].SavedAt < cutoff || i >= MaxHistoryEntries)
+                CollectorCursorStore.TryDelete(ordered[i].Key);
+        }
     }
 }

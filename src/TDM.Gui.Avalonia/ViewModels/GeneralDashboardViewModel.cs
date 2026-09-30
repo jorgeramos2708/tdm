@@ -19,11 +19,11 @@ public partial class GeneralDashboardViewModel : ObservableObject
     [ObservableProperty] private IReadOnlyList<double> _memoryUsedSeries = Array.Empty<double>();
     [ObservableProperty] private IReadOnlyList<ModuleRow> _modules = Array.Empty<ModuleRow>();
 
-    public void Apply(IReadOnlyList<ObservabilitySample> samples)
+    public void Apply(IReadOnlyList<ObservabilitySample> samples, SupportThresholds? thresholds = null)
     {
         if (samples.Count == 0) { Reset(); return; }
         var latest = samples[^1];
-        var thresholds = SupportMonitoringSettings.Default.Thresholds;
+        thresholds ??= SupportMonitoringSettings.Default.Thresholds;
         var moduleSample = samples.LastOrDefault(x => x.ModuleHealth.Count > 0) ?? latest;
         var cpuSample = samples.LastOrDefault(x => x.CpuPercent.HasValue) ?? latest;
         var memorySample = samples.LastOrDefault(x => x.MemoryFreePercent.HasValue) ?? latest;

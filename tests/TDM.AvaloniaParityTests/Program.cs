@@ -891,6 +891,60 @@ internal static class Program
                 "El centro de soporte no distingue su universo de los incidentes agrupados del informe.");
         });
 
+        Run("GuiThresholdsReachGeneralAndPreventivePanels", () =>
+        {
+            var defaults = SupportMonitoringSettings.Default.Thresholds;
+            var warnish = defaults with { CpuWarning = 10d, CpuCritical = 90d };
+            var goodish = defaults with { CpuWarning = 85d, CpuCritical = 95d };
+            var samples = new[] { new ObservabilitySample { Timestamp = now, CpuPercent = 50d } };
+
+            var generalWarn = new GeneralDashboardViewModel();
+            generalWarn.Apply(samples, warnish);
+            var generalGood = new GeneralDashboardViewModel();
+            generalGood.Apply(samples, goodish);
+            True(!ReferenceEquals(generalWarn.CpuAccent, generalGood.CpuAccent),
+                "El panel General ignora los umbrales configurados: coloreó igual con umbrales distintos.");
+
+            var preventive = new PreventiveDashboardViewModel();
+            preventive.Apply(Array.Empty<ObservabilitySample>(), warnish);
+            True(preventive.CpuWarningThreshold == warnish.CpuWarning,
+                "El panel Preventivo no aplicó los umbrales configurados en su estado sin datos.");
+            True(preventive.CpuWarningThreshold != defaults.CpuWarning,
+                "El panel Preventivo siguió mostrando el umbral por defecto pese a umbrales personalizados.");
+        });
+
+        Run("GuiDashboardsDeclareTruncatedRows", () =>
+        {
+            var incidentRows = new List<ObservabilityIncident>();
+            for (var i = 0; i < 75; i++)
+            {
+                incidentRows.Add(new ObservabilityIncident(
+                    now.AddMinutes(-i), "SERVICE_STATE", $"svc{i}", "Error",
+                    $"servicio svc{i} detenido en la ventana {i}"));
+            }
+            var incidentVm = new IncidentsDashboardViewModel();
+            incidentVm.Apply([new ObservabilitySample { Timestamp = now, Incidents = incidentRows }]);
+            Equal(60, incidentVm.Incidents.Count);
+            True(incidentVm.TruncationNotice.Contains("60 de 75", StringComparison.Ordinal),
+                "El panel de incidentes no declara el recorte de su línea de incidentes.");
+
+            var sessionRows = new List<ObservabilityIncident>();
+            for (var i = 0; i < 35; i++)
+            {
+                sessionRows.Add(new ObservabilityIncident(
+                    now.AddMinutes(-i), "USER_LOGON_FAILURE", $"user{i}", "Error",
+                    $"fallo de inicio de sesión para user{i}", Classification: "IdentityCorrelated"));
+            }
+            var sessionVm = new SessionsDashboardViewModel();
+            sessionVm.Apply([new ObservabilitySample { Timestamp = now, Incidents = sessionRows }]);
+            Equal(30, sessionVm.SessionIncidents.Count);
+            True(sessionVm.TruncationNotice.Contains("30 de 35", StringComparison.Ordinal),
+                "El panel de sesiones no declara el recorte de sus incidencias.");
+            sessionVm.ShowSessionsDetailCommand.Execute(null);
+            True(sessionVm.DetailText.Contains("y 5 incidencia(s) más", StringComparison.Ordinal),
+                "El detalle de sesiones seguía acotado a 10 filas en lugar de las 30 visibles.");
+        });
+
         try { if (Directory.Exists(stateRoot)) Directory.Delete(stateRoot, recursive: true); } catch { }
 
         Console.WriteLine();

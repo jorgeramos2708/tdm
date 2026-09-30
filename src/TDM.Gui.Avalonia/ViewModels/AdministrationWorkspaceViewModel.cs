@@ -111,7 +111,10 @@ public partial class AdministrationWorkspaceViewModel : ObservableObject
                 ? $"Referencia guardada · {snapshot.StoreStatus.BaselineCapturedAt?.ToLocalTime():dd/MM/yyyy HH:mm:ss}"
                 : "Aún no se ha generado una referencia";
             BaselinePath = snapshot.StoreStatus.BaselinePath;
-            RetentionState = $"{snapshot.StoreStatus.RetentionDays} días · {snapshot.StoreStatus.HistoryFileCount} históricos · {snapshot.StoreStatus.TransitionFileCount} transiciones";
+            RetentionState = $"{snapshot.StoreStatus.RetentionDays} días · {snapshot.StoreStatus.HistoryFileCount} históricos · {snapshot.StoreStatus.TransitionFileCount} transiciones"
+                + (snapshot.StoreStatus.CorruptSnapshotReads > 0
+                    ? $" · {snapshot.StoreStatus.CorruptSnapshotReads} lectura(s) de snapshot corrupta(s)"
+                    : string.Empty);
             FederationEditor = OperationalConfigurationService.FormatFederation(snapshot.Federation);
             FederationStatus = $"{snapshot.Federation.Nodes.Count} nodo(s) configurados · coordinador {snapshot.Federation.CoordinatorName}";
             ApplyEmailSettings(snapshot.EmailSettings);

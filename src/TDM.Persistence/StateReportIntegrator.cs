@@ -198,7 +198,7 @@ public static class StateReportIntegrator
         try
         {
             var store = new LocalStateStore(rootPath);
-            var channels = new[] { "monitor", "service-monitor", "forensic-monitor", "integrity-monitor" };
+            var channels = new[] { "monitor", "service-monitor", "forensic-monitor", "integrity-monitor", "diagnostic-avalonia" };
             var collected = new List<(StateTransition Transition, string Channel)>();
             foreach (var channel in channels)
             {

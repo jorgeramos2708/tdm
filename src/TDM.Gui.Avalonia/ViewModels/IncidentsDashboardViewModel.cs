@@ -12,6 +12,7 @@ public partial class IncidentsDashboardViewModel : ObservableObject
     [ObservableProperty] private string _errors = "No evaluado";
     [ObservableProperty] private string _affectedComponents = "No evaluado";
     [ObservableProperty] private IReadOnlyList<IncidentRow> _incidents = Array.Empty<IncidentRow>();
+    [ObservableProperty] private string _truncationNotice = string.Empty;
     [ObservableProperty] private string _detailTitle = "Incidentes";
     [ObservableProperty] private string _detailText = "Selecciona Ver detalle para el resumen de incidentes.";
     [ObservableProperty] private bool _isDetailVisible;
@@ -24,6 +25,7 @@ public partial class IncidentsDashboardViewModel : ObservableObject
         {
             Total = Critical = Errors = AffectedComponents = "No evaluado";
             Incidents = Array.Empty<IncidentRow>();
+            TruncationNotice = string.Empty;
             _allIncidents = [];
             _incidentsFullDetail = "Sin datos de incidentes en la ventana observable.";
             RefreshVisibleDetail();
@@ -37,6 +39,9 @@ public partial class IncidentsDashboardViewModel : ObservableObject
         Errors = incidents.Count(x => x.Severity.Equals("Error", StringComparison.OrdinalIgnoreCase)).ToString();
         AffectedComponents = incidents.Select(x => x.Component).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count().ToString();
         Incidents = incidents.Take(60).Select(ToRow).ToList();
+        TruncationNotice = incidents.Count > 60
+            ? $"Mostrando 60 de {incidents.Count} incidentes en la línea de incidentes; el detalle y el informe conservan el conjunto completo."
+            : string.Empty;
         _incidentsFullDetail = BuildIncidentsDetail(incidents);
         RefreshVisibleDetail();
     }

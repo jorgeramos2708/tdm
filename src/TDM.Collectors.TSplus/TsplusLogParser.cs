@@ -8,14 +8,16 @@ public static partial class TsplusLogParser
 {
     private static readonly string[] CriticalTokens =
     [
-        "fatal", "critical", "panic", "catastrophic"
+        "fatal", "critical", "panic", "catastrophic", "crítico", "critico"
     ];
 
     private static readonly string[] ErrorTokens =
     [
         "error", "exception", "crash", "failed", "failure",
         "cannot", "can't", "unable", "access denied", "file not found",
-        "connection refused", "address already in use"
+        "connection refused", "address already in use",
+        "falló", "fallado", "falla", "denegado", "denegada",
+        "no se pudo", "no fue posible", "rechazado"
     ];
 
     public static DiagnosticEvent? ParseLine(
@@ -76,11 +78,11 @@ public static partial class TsplusLogParser
         // una línea WARN sólo porque el texto contiene la palabra "error".
         if (Regex.IsMatch(line, @"^\s*(?:\[[^\]]+\]\s*)?DEBUG\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
             return DiagnosticSeverity.Informativo;
-        if (Regex.IsMatch(line, @"^\s*(?:\[[^\]]+\]\s*)?(?:FATAL|CRITICAL)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        if (Regex.IsMatch(line, @"^\s*(?:\[[^\]]+\]\s*)?(?:FATAL|CRITICAL|CRÍTICO|CRITICO)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
             return DiagnosticSeverity.Critico;
         if (Regex.IsMatch(line, @"^\s*(?:\[[^\]]+\]\s*)?(?:ERROR|ERR)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
             return DiagnosticSeverity.Error;
-        if (Regex.IsMatch(line, @"^\s*(?:\[[^\]]+\]\s*)?(?:WARNING|WARN)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        if (Regex.IsMatch(line, @"^\s*(?:\[[^\]]+\]\s*)?(?:WARNING|WARN|ADVERTENCIA|AVISO)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
             return DiagnosticSeverity.Advertencia;
 
         // Resúmenes sanos como "errors: 0", "0 failures" o "without error" no deben
@@ -102,8 +104,8 @@ public static partial class TsplusLogParser
 
     private static string ClassifyType(string line, DiagnosticSeverity severity)
     {
-        if (ContainsAny(line, "access denied", "unauthorized")) return "ACCESS_DENIED";
-        if (ContainsAny(line, "file not found", "cannot find", "missing file")) return "FILE_NOT_FOUND";
+        if (ContainsAny(line, "access denied", "unauthorized", "acceso denegado")) return "ACCESS_DENIED";
+        if (ContainsAny(line, "file not found", "cannot find", "missing file", "archivo no encontrado")) return "FILE_NOT_FOUND";
         if (TimeoutRegex().IsMatch(line)) return "TIMEOUT";
         if (ContainsAny(line, "certificate", "ssl", "tls")) return "CERTIFICATE_OR_TLS";
         // P21: JAVA antes que LICENSE: una línea con ambos ("openjdk ... license ...") es
@@ -120,10 +122,10 @@ public static partial class TsplusLogParser
         if (ContainsAny(line, "connection client", "rdp6", "remoteapp client", "client generator", "seamless client")) return "CONNECTION_CLIENT";
         if (ContainsAny(line, "universal printer", "virtual printer", "novapdf", "print job", "printing", "printer")) return "PRINTING";
         if (ContainsAny(line, "sqlite", "database is locked", "sql logic error")) return "DATABASE";
-        if (ContainsAny(line, "session", "logon", "login", "logonsession", "apsc")) return "SESSION";
+        if (ContainsAny(line, "session", "logon", "login", "logonsession", "apsc", "sesión", "sesiones")) return "SESSION";
         if (ContainsAny(line, "address already in use", "failed to bind", "cannot bind")) return "PORT_BIND";
         if (ContainsAny(line, "exception", "fatal", "crash")) return "EXCEPTION";
-        if (ContainsAny(line, "failed", "failure", "unable", "cannot")) return "OPERATION_FAILED";
+        if (ContainsAny(line, "failed", "failure", "unable", "cannot", "falló", "fallado", "no se pudo")) return "OPERATION_FAILED";
         return severity switch
         {
             DiagnosticSeverity.Critico => "LOG_CRITICAL",
@@ -240,13 +242,13 @@ public static partial class TsplusLogParser
     [GeneratedRegex(@"(?i)(?:0x[0-9a-f]{4,16}|HRESULT\s*[:=]?\s*0x[0-9a-f]+|error\s*(?:code)?\s*[:=]?\s*-?\d+)", RegexOptions.CultureInvariant)]
     private static partial Regex ErrorCodeRegex();
 
-    [GeneratedRegex(@"(?ix)\b(?:(?:no|without)\s+(?:errors?|failures?|exceptions?)|(?:errors?|failures?|exceptions?|failed\s+attempts?)\s*(?:count\s*)?[:=]\s*(?:0|none|false|n/?a)|0\s+(?:errors?|failures?|exceptions?|failed\s+attempts?)|(?:last\s+)?error\s*[:=]\s*(?:0|none|false|n/?a))\b", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?ix)\b(?:(?:no|without)\s+(?:errors?|failures?|exceptions?)|(?:errors?|failures?|exceptions?|failed\s+attempts?)\s*(?:count\s*)?[:=]\s*(?:0|none|false|n/?a)|0\s+(?:errors?|failures?|exceptions?|failed\s+attempts?)|(?:last\s+)?error\s*[:=]\s*(?:0|none|false|n/?a)|sin\s+(?:errores?|fallas?|incidencias)|0\s+(?:errores|fallas|incidencias)|(?:errores|fallas)\s*[:=]\s*0)\b", RegexOptions.CultureInvariant)]
     private static partial Regex BenignFailureSummaryRegex();
 
-    [GeneratedRegex(@"(?i)\b(?:warning|warn|timeout|timed\s+out|retry|denied|not\s+found|unavailable)\b", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?i)\b(?:warning|warn|timeout|timed\s+out|retry|denied|not\s+found|unavailable|advertencia|aviso|reintent\w*|denegad\w*|no\s+encontrad\w*|no\s+disponible|tiempo\s+agotado)\b", RegexOptions.CultureInvariant)]
     private static partial Regex WarningRegex();
 
-    [GeneratedRegex(@"(?i)\b(?:timeout|timed\s+out)\b", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?i)\b(?:timeout|timed\s+out|tiempo\s+agotado)\b", RegexOptions.CultureInvariant)]
     private static partial Regex TimeoutRegex();
 
     [GeneratedRegex(@"(?i)^(?:System|Microsoft|Newtonsoft|TSplus|SQLite|Mono|java|sun)\.[A-Za-z0-9_.`]+(?:\(|:)", RegexOptions.CultureInvariant)]

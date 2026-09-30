@@ -63,12 +63,53 @@ public static class CollectorCursorStore
         }
     }
 
-    private static string StatePath(string key)
+    public static IReadOnlyList<string> ListKeys(string keyPrefix)
+    {
+        var keys = new List<string>();
+        try
+        {
+            var root = StateRoot();
+            if (!Directory.Exists(root)) return keys;
+            foreach (var file in Directory.EnumerateFiles(root, "*.json"))
+            {
+                var name = Path.GetFileNameWithoutExtension(file);
+                if (!string.IsNullOrWhiteSpace(name) && name.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase))
+                    keys.Add(name);
+            }
+            keys.Sort(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+        }
+        return keys;
+    }
+
+    public static bool TryDelete(string key)
+    {
+        try
+        {
+            var path = StatePath(key);
+            if (!File.Exists(path)) return true;
+            File.Delete(path);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
+
+    private static string StateRoot()
     {
         var overrideRoot = Environment.GetEnvironmentVariable("TDM_STATE_ROOT");
-        var root = !string.IsNullOrWhiteSpace(overrideRoot)
+        return !string.IsNullOrWhiteSpace(overrideRoot)
             ? Path.GetFullPath(overrideRoot)
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "TDM", "collector-state");
+    }
+
+    private static string StatePath(string key)
+    {
+        var root = StateRoot();
         var safe = new string(key.Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_').ToArray());
         if (string.IsNullOrWhiteSpace(safe)) safe = "cursor";
         return Path.Combine(root, safe + ".json");

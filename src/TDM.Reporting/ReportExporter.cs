@@ -548,6 +548,35 @@ public static async Task<ReportExportResult> ExportAsync(
         }
         sb.Append("</div>");
 
+        var affectedProcesses = report.Eventos
+            .Where(e => e.Tipo is "APPLICATION_CRASH" or "DOTNET_UNHANDLED_EXCEPTION" or "WER_REPORT"
+                or "TSPLUS_HTML5_JVM_CRASH" or "TSPLUS_CRASH_LOOP_PATTERN")
+            .GroupBy(e => e.Componente, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new
+            {
+                Name = g.Key,
+                Count = g.Count(),
+                Severity = g.Max(x => x.Severidad),
+                Types = string.Join(" · ", g.Select(x => x.Tipo).Distinct(StringComparer.OrdinalIgnoreCase)),
+                Last = g.Max(x => x.Timestamp ?? DateTimeOffset.MinValue)
+            })
+            .OrderByDescending(x => x.Severity)
+            .ThenByDescending(x => x.Last)
+            .ToList();
+        if (affectedProcesses.Count > 0)
+        {
+            sb.Append("<div class='card'><h2>Procesos afectados</h2><table><tr><th>Proceso</th><th>Severidad</th><th>Eventos</th><th>Tipos</th><th>Último</th></tr>");
+            foreach (var process in affectedProcesses.Take(40))
+            {
+                var lastSeen = process.Last == DateTimeOffset.MinValue ? "N/D" : process.Last.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss");
+                sb.Append($"<tr><td>{H(process.Name)}</td><td>{H(process.Severity.ToString())}</td><td>{process.Count}</td><td>{H(process.Types)}</td><td>{H(lastSeen)}</td></tr>");
+            }
+            sb.Append("</table>");
+            if (affectedProcesses.Count > 40)
+                sb.Append($"<p class='muted'>Mostrando 40 de {affectedProcesses.Count} procesos; el JSON conserva todos los eventos de caída.</p>");
+            sb.Append("<p class='muted'>Sección construida con los eventos de caída/reinicio de proceso de la ventana; la atribución de causa raíz vive en su propia sección.</p></div>");
+        }
+
         var crashLoops = report.Eventos.Where(e => e.Tipo == "TSPLUS_CRASH_LOOP_PATTERN").OrderByDescending(e => e.Timestamp).ToList();
         if (crashLoops.Count > 0)
         {
@@ -870,6 +899,32 @@ public static async Task<ReportExportResult> ExportAsync(
         var scmDependencies = report.Eventos.Where(e => e.Tipo == "SERVICE_DEPENDENCY_STATE").ToList();
         var scmDependents = report.Eventos.Where(e => e.Tipo == "SERVICE_DEPENDENT_STATE").ToList();
         sb.Append("<div class='card'><h2>Salud y dependencias</h2>");
+        var serviceStateEvents = report.Eventos
+            .Where(e => e.Tipo.Equals("SERVICE_STATE", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(e =>
+            {
+                var name = e.Evidencia?.FirstOrDefault(x => x.Clave == "Servicio")?.Valor;
+                return string.IsNullOrWhiteSpace(name) || name.Equals("N/D", StringComparison.OrdinalIgnoreCase) ? e.Componente : name;
+            }, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderByDescending(e => e.Severidad).ThenByDescending(e => e.Timestamp ?? DateTimeOffset.MinValue).First())
+            .OrderByDescending(e => e.Severidad)
+            .ThenBy(e => e.Componente, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (serviceStateEvents.Count > 0)
+        {
+            sb.Append("<h3>Estado de servicios Windows/TSplus</h3><table><tr><th>Servicio</th><th>Severidad</th><th>Estado</th><th>Inicio</th><th>Hora</th></tr>");
+            foreach (var stateEvent in serviceStateEvents.Take(40))
+            {
+                string V(string key) => stateEvent.Evidencia?.FirstOrDefault(x => x.Clave == key)?.Valor ?? "N/D";
+                var serviceName = V("Servicio") != "N/D" ? V("Servicio") : stateEvent.Componente;
+                var presentationState = V("Estado presentación") != "N/D" ? V("Estado presentación") : V("Estado");
+                var stateTime = stateEvent.Timestamp?.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss") ?? "N/D";
+                sb.Append($"<tr><td>{H(serviceName)}</td><td>{H(stateEvent.Severidad.ToString())}</td><td>{H(presentationState)}</td><td>{H(V("Inicio"))}</td><td>{H(stateTime)}</td></tr>");
+            }
+            sb.Append("</table>");
+            if (serviceStateEvents.Count > 40)
+                sb.Append($"<p class='muted'>Mostrando 40 de {serviceStateEvents.Count} servicios; el JSON conserva todos los estados observados.</p>");
+        }
         if (dependencyHealth is null && scmDependencyCoverage is null && scmDependencies.Count == 0)
             sb.Append("<p>No evaluado: no se obtuvo evidencia suficiente de dependencias.</p>");
         if (dependencyHealth is not null)

@@ -13,6 +13,7 @@ public partial class SessionsDashboardViewModel : ObservableObject
     [ObservableProperty] private string _logonFailures = "No evaluado";
     [ObservableProperty] private string _nlaFailures = "No evaluado";
     [ObservableProperty] private IReadOnlyList<IncidentRow> _sessionIncidents = Array.Empty<IncidentRow>();
+    [ObservableProperty] private string _truncationNotice = string.Empty;
     [ObservableProperty] private string _detailTitle = "Sesiones";
     [ObservableProperty] private string _detailText = "Selecciona Ver detalle para el resumen de sesiones.";
     [ObservableProperty] private bool _isDetailVisible;
@@ -28,6 +29,7 @@ public partial class SessionsDashboardViewModel : ObservableObject
             Coverage = "No evaluado";
             SessionIncidents = Array.Empty<IncidentRow>();
             _sessionRows = Array.Empty<IncidentRow>();
+            TruncationNotice = string.Empty;
             _sessionsFullDetail = "Sin datos de sesiones en la ventana observable.";
             RefreshVisibleDetail();
             return;
@@ -47,6 +49,9 @@ public partial class SessionsDashboardViewModel : ObservableObject
             .Select(ToRow)
             .ToList();
         SessionIncidents = _sessionRows.Take(30).ToList();
+        TruncationNotice = _sessionRows.Count > 30
+            ? $"Mostrando 30 de {_sessionRows.Count} incidencias de sesión en la ventana; el detalle y el informe conservan el conjunto completo."
+            : string.Empty;
         _sessionsFullDetail = BuildSessionsDetail(sessionSource, sessionsEvaluated);
         RefreshVisibleDetail();
     }
@@ -84,14 +89,14 @@ public partial class SessionsDashboardViewModel : ObservableObject
 
         builder.AppendLine();
         builder.AppendLine("Sesiones con incidencia (revisar en este orden):");
-        foreach (var incident in _sessionRows.Take(10))
+        foreach (var incident in _sessionRows.Take(30))
         {
             builder.Append($"• {incident.Time} · {incident.Severity} · {incident.Kind} · {incident.Component}");
             builder.Append($" — {incident.Summary}");
             builder.AppendLine();
         }
-        if (_sessionRows.Count > 10)
-            builder.Append($"… y {_sessionRows.Count - 10} incidencia(s) más en la ventana.");
+        if (_sessionRows.Count > 30)
+            builder.Append($"… y {_sessionRows.Count - 30} incidencia(s) más en la ventana.");
         return builder.ToString().TrimEnd();
     }
 

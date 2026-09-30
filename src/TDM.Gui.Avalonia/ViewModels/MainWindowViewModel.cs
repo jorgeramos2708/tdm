@@ -110,8 +110,8 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
             var result = await _telemetry.ReadAsync(SelectedPeriod, _lifetime.Token);
             Support.Apply(result.Samples);
-            MultiServer.Apply(result.CoordinatorName, result.FederationStatuses);
-            General.Apply(result.Samples);
+            MultiServer.Apply(result.CoordinatorName, result.FederationStatuses, Administration.CurrentThresholds);
+            General.Apply(result.Samples, Administration.CurrentThresholds);
             Performance.Apply(result.Samples, liveResources, Administration.CurrentThresholds);
             Tsplus.Apply(result.Samples);
             Services.Apply(result.Samples);

@@ -50,6 +50,7 @@
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
+        <TextBlock Text="{Binding TruncationNotice}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
         <Button Classes="detail" Content="Ver detalle" Command="{Binding ShowIncidentsDetailCommand}" HorizontalAlignment="Left" Margin="0,5,0,0" />
       </StackPanel>
     </Border>

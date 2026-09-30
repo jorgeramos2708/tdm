@@ -7,8 +7,13 @@ namespace TDM.Persistence;
 public sealed class LocalStateStore
 {
     private static long _lastCleanupUtcTicks;
+    private static long _corruptSnapshotReads;
+    private static string? _lastCorruptSnapshotPath;
     private static readonly Lazy<string> CachedDefaultRoot = new(ResolveDefaultRootCore, LazyThreadSafetyMode.ExecutionAndPublication);
     public static string DefaultRootPath => CachedDefaultRoot.Value;
+
+    public static long CorruptSnapshotReadCount => Interlocked.Read(ref _corruptSnapshotReads);
+    public static string? LastCorruptSnapshotPath => _lastCorruptSnapshotPath;
     private readonly JsonSerializerOptions _json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -184,7 +189,7 @@ public sealed class LocalStateStore
         var history = Directory.Exists(historyDir) ? Directory.EnumerateFiles(historyDir, "state-*.jsonl").Count() : 0;
         var transitions = Directory.Exists(historyDir) ? Directory.EnumerateFiles(historyDir, "transitions-*.jsonl").Count() : 0;
         return new LocalStoreStatus(RootPath, LatestSnapshotPath, BaselinePath, baseline is not null, baseline?.CapturedAt,
-            RetentionDays, history, transitions);
+            RetentionDays, history, transitions, CorruptSnapshotReadCount);
     }
 
     public static PersistentStateSnapshot CarryForwardMissing(PersistentStateSnapshot previous, PersistentStateSnapshot current)
@@ -236,7 +241,11 @@ public sealed class LocalStateStore
         }
         catch (JsonException)
         {
-            // Un archivo truncado/corrupto no debe bloquear el diagnóstico actual.
+            // Un archivo truncado/corrupto no debe bloquear el diagnóstico actual,
+            // pero tampoco puede perderse en silencio: se telemetriza y se registra.
+            Interlocked.Increment(ref _corruptSnapshotReads);
+            _lastCorruptSnapshotPath = path;
+            System.Diagnostics.Trace.TraceWarning($"[TDM] Snapshot de estado corrupto ignorado: {path}");
             return null;
         }
     }
