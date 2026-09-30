@@ -1,8 +1,8 @@
 # Auditoría general de efectividad — cadena completa
 
-**Versión auditada**: TDM v1.0-rc18.21.0-FIX93, tras Fase 9 (`85a64c8`).
+**Versión auditada**: TDM v1.0-rc18.21.0-FIX93, tras Fase 10 (`80fe6d4`).
 **Método**: 4 agentes de exploración (~50 hallazgos) sobre monitoreo → transiciones → detección → agrupación → correlación → ranking → causa raíz → impacto → dependencias → eventos → logs → configuración → consistencia → GUI; verificación manual de los hallazgos más graves (marcados ✅) y re-verificación de los hallazgos conocidos abiertos de la auditoría previa.
-**Gates vigentes**: build 0/0 · ProductionTests 106/106 · ParityTests 43/43 · VERIFY 7/7 · publish 138845383.
+**Gates vigentes**: build 0/0 · ProductionTests 111/111 · ParityTests 45/45 · VERIFY 7/7 · publish 138927303.
 
 ## 1. Monitoreo real (colectores/cadencia)
 
@@ -22,8 +22,8 @@
 | Sev | Hallazgo | Lugar |
 |---|---|---|
 | Media ✅ | Transiciones se fechan con `CapturedAt` de la foto, no con el momento del cambio (rompe cercanía temporal) | `LocalStateStore.cs:207` |
-| Media ✅ | Snapshot corrupto → `return null` silencioso, sin log ni hallazgo; el ciclo sigue a ciegas | `LocalStateStore.cs:228-241` |
-| Media | Tolerancia de dedup 5s vs cadencias 60/120s → misma transición doble-contada en RCA (A#3); lectura barre 30 días completos por ciclo (A#4); canal `diagnostic-avalonia` excluido de lecturas (A#5) | A#3-5 |
+| Media ✅ | Snapshot corrupto → `return null` silencioso, sin log ni hallazgo → **corregido en Fase 10** (contador `CorruptSnapshotReadCount`, `Trace.TraceWarning` con la ruta y `LocalStoreStatus.CorruptSnapshotReads`) | `LocalStateStore.cs:242-249` |
+| Media | Tolerancia de dedup 5s vs cadencias 60/120s → misma transición doble-contada en RCA (A#3, **corregido en Fase 9** con tolerancia 10 min + guardia de inversión); lectura barre 30 días completos por ciclo (A#4); canal `diagnostic-avalonia` excluido de lecturas (A#5, **corregido en Fase 10**) | A#3-5 |
 | Media | Fallo al leer transiciones recientes traga sin límite | `StateReportIntegrator.cs:254-257` |
 | Baja ✅ | `TDM_LOCAL_HISTORY_UNAVAILABLE`: grep en todo `src/` → 1 sola aparición (emisión), cero consumidores | `StateReportIntegrator.cs:142` |
 
@@ -34,12 +34,12 @@
 
 ## 4. Detección — logs Windows/TSplus
 
-- **Media ✅**: `TsplusLogParser` clasifica sólo con tokens en inglés (`fatal/error/...`, sin "falló/denegado/no se pudo") y descarta todo lo `Informativo` (`TsplusLogParser.cs:9-19,42`) → logs en español generan casi nada.
+- **Media ✅**: `TsplusLogParser` clasifica sólo con tokens en inglés (`fatal/error/...`, sin "falló/denegado/no se pudo") y descarta todo lo `Informativo` (`TsplusLogParser.cs:9-19,42`) → logs en español generan casi nada — **corregido en Fase 10** (tokens/prefijos/regex en español + resúmenes sanos, `TsplusLogParser.cs:9-21,81-102,107-128`).
 - Baja: UTF-16 sin BOM no detectado en el incremental (`IncrementalTsplusLogCollector.cs:479-480`); fallback cultural `es-MX` (`TsplusLogParser.cs:226`).
 
 ## 5. Configuración TSplus
 
-- **Media ✅**: `ConfigurationHistoryStore.GetGenerationAsync` devuelve `null` con TODO (`:76-83`) → `DiffAgainstGenerationAsync` siempre vacío y el resumen multi-generación siempre "Sin cambios"; `PruneOldEntriesAsync` = `await Task.CompletedTask` (`:127-134`).
+- **Media ✅**: `ConfigurationHistoryStore.GetGenerationAsync` devuelve `null` con TODO (`:76-83`) → `DiffAgainstGenerationAsync` siempre vacío y el resumen multi-generación siempre "Sin cambios"; `PruneOldEntriesAsync` = `await Task.CompletedTask` (`:127-134`) — **corregido en Fase 10** (historial/generación/podado reales, `ConfigurationHistoryStore.cs:56-147`).
 - Cerrado en Fase 7: `settings.js` con versión desconocida (H10).
 
 ## 6. Agrupación de incidentes
@@ -78,9 +78,9 @@
 | Media | Contadores **CRÍTICOS/ERRORES** suman hallazgos+eventos → `14+11 > 20`; no cuadran con HTML ni JSON | `DiagnosticWorkspaceViewModel.cs:478-481` |
 | Media | Donut "SERVICIOS/DEPENDENCIAS" mide 3 cosas (centro=sanos, arco=afectados, aro verde siempre; `healthy` incluye "No requerido") → contradice el panel Servicios | `SupportDashboardViewModel.cs:92-103,64` |
 | Media | Score **preventivo** evalúa el diccionario SCM crudo sin el subgrafo TSplus que aplican los demás paneles → se contradicen sobre el mismo dato | `PreventiveDashboardViewModel.cs:94-95,352` |
-| Media | Truncados sin aviso (`Take(60)`/`Take(30)`); "y N más" calculado sobre 10 filas pero se muestran 30 | `IncidentsDashboardViewModel.cs:39`, `SessionsDashboardViewModel.cs:49,93` |
+| Media ✅ | Truncados sin aviso (`Take(60)`/`Take(30)`); "y N más" calculado sobre 10 filas pero se muestran 30 → **corregido en Fase 10** (`TruncationNotice` + detalle de sesiones a 30) | `IncidentsDashboardViewModel.cs:41-44`, `SessionsDashboardViewModel.cs:51-54,92-99` |
 | Media | GUI sin pre-record antes de `Analyze` (paridad rota vs servicio); feedback escrito en `MachineRootPath` pero leído de otra raíz → la GUI ignora veredictos verificados (A#6-8) | A#6-8 |
-| Baja | `SERVICE_STATE` sin sección HTML y fuera de ambas timelines; sin sección de procesos afectados en HTML (la GUI sí lista "Proceso:") | conocido (1) ampliado ✅ |
+| Baja ✅ | `SERVICE_STATE` sin sección HTML y fuera de ambas timelines; sin sección de procesos afectados en HTML (la GUI sí lista "Proceso:") → **corregido en Fase 10** (tabla en "Salud y dependencias" + tarjeta "Procesos afectados") | `ReportExporter.cs:903-925,560-577` |
 
 ## 11. Huecos de tests
 
@@ -89,7 +89,7 @@
 3. Patrón dominante de *source-text gates* (tests leen el `.cs`, ej. `:875,:910,:1252`) — detectan cambios de texto, no de comportamiento.
 4. Cero tests de caminos de fallo de colectores (permisos, canales inexistentes, fuga de watchers).
 5. Reglas RCA `WindowsFarm` sin test de gating sintomático/temporal (no existe código que probar).
-6. `ReportDiffer` sin test de IDs duplicados; sin aserción de que `SERVICE_STATE`/procesos existan en el HTML (pies vs `Take()` cubierto desde Fase 9).
+6. `ReportDiffer` sin test de IDs duplicados (pies vs `Take()` cubierto desde Fase 9; aserción de `SERVICE_STATE`/procesos en el HTML cubierta desde Fase 10 con `ExportRendersServiceStateAndProcessSections`).
 
 ## 12. Correcciones detectadas en esta ronda (no re-reportar)
 
@@ -100,5 +100,5 @@
 
 - **P0 ✅ cerrado en Fase 8 (`085e799`)**: filtro del canal Security (§3 Alta) · start-mode antes de `Critico` en TSplus ligero (§1 H2) · gating sintomático+ventana en candidatos Windows estáticos (§7 Alta) · dreno del push collector (§1 Alta) · paridad GUI pre-record + margen −15 min + raíz de feedback (§10).
 - **P1 ✅ cerrado en Fase 9 (`85a64c8`)**: `requiredNow` unificado (`WindowsServiceCatalog.RequiredNow`/`StoppedSeverity` + depth≥1 con modo de inicio) · dos universos de incidentes (puente en `BuildSummary` + rótulo de alcance operativo en los dashboards) · contadores GUI CRÍTICOS/ERRORES sólo sobre hallazgos · dedup de transiciones (tolerancia 10 min + guardia de inversión intermedia) · recorte a `PeriodoAnalizado` en clusters y RCA (`DiagnosticTimeWindow.IsEventInside`; fallback histórico AD intacto) · `N/D` del grafo SCM (respaldo `Servicio origen`) y verde de "No evaluado" → `warn` · pies vs `Take()` (pie con el número real de ocultas sobre 120/60) · baseline fallida no persistida (`SCM_GRAPH_BASELINE_STALE`).
-- **P2**: parser de logs en español · telemetría de snapshot corrupto · `ConfigurationHistory` multi-generación · umbrales conectados a más paneles · secciones `SERVICE_STATE`+procesos en HTML · avisos de truncado en GUI · canal `diagnostic-avalonia`.
+- **P2 ✅ cerrado en Fase 10 (`80fe6d4`)**: parser de logs en español (`TsplusLogParser` tokens/prefijos/regex + `ClassifyType`) · telemetría de snapshot corrupto (`CorruptSnapshotReadCount`/`LastCorruptSnapshotPath` + `Trace.TraceWarning` + `LocalStoreStatus.CorruptSnapshotReads` + `RetentionState`) · `ConfigurationHistory` multi-generación (historial/generación/podado reales) · umbrales conectados a más paneles (`General`/`MultiServer`/`Preventive` desde `CurrentThresholds`) · secciones `SERVICE_STATE`+procesos en HTML (tabla en "Salud y dependencias" + tarjeta "Procesos afectados") · avisos de truncado en GUI (`TruncationNotice` + detalle de sesiones a 30) · canal `diagnostic-avalonia` en lecturas.
 - **P3**: bajos (IDs posicionales, `/60s`, ledger, `TakeLast(120)`, `es-MX`, UTF-16).
