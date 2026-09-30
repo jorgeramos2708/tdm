@@ -1,8 +1,8 @@
 # Auditoría general de efectividad — cadena completa
 
-**Versión auditada**: TDM v1.0-rc18.21.0-FIX93, tras Fase 11 (`5894fc1`).
+**Versión auditada**: TDM v1.0-rc18.21.0-FIX93, tras Fase 12 (`f327867`).
 **Método**: 4 agentes de exploración (~50 hallazgos) sobre monitoreo → transiciones → detección → agrupación → correlación → ranking → causa raíz → impacto → dependencias → eventos → logs → configuración → consistencia → GUI; verificación manual de los hallazgos más graves (marcados ✅) y re-verificación de los hallazgos conocidos abiertos de la auditoría previa.
-**Gates vigentes**: build 0/0 · ProductionTests 117/117 · ParityTests 45/45 · VERIFY 7/7 · publish 138939591.
+**Gates vigentes**: build 0/0 · ProductionTests 122/122 · ParityTests 47/47 · VERIFY 7/7 · publish 138939591.
 
 ## 1. Monitoreo real (colectores/cadencia)
 
@@ -10,11 +10,11 @@
 |---|---|---|
 | **Alta ✅** | Colector "push" se suscribe y drena en la misma llamada → ~0 eventos por ventana + acumula `EventLogWatcher` por ciclo sin dispose | `WindowsPushEventCollector.cs:30,44` |
 | Media | `requiredNow` calculado distinto por `ServiceDependencyGraphCollector` vs `WindowsServiceCollector` → la misma fuente dice "sano" y "crítico" | C#4 |
-| Media | `ServiceDependencyGraphCollector` sin try/catch por servicio + `ServiceController` sin dispose (hasta ~320 handles/ciclo) | C#5 |
+| Media | `ServiceDependencyGraphCollector` sin try/catch por servicio + `ServiceController` sin dispose (hasta ~320 handles/ciclo) → **corregido en Fase 12** (cualquier excepción no-cancelación aísla por servicio en los 4 puntos; dispose verificado por gate) | C#5 |
 | Media | Lectura fallida de dependencias persistida como baseline vacía → drift falso o perdido | C#6 |
 | Media | Descubrimiento cae a catálogo fijo sin señal de cobertura (C#7); contador compartido en integridad de logs deja Security 1102 sin examinar con cobertura "Disponible" (C#8) | C#7-8 |
 | Media | Drift de registro saltado con `baseline.Registry` null (bases viejas, C#9); canales forenses inexistentes hunden fuente a "Parcial" permanente (C#11) | C#9,11 |
-| Media | Muestras de emergencia no escriben journal/canal longitudinal ni transiciones → monitor congelado en ventanas de carga; ciclo longitudinal saltado a >45s con presupuesto 180s | A#9-10 |
+| Media | Muestras de emergencia no escriben journal/canal longitudinal ni transiciones → monitor congelado en ventanas de carga; ciclo longitudinal saltado a >45s con presupuesto 180s → **corregido en Fase 12** (emergencia espeja el ciclo normal; gate `HasBudgetForLongitudinal` con reserva de 23 s) | A#9-10 |
 | Baja | Catálogo ligero no incluye dependencias/salud (ciclo pesado ~10min vs 5min de GUI) | `CollectorCatalog.cs:73-80` ✅ |
 
 ## 2. Transiciones de estado
@@ -68,7 +68,7 @@
 
 ## 9. Consistencia del reporte y precisión
 
-- Media: `ReportDiffer` usa `ToDictionary(f => f.Id)` — IDs duplicados lanzan `ArgumentException` que `ReportExporter.cs:54-56` traga con `_ = ex;` → la tarjeta "Cambios desde el reporte anterior" desaparece sin rastro; fecha sin fallback → "01/01/0001" (D#12).
+- Media: `ReportDiffer` usa `ToDictionary(f => f.Id)` — IDs duplicados lanzan `ArgumentException` que `ReportExporter.cs:54-56` traga con `_ = ex;` → la tarjeta "Cambios desde el reporte anterior" desaparece sin rastro; fecha sin fallback → "01/01/0001" (D#12) → **corregido en Fase 12** (last-wins por Id, fallback `PeriodoAnalizadoFin → Fin → Inicio` con "Fecha no declarada" y tarjeta de respaldo en el export).
 - Baja: campos de ventana autoampliada sólo en JSON; precisión penalizada por los candidatos estáticos de la §7.
 
 ## 10. GUI — servicios/dependencias/procesos/sesiones
@@ -76,8 +76,8 @@
 | Sev | Hallazgo | Lugar |
 |---|---|---|
 | Media | Contadores **CRÍTICOS/ERRORES** suman hallazgos+eventos → `14+11 > 20`; no cuadran con HTML ni JSON | `DiagnosticWorkspaceViewModel.cs:478-481` |
-| Media | Donut "SERVICIOS/DEPENDENCIAS" mide 3 cosas (centro=sanos, arco=afectados, aro verde siempre; `healthy` incluye "No requerido") → contradice el panel Servicios | `SupportDashboardViewModel.cs:92-103,64` |
-| Media | Score **preventivo** evalúa el diccionario SCM crudo sin el subgrafo TSplus que aplican los demás paneles → se contradicen sobre el mismo dato | `PreventiveDashboardViewModel.cs:94-95,352` |
+| Media | Donut "SERVICIOS/DEPENDENCIAS" mide 3 cosas (centro=sanos, arco=afectados, aro verde siempre; `healthy` incluye "No requerido") → contradice el panel Servicios → **corregido en Fase 12** (centro `afectados/total` como arco y módulos; aro verde sólo con sanos/neutrales reales) | `SupportDashboardViewModel.cs:92-103,64` |
+| Media | Score **preventivo** evalúa el diccionario SCM crudo sin el subgrafo TSplus que aplican los demás paneles → se contradicen sobre el mismo dato → **corregido en Fase 12** (`scoringLatest` e inestabilidad pasan por `TsplusOperationalStates`) | `PreventiveDashboardViewModel.cs:94-95,352` |
 | Media ✅ | Truncados sin aviso (`Take(60)`/`Take(30)`); "y N más" calculado sobre 10 filas pero se muestran 30 → **corregido en Fase 10** (`TruncationNotice` + detalle de sesiones a 30) | `IncidentsDashboardViewModel.cs:41-44`, `SessionsDashboardViewModel.cs:51-54,92-99` |
 | Media | GUI sin pre-record antes de `Analyze` (paridad rota vs servicio); feedback escrito en `MachineRootPath` pero leído de otra raíz → la GUI ignora veredictos verificados (A#6-8) | A#6-8 |
 | Baja ✅ | `SERVICE_STATE` sin sección HTML y fuera de ambas timelines; sin sección de procesos afectados en HTML (la GUI sí lista "Proceso:") → **corregido en Fase 10** (tabla en "Salud y dependencias" + tarjeta "Procesos afectados") | `ReportExporter.cs:903-925,560-577` |
@@ -85,11 +85,11 @@
 ## 11. Huecos de tests
 
 1. **Ningún test ejecuta `WindowsEventCollector` contra eventos de auditoría** (4625): sólo `ResolveRelevantLimit`/`IsPartialCoverage` y *source-text gates* (`Program.cs:898-911,1262-1274`) → el bug de Security nunca puede caer.
-2. **Ciclo de emergencia sin tests** (grep `EmergencySample` en `tests/` → 0).
+2. **Ciclo de emergencia sin tests** (grep `EmergencySample` en `tests/` → 0) → **cerrado en Fase 12** con `EmergencySamplePersistsJournalTransitionsAndLongitudinal` (source-gate de pre-registro/transiciones/enriquecimiento/longitudinal).
 3. Patrón dominante de *source-text gates* (tests leen el `.cs`, ej. `:875,:910,:1252`) — detectan cambios de texto, no de comportamiento.
 4. Cero tests de caminos de fallo de colectores (permisos, canales inexistentes, fuga de watchers).
 5. Reglas RCA `WindowsFarm` sin test de gating sintomático/temporal (no existe código que probar).
-6. `ReportDiffer` sin test de IDs duplicados (pies vs `Take()` cubierto desde Fase 9; aserción de `SERVICE_STATE`/procesos en el HTML cubierta desde Fase 10 con `ExportRendersServiceStateAndProcessSections`).
+6. `ReportDiffer` sin test de IDs duplicados (pies vs `Take()` cubierto desde Fase 9; aserción de `SERVICE_STATE`/procesos en el HTML cubierta desde Fase 10 con `ExportRendersServiceStateAndProcessSections`) → **cerrado en Fase 12** con `ReportDifferHandlesDuplicateFindingIdsAndUndatedReports` y `ExportKeepsDiffCardWithDuplicateFindingIds`.
 
 ## 12. Correcciones detectadas en esta ronda (no re-reportar)
 
@@ -102,3 +102,4 @@
 - **P1 ✅ cerrado en Fase 9 (`85a64c8`)**: `requiredNow` unificado (`WindowsServiceCatalog.RequiredNow`/`StoppedSeverity` + depth≥1 con modo de inicio) · dos universos de incidentes (puente en `BuildSummary` + rótulo de alcance operativo en los dashboards) · contadores GUI CRÍTICOS/ERRORES sólo sobre hallazgos · dedup de transiciones (tolerancia 10 min + guardia de inversión intermedia) · recorte a `PeriodoAnalizado` en clusters y RCA (`DiagnosticTimeWindow.IsEventInside`; fallback histórico AD intacto) · `N/D` del grafo SCM (respaldo `Servicio origen`) y verde de "No evaluado" → `warn` · pies vs `Take()` (pie con el número real de ocultas sobre 120/60) · baseline fallida no persistida (`SCM_GRAPH_BASELINE_STALE`).
 - **P2 ✅ cerrado en Fase 10 (`80fe6d4`)**: parser de logs en español (`TsplusLogParser` tokens/prefijos/regex + `ClassifyType`) · telemetría de snapshot corrupto (`CorruptSnapshotReadCount`/`LastCorruptSnapshotPath` + `Trace.TraceWarning` + `LocalStoreStatus.CorruptSnapshotReads` + `RetentionState`) · `ConfigurationHistory` multi-generación (historial/generación/podado reales) · umbrales conectados a más paneles (`General`/`MultiServer`/`Preventive` desde `CurrentThresholds`) · secciones `SERVICE_STATE`+procesos en HTML (tabla en "Salud y dependencias" + tarjeta "Procesos afectados") · avisos de truncado en GUI (`TruncationNotice` + detalle de sesiones a 30) · canal `diagnostic-avalonia` en lecturas.
 - **P3 ✅ cerrado en Fase 11 (`5894fc1`)**: IDs de clúster content-derived (`INC-GRP-` + 8 hex de `SHA256(dominio|identidad|primer timestamp)`, sin posición) · ráfaga con span real (`(ráfaga ×N en 45 s|2.5 min)`) y `Subject` unido con tope 6 + `(+N más)` (regex acepta legado `/60s`) · aviso de `TakeLast(120)` (`ObservabilitySample.IncidentsDropped` + `DashboardRules.DroppedIncidents` en Incidentes, Sesiones y Soporte, detalle y axaml) · ramas muertas de `IncidentLedger` (bloque `fallbackCandidate` irrecorrible + constante `ManagedIncidentState.Persistent`) · parser sin `es-MX` (180 formatos invariantes generados, `SplitTimestampOffset` para `Z`/`±HH:MM`, ambigüedad exige ventana) · UTF-16 sin BOM (paridad por pares sobre 32 bytes). 6 tests nuevos (117/117) + `GuiDashboardsDeclareTruncatedRows` extendido (45/45).
+- **P4 ✅ cerrado en Fase 12 (`f327867`)**: `ReportDiffer` tolerante a IDs duplicados (last-wins por `Id`, igual que las causas) y fechas sin `01/01/0001` (fallback `PeriodoAnalizadoFin → Fin → Inicio` + "Fecha no declarada" + tarjeta de respaldo en el export) (D#12) · muestra de emergencia con el pipeline completo del ciclo normal (pre-registro `service-monitor`, transiciones recientes, `RecordAndEnrichAsync` y despacho longitudinal) (A#9) · gate longitudinal sobre el presupuesto real (`HasBudgetForLongitudinal`: consumido + 23 s ≤ 180 s, en vez de 45 s fijos) (A#10) · aislamiento por servicio en el grafo SCM ante cualquier excepción no-cancelación en los 4 puntos + dispose verificado (C#5) · dona Soporte con una sola medida (centro `afectados/total`, aro gris sin elementos sanos) · score preventivo e inestabilidad sobre el subgrafo TSplus alcanzable (mismos paneles). 5 tests nuevos (122/122) + 2 tests de paridad y `Support_ServiceRatio` ajustado (47/47).
