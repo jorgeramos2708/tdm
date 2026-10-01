@@ -20,7 +20,7 @@ public static class StateReportIntegrator
     {
         var events = report.Eventos.ToList();
         var findings = report.Hallazgos.ToList();
-        var anchor = report.PeriodoAnalizadoFin != default ? report.PeriodoAnalizadoFin : report.Fin;
+        var anchor = DiagnosticReportWindow.EffectivePeriodEnd(report);
         try
         {
             var store = new LocalStateStore(rootPath);

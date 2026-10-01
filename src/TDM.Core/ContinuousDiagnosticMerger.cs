@@ -127,8 +127,7 @@ public static class ContinuousDiagnosticMerger
 
     private static DateTimeOffset ResolveEnd(DiagnosticReport report)
     {
-        if (report.PeriodoAnalizadoFin != default) return report.PeriodoAnalizadoFin;
-        if (report.Fin != default) return report.Fin;
-        return DateTimeOffset.Now;
+        var end = DiagnosticReportWindow.EffectivePeriodEnd(report);
+        return end != default ? end : DateTimeOffset.Now;
     }
 }

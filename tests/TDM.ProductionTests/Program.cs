@@ -139,7 +139,14 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("ExportKeepsDiffCardWithDuplicateFindingIds", ExportKeepsDiffCardWithDuplicateFindingIds),
     ("EmergencySamplePersistsJournalTransitionsAndLongitudinal", EmergencySamplePersistsJournalTransitionsAndLongitudinal),
     ("LongitudinalPhaseBudgetGateRejectsFixed45Seconds", LongitudinalPhaseBudgetGateRejectsFixed45Seconds),
-    ("ServiceDependencyGraphIsolatesServiceFailures", ServiceDependencyGraphIsolatesServiceFailures)
+    ("ServiceDependencyGraphIsolatesServiceFailures", ServiceDependencyGraphIsolatesServiceFailures),
+    ("NlaPasswordChangeNeedsWindowedConflict", NlaPasswordChangeNeedsWindowedConflict),
+    ("UncorrelatedConfigCandidatesDoNotConflict", UncorrelatedConfigCandidatesDoNotConflict),
+    ("RdpSuccessStagesAreNotOperationalIncidents", RdpSuccessStagesAreNotOperationalIncidents),
+    ("PrincipalWithoutIndependentEvidenceRaisesTension", PrincipalWithoutIndependentEvidenceRaisesTension),
+    ("FailurePatternsUseFullCandidateList", FailurePatternsUseFullCandidateList),
+    ("RemoteLogonFailuresCoverEachCorrelatedUser", RemoteLogonFailuresCoverEachCorrelatedUser),
+    ("PeriodEndFallbackIsUnifiedAcrossNarrativeAndExport", PeriodEndFallbackIsUnifiedAcrossNarrativeAndExport)
 };
 
 var failed = 0;
@@ -3135,6 +3142,238 @@ static void SeedMinimalInstall(string install, out string iniPath, out string or
     var wsDir = Path.Combine(install, "Clients", "webserver");
     Directory.CreateDirectory(wsDir);
     File.WriteAllText(Path.Combine(wsDir, "runwebserver.bat"), "@echo off");
+}
+
+// Fase 13 (P5): §6+§7 — B#14-20, B#23.
+static Task NlaPasswordChangeNeedsWindowedConflict()
+{
+    var now = DateTimeOffset.Now;
+    var nla2019 = new DiagnosticFinding(
+        "WINDOWS-2019-NLA-PASSWORD-CHANGE-COMPATIBILITY",
+        "Windows NLA / contraseña",
+        DiagnosticSeverity.Advertencia,
+        "Windows Server 2019 exige contraseña vigente con NLA habilitado.",
+        "El cambio de contraseña obligatorio rompe la autenticación previa a la sesión.",
+        [new EvidenceItem("Sistema", "Windows Server 2019")],
+        ConfidenceLevel.Alta,
+        Capa: DiagnosticLayer.Windows);
+    string Evidence(RootCauseCandidate c, string key) => c.Evidencia.FirstOrDefault(e => e.Clave == key)?.Valor ?? "N/D";
+
+    var quiet = RootCauseCorrelator.Analyze(Report([], now, [nla2019]));
+    var quietNla = quiet.FirstOrDefault(x => x.Id == "ROOT-WINDOWS-NLA-PASSWORD-CHANGE");
+    NotNull(quietNla, "La hipótesis NLA desapareció sin conflicto en ventana.");
+    Equal(84, quietNla!.Puntaje, "NLA se elevó a 98 sin conflicto dentro de la ventana.");
+    Equal(ConfidenceLevel.Media, quietNla.Confianza, "NLA se declaró Alta sin conflicto en ventana.");
+    True(quietNla.HoraIncidente is null, "Sin conflicto en ventana NLA recibió hora de incidente.");
+    Equal("No observado", Evidence(quietNla, "Conflicto NLA en la ventana"),
+        "El gating de ventana NLA no quedó declarado en la evidencia.");
+
+    var stale = new DiagnosticEvent(now.AddHours(-5), "Windows Security / RDP", "NLA / contraseña",
+        DiagnosticLayer.Windows, DiagnosticSeverity.Error, "WINDOWS_NLA_PASSWORD_CHANGE_CONFLICT", "contraseña expirada");
+    var staleRun = RootCauseCorrelator.Analyze(Report([stale], now, [nla2019]));
+    var staleNla = staleRun.FirstOrDefault(x => x.Id == "ROOT-WINDOWS-NLA-PASSWORD-CHANGE");
+    NotNull(staleNla, "La hipótesis NLA desapareció con conflicto fuera de la ventana.");
+    Equal(84, staleNla!.Puntaje, "Un conflicto NLA fuera de la ventana analizada elevó el puntaje a 98.");
+
+    var fresh = new DiagnosticEvent(now.AddMinutes(-10), "Windows Security / RDP", "NLA / contraseña",
+        DiagnosticLayer.Windows, DiagnosticSeverity.Error, "WINDOWS_NLA_PASSWORD_CHANGE_CONFLICT", "contraseña expirada");
+    var freshRun = RootCauseCorrelator.Analyze(Report([fresh], now, [nla2019]));
+    var freshNla = freshRun.FirstOrDefault(x => x.Id == "ROOT-WINDOWS-NLA-PASSWORD-CHANGE");
+    NotNull(freshNla, "El candidato NLA desapareció con conflicto en ventana.");
+    Equal(98, freshNla!.Puntaje, "El conflicto NLA dentro de la ventana no elevó el puntaje a 98.");
+    Equal(ConfidenceLevel.Alta, freshNla.Confianza, "El conflicto NLA dentro de la ventana no elevó la confianza a Alta.");
+    True(freshNla.HoraIncidente == fresh.Timestamp, "El conflicto NLA dentro de la ventana no ancló la hora del incidente.");
+    Equal("WINDOWS_NLA_PASSWORD_CHANGE_CONFLICT", Evidence(freshNla, "Conflicto NLA en la ventana"),
+        "El evento NLA anclado no quedó declarado en la evidencia.");
+    return Task.CompletedTask;
+}
+
+static Task UncorrelatedConfigCandidatesDoNotConflict()
+{
+    var now = DateTimeOffset.Now;
+    string Evidence(RootCauseCandidate c, string key) => c.Evidencia.FirstOrDefault(e => e.Clave == key)?.Valor ?? "N/D";
+    var windows = new RootCauseCandidate(1, "WIN-CFG", "Política RDP", DiagnosticLayer.Windows, 84, ConfidenceLevel.Media,
+        "Política RDP estática", "hipótesis de configuración sin ventana", [], Producto: TsplusProduct.RemoteAccess,
+        HoraIncidente: null, OrigenClasificado: "WINDOWS");
+    var tsplus = new RootCauseCandidate(2, "TS-CFG", "Granja TSplus", DiagnosticLayer.Tsplus, 79, ConfidenceLevel.Media,
+        "Granja estática", "hipótesis de configuración sin ventana", [], Producto: TsplusProduct.RemoteAccess,
+        HoraIncidente: null, OrigenClasificado: "TSPLUS");
+
+    var calm = DiagnosticPrecisionAnalyzer.Calibrate(Report([], now), [windows, tsplus]);
+    Equal(84, calm[0].Puntaje, "Dos configuraciones estáticas sin HoraIncidente fueron penalizadas como conflicto de origen.");
+    Equal(79, calm[1].Puntaje, "El segundo candidato estático perdió puntos por conflicto de origen.");
+    False(Evidence(calm[0], "Calibración de precisión RC18.14.3").Contains("orígenes distintos", StringComparison.Ordinal),
+        "La calibración aplicó penalización de conflicto a candidatos sin correlación temporal.");
+    Equal("No", Evidence(calm[0], "Conflicto entre orígenes fuertes"),
+        "Dos hipótesis sin hora de incidente se declararon en conflicto de origen.");
+
+    var correlatedWindows = windows with { Puntaje = 90, HoraIncidente = now.AddMinutes(-2) };
+    var correlatedTsplus = tsplus with { Puntaje = 88, HoraIncidente = now.AddMinutes(-1) };
+    var tense = DiagnosticPrecisionAnalyzer.Calibrate(Report([], now), [correlatedWindows, correlatedTsplus]);
+    Equal(82, tense[0].Puntaje, "El conflicto correlacionado no aplicó la penalización de 8 puntos al primer candidato.");
+    Equal(80, tense[1].Puntaje, "El conflicto correlacionado no aplicó la penalización de 8 puntos al segundo candidato.");
+    Equal("Sí", Evidence(tense[0], "Conflicto entre orígenes fuertes"),
+        "Dos candidatos fuertes correlacionados de orígenes distintos no marcaron conflicto.");
+    True(Evidence(tense[0], "Calibración de precisión RC18.14.3").Contains("orígenes distintos", StringComparison.Ordinal),
+        "La penalización de conflicto no quedó explicada en la evidencia del candidato.");
+    return Task.CompletedTask;
+}
+
+static Task RdpSuccessStagesAreNotOperationalIncidents()
+{
+    var now = DateTimeOffset.Now;
+    var logon = new DiagnosticEvent(now, "Lsm", "Terminal Services", DiagnosticLayer.Rdp,
+        DiagnosticSeverity.Informativo, "RDP_SESSION_LOGON_STAGE", "Logon succeeded");
+    var auth = new DiagnosticEvent(now, "RDP", "RemoteConnectionManager", DiagnosticLayer.Rdp,
+        DiagnosticSeverity.Advertencia, "RDP_AUTHENTICATION_STAGE", "authentication ok");
+    var shell = new DiagnosticEvent(now, "Lsm", "Terminal Services", DiagnosticLayer.Rdp,
+        DiagnosticSeverity.Informativo, "RDP_SHELL_START_STAGE", "shell started");
+    False(DiagnosticPrecisionAnalyzer.IsCausalSignal(logon), "Un logon RDP exitoso contó como señal causal.");
+    False(DiagnosticPrecisionAnalyzer.IsCausalSignal(auth), "Una autenticación RDP exitosa contó como señal causal.");
+    False(DiagnosticPrecisionAnalyzer.IsCausalSignal(shell), "Un shell start exitoso contó como señal causal.");
+    var gap = new DiagnosticEvent(now, "Lsm", "Terminal Services", DiagnosticLayer.Rdp,
+        DiagnosticSeverity.Advertencia, "RDP_SHELL_START_GAP", "gap en el pipeline de shell");
+    True(DiagnosticPrecisionAnalyzer.IsCausalSignal(gap), "RDP_SHELL_START_GAP dejó de contar como señal causal.");
+
+    var stageClusters = IncidentClusterAnalyzer.Analyze(Report([logon, auth], now));
+    Equal(1, stageClusters.Count, "Los stages RDP no formaron un solo clúster de evidencia.");
+    Equal("EVIDENCIA_CORRELACIONABLE", stageClusters[0].Estado,
+        "Un clúster sólo con stages de éxito se declaró INCIDENTE_OPERATIVO.");
+
+    DiagnosticEvent Service(DiagnosticSeverity severidad) => new(now.AddMinutes(-1), "TDM", "Web Portal Service",
+        DiagnosticLayer.Tsplus, severidad, "SERVICE_STATE", "Estado actual: Stopped",
+        Evidencia: [new EvidenceItem("Servicio", "WebPortalService"), new EvidenceItem("Estado", "Stopped")],
+        Producto: TsplusProduct.RemoteAccess);
+
+    var warnClusters = IncidentClusterAnalyzer.Analyze(Report([Service(DiagnosticSeverity.Advertencia)], now));
+    Equal(1, warnClusters.Count, "El SERVICE_STATE Advertencia no formó clúster.");
+    Equal("EVIDENCIA_CORRELACIONABLE", warnClusters[0].Estado,
+        "Un SERVICE_STATE Advertencia se declaró INCIDENTE_OPERATIVO fuera del contrato Error/Crítico.");
+
+    var criticalClusters = IncidentClusterAnalyzer.Analyze(Report([Service(DiagnosticSeverity.Critico)], now));
+    Equal(1, criticalClusters.Count, "El SERVICE_STATE Crítico no formó clúster.");
+    Equal("INCIDENTE_OPERATIVO", criticalClusters[0].Estado,
+        "Un servicio TSplus detenido Crítico dejó de declararse incidente operativo.");
+    return Task.CompletedTask;
+}
+
+static Task PrincipalWithoutIndependentEvidenceRaisesTension()
+{
+    var now = DateTimeOffset.Now;
+    var principal = new RootCauseCandidate(1, "ROOT-WINDOWS-RDP-DISABLED-POLICY", "Windows / política RDP",
+        DiagnosticLayer.Windows, 96, ConfidenceLevel.Alta, "RDP deshabilitado por directiva.",
+        "fDenyTSConnections activo impide nuevas conexiones.",
+        [new EvidenceItem("Evidencia primaria independiente", "No")],
+        Producto: TsplusProduct.RemoteAccess, HoraIncidente: now.AddMinutes(-2), OrigenClasificado: "WINDOWS");
+
+    var report = Report([], now) with { CausaRaizPrincipal = principal };
+    var tensions = ReportConsistencyAnalyzer.Analyze(report);
+    True(tensions.Any(t => t.Contains("[PRINCIPAL]", StringComparison.Ordinal)
+                        && t.Contains("evidencia primaria independiente", StringComparison.OrdinalIgnoreCase)),
+        "La causa principal sin evidencia primaria independiente no generó tensión de coherencia.");
+
+    var supported = principal with { Evidencia = [new EvidenceItem("Evidencia primaria independiente", "Sí")] };
+    var clean = ReportConsistencyAnalyzer.Analyze(Report([], now) with { CausaRaizPrincipal = supported });
+    False(clean.Any(t => t.Contains("[PRINCIPAL]", StringComparison.Ordinal)),
+        "Una causa principal con evidencia independiente generó tensión espuria.");
+    return Task.CompletedTask;
+}
+
+static Task FailurePatternsUseFullCandidateList()
+{
+    var now = DateTimeOffset.Now;
+    var events = new List<DiagnosticEvent>();
+    for (var i = 1; i <= 10; i++)
+    {
+        events.Add(new DiagnosticEvent(
+            now.AddMinutes(-i * 3),
+            "Application Error",
+            $"app{i:D2}.exe",
+            DiagnosticLayer.Tsplus,
+            DiagnosticSeverity.Error,
+            "APPLICATION_CRASH",
+            $"Faulting application app{i:D2}.exe",
+            Codigo: "1000",
+            Evidencia: [
+                new EvidenceItem("Aplicación", $"app{i:D2}.exe"),
+                new EvidenceItem("Ruta del módulo", $@"C:\Program Files (x86)\TSplus\mod{i}.dll")
+            ],
+            Producto: TsplusProduct.RemoteAccess));
+    }
+
+    var report = DiagnosticWorkflow.Analyze(Report(events, now));
+    Equal(8, report.CausasRaiz.Count, "El recorte de presentación dejó de limitar las causas visibles a 8.");
+    Equal(10, report.PatronesFalla.Count,
+        "Los patrones de falla se calcularon sobre el recorte de 8 candidatos en vez de la lista completa.");
+    True(report.PatronesFalla.Any(p => p.Componente == "app01.exe"),
+        "Un candidato de crash fuera del top 8 no alimentó los patrones de falla.");
+    return Task.CompletedTask;
+}
+
+static Task RemoteLogonFailuresCoverEachCorrelatedUser()
+{
+    var now = DateTimeOffset.Now;
+    DiagnosticEvent Failure(DateTimeOffset ts, string user) => new(ts, "Security",
+        "Microsoft-Windows-Security-Auditing", DiagnosticLayer.Seguridad, DiagnosticSeverity.Error,
+        "USER_LOGON_FAILURE", "4625",
+        Evidencia: [new EvidenceItem("Usuario", user), new EvidenceItem("Status", "0xC000006D")]);
+    DiagnosticEvent Symptom(DateTimeOffset ts, string user) => new(ts, "TermService",
+        "Remote Desktop Services", DiagnosticLayer.Rdp, DiagnosticSeverity.Error,
+        "RDP_SESSION_FAILURE", "La sesión RDP falló.",
+        Evidencia: [new EvidenceItem("Usuario", user)]);
+
+    var t0 = now.AddMinutes(-40);
+    var events = new List<DiagnosticEvent>
+    {
+        Failure(t0, "alice"),
+        Symptom(t0.AddMinutes(1), "alice"),
+        Failure(t0.AddMinutes(5), "alice"),
+        Symptom(t0.AddMinutes(6), "alice"),
+        Failure(t0.AddMinutes(10), "bob"),
+        Symptom(t0.AddMinutes(11), "bob"),
+        Failure(t0.AddMinutes(15), "carol"),
+        Symptom(t0.AddMinutes(16), "carol"),
+        Failure(t0.AddMinutes(20), "dave")
+    };
+
+    var candidates = RootCauseCorrelator.Analyze(Report(events, now));
+    True(candidates.Any(c => c.Id == "ROOT-WINDOWS-REMOTE-LOGON-alice"),
+        "El primer usuario correlacionado no generó candidato.");
+    True(candidates.Any(c => c.Id == "ROOT-WINDOWS-REMOTE-LOGON-bob"),
+        "El segundo usuario correlacionado no generó candidato (el ciclo se detuvo en el primero).");
+    True(candidates.Any(c => c.Id == "ROOT-WINDOWS-REMOTE-LOGON-carol"),
+        "El tercer usuario correlacionado no generó candidato (el ciclo se detuvo en el primero).");
+    False(candidates.Any(c => c.Id == "ROOT-WINDOWS-REMOTE-LOGON-dave"),
+        "Un failure sin síntoma correlacionado generó candidato de ruido.");
+    Equal(1, candidates.Count(c => c.Id == "ROOT-WINDOWS-REMOTE-LOGON-alice"),
+        "El mismo usuario generó candidatos duplicados.");
+    return Task.CompletedTask;
+}
+
+static async Task PeriodEndFallbackIsUnifiedAcrossNarrativeAndExport()
+{
+    var now = DateTimeOffset.Now;
+    var withoutPeriod = Report([], now) with { PeriodoAnalizadoFin = default };
+    Equal(now, DiagnosticReportWindow.EffectivePeriodEnd(withoutPeriod),
+        "Sin PeriodoAnalizadoFin el cierre no cayó al fin de captura.");
+    var declared = now.AddMinutes(-5);
+    var withPeriod = Report([], now) with { PeriodoAnalizadoFin = declared };
+    Equal(declared, DiagnosticReportWindow.EffectivePeriodEnd(withPeriod),
+        "El PeriodoAnalizadoFin declarado no prevaleció sobre el fin de captura.");
+
+    var narrative = DiagnosticNarrativeBuilder.Build(withoutPeriod);
+    True(narrative.Contains($"Periodo visible: {withoutPeriod.PeriodoAnalizadoInicio.ToLocalTime():dd/MM/yyyy HH:mm:ss} - {withoutPeriod.Fin.ToLocalTime():dd/MM/yyyy HH:mm:ss}", StringComparison.Ordinal),
+        "Sin PeriodoAnalizadoFin la narrativa no cerró la ventana con el fin de captura.");
+
+    var dir = TempDir();
+    try
+    {
+        var result = await ReportExporter.ExportAsync(withoutPeriod, dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains($"{withoutPeriod.PeriodoAnalizadoInicio.ToLocalTime():dd/MM/yyyy HH:mm}–{withoutPeriod.Fin.ToLocalTime():HH:mm}", StringComparison.Ordinal),
+            "El periodo rápido del export no cerró con el fin de captura.");
+    }
+    finally { TryDelete(dir); }
 }
 
 static string? FindRepoRoot()

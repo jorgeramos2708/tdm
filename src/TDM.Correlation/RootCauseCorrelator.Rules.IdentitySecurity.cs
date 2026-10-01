@@ -94,10 +94,13 @@ public static partial class RootCauseCorrelator
 
         // RC18.3.1: autenticación por usuario. Un 4625 aislado puede ser ruido; sólo se convierte en candidato
         // cuando el mismo usuario aparece en un síntoma RDP/TSplus cercano.
+        // B#23: un candidato por usuario con síntoma correlacionado (anclado al primer failure
+        // con related); el break anterior dejaba fuera a todos los usuarios salvo el primero.
         var remoteLogonFailures = report.Eventos
             .Where(e => e.Timestamp.HasValue && e.Tipo == "USER_LOGON_FAILURE")
             .OrderBy(e => e.Timestamp)
             .ToList();
+        var emittedLogonUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var failure in remoteLogonFailures)
         {
             var user = failure.Evidencia?.FirstOrDefault(x => x.Clave == "Usuario")?.Valor;
@@ -108,6 +111,7 @@ public static partial class RootCauseCorrelator
                 .Where(e => e.Capa is DiagnosticLayer.Rdp or DiagnosticLayer.Tsplus)
                 .FirstOrDefault(e => EventIdentity(e) is string candidate && SameIdentity(candidate, user));
             if (related is null) continue;
+            if (!emittedLogonUsers.Add(user)) continue;
             drafts.Add(new CandidateDraft(
                 $"ROOT-WINDOWS-REMOTE-LOGON-{user}",
                 $"Autenticación Windows / {user}",
@@ -128,7 +132,6 @@ public static partial class RootCauseCorrelator
                 failure.Timestamp,
                 "WINDOWS",
                 TsplusProduct.RemoteAccess));
-            break;
         }
 
         // RC18.3.1: perfiles de usuario como capa causal entre autenticación y apertura de sesión/aplicación.

@@ -163,10 +163,15 @@ public static class IncidentClusterAnalyzer
     }
 
     private static bool IsOperationalImpact(DiagnosticEvent e)
-        => e.Tipo == "SERVICE_STATE" && e.Producto == TsplusProduct.RemoteAccess &&
-           !string.Equals(Value(e, "Estado"), "Running", StringComparison.OrdinalIgnoreCase)
-           || e.Tipo is "RDP_AUTHENTICATION_STAGE" or "RDP_SESSION_LOGON_STAGE" or "RDP_SHELL_START_STAGE" or "RDP_SHELL_START_GAP" or "RDP_SHELL_START_DELAY"
-           || e.Tipo is "WINDOWS_AD_AUTH_DEPENDENCY_FAILURE" or "WINDOWS_AD_TERMSRV_SPN_FAILURE" or "WINDOWS_AD_DOMAIN_CONNECTIVITY_FAILURE";
+        // B#15/B#16: sólo ERROR/CRÍTICO declara INCIDENTE_OPERATIVO, el mismo contrato que
+        // exige el ledger (DiagnosticEventCatalog.IsIncidentSeverity). Los stages de logon
+        // exitoso de RDP (1149/21/22, Informativo/Advertencia) y los states por debajo de
+        // ERROR son evidencia de agrupación, nunca incidente operativo persistible.
+        => DiagnosticEventCatalog.IsIncidentSeverity(e.Severidad)
+           && (e.Tipo == "SERVICE_STATE" && e.Producto == TsplusProduct.RemoteAccess &&
+               !string.Equals(Value(e, "Estado"), "Running", StringComparison.OrdinalIgnoreCase)
+               || e.Tipo is "RDP_SHELL_START_GAP" or "RDP_SHELL_START_DELAY"
+               || e.Tipo is "WINDOWS_AD_AUTH_DEPENDENCY_FAILURE" or "WINDOWS_AD_TERMSRV_SPN_FAILURE" or "WINDOWS_AD_DOMAIN_CONNECTIVITY_FAILURE");
 
     private static string Domain(DiagnosticEvent e)
     {

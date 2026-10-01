@@ -129,7 +129,7 @@ public async Task<DiagnosticReport> RunAsync(string period, CancellationToken ct
 
     var windowStart = report.PeriodoAnalizadoInicio == default ? report.Inicio - lookback : report.PeriodoAnalizadoInicio;
     var transitionsFrom = windowStart - TimeSpan.FromMinutes(15);
-    var to = report.PeriodoAnalizadoFin == default ? report.Fin : report.PeriodoAnalizadoFin;
+        var to = DiagnosticReportWindow.EffectivePeriodEnd(report);
     var primaryHistoryRoot = monitorRoot ?? diagnosticRoot;
     report = await StateReportIntegrator.AddRecentMonitorTransitionsAsync(report, transitionsFrom, to, ct, primaryHistoryRoot).ConfigureAwait(false);
     if (!Path.GetFullPath(primaryHistoryRoot).Equals(Path.GetFullPath(diagnosticRoot), StringComparison.OrdinalIgnoreCase))

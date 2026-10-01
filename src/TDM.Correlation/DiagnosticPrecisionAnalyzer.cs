@@ -222,7 +222,8 @@ public static class DiagnosticPrecisionAnalyzer
             "DEPENDENCY_LOAD_FAILURE" or "DLL_NOT_FOUND" or "INVALID_IMAGE_FORMAT" or
             "DEFENDER_ACTION_TAKEN" or "DEFENDER_THREAT_DETECTED" or "USER_PROFILE_SERVICE_EVENT" or
             "USER_LOGON_FAILURE" or "USER_NLA_PASSWORD_FAILURE" or "ACCOUNT_LOCKOUT" or "KERBEROS_PREAUTH_FAILURE" or "TSPLUS_HTML5_JVM_CRASH" or
-            "RDP_AUTHENTICATION_STAGE" or "RDP_SESSION_LOGON_STAGE" or "RDP_SHELL_START_STAGE" or
+            // B#15: los stages de autenticación/logon/shell de RDP (1149/21/22) marcan éxito
+            // de sesión; sólo GAP/DELAY representan una falla del pipeline y siguen siendo causales.
             "RDP_SHELL_START_GAP" or "RDP_SHELL_START_DELAY" or "TLS_SCHANNEL_EVENT" or "WINDOWS_AD_AUTH_DEPENDENCY_FAILURE" or
             "WINDOWS_AD_TERMSRV_SPN_FAILURE" or "WINDOWS_AD_DOMAIN_CONNECTIVITY_FAILURE" or
             "THIRD_PARTY_MODULE_TSPLUS_CRASH" or "THIRD_PARTY_SECURITY_INTERFERENCE_SIGNAL" or
@@ -243,9 +244,12 @@ public static class DiagnosticPrecisionAnalyzer
 
     private static bool HasOriginConflict(IReadOnlyList<RootCauseCandidate> candidates)
     {
+        // B#18: el conflicto de origen exige correlación temporal en ambos candidatos.
+        // Configuraciones estáticas >=75 sin HoraIncidente compiten por diseño (RDP, roles,
+        // granja); dos hipótesis sin ventana no son un conflicto que penalice la precisión.
         var strongOrigins = candidates
             .Where(IsCausalCandidate)
-            .Where(c => c.Puntaje >= 75)
+            .Where(c => c.Puntaje >= 75 && c.HoraIncidente.HasValue)
             .Select(c => c.OrigenClasificado)
             .Where(o => !string.IsNullOrWhiteSpace(o) && o != "INDETERMINADO")
             .Select(NormalizeOrigin)

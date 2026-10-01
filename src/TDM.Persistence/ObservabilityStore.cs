@@ -245,7 +245,7 @@ public sealed class ObservabilityStore
         var serviceStates = BuildServiceStates(report);
         var dependencyStates = BuildDependencyStates(report);
         var (incidents, incidentsDropped) = BuildIncidents(report);
-        var timestamp = report.PeriodoAnalizadoFin != default ? report.PeriodoAnalizadoFin : report.Fin;
+        var timestamp = DiagnosticReportWindow.EffectivePeriodEnd(report);
         if (timestamp == default) timestamp = DateTimeOffset.Now;
 
         return new ObservabilitySample

@@ -584,7 +584,7 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
     {
         var sb = new StringBuilder();
         var windowStart = report.PeriodoAnalizadoInicio == default ? report.Inicio - report.Lookback : report.PeriodoAnalizadoInicio;
-        var windowEnd = report.PeriodoAnalizadoFin == default ? report.Inicio : report.PeriodoAnalizadoFin;
+        var windowEnd = DiagnosticReportWindow.EffectivePeriodEnd(report);
         sb.AppendLine($"Equipo: {report.Sistema.Equipo}");
         sb.AppendLine($"Sistema: {report.Sistema.SistemaOperativo} {report.Sistema.Version} | build: {report.Sistema.Build} | arquitectura: {report.Sistema.Arquitectura}");
         sb.AppendLine($"TSplus: {(report.Sistema.TsplusDetectado ? $"Detectado | versión: {report.Sistema.TsplusVersion ?? "N/D"}" : report.Sistema.EstadoDeteccionTexto())}");

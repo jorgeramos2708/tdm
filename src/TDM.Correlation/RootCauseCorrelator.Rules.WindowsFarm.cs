@@ -218,21 +218,29 @@ public static partial class RootCauseCorrelator
         if (nlaPasswordIssue is not null)
         {
             var is2019 = nlaPasswordIssue.Id == "WINDOWS-2019-NLA-PASSWORD-CHANGE-COMPATIBILITY";
+            // B#17: 98/Alta exige el conflicto NLA dentro de la ventana analizada; sin ese
+            // ancla temporal la compatibilidad se conserva como hipótesis de configuración
+            // (84/Media), igual que la política RDP y los roles RDS sin síntoma.
             var nlaEvent = report.Eventos
                 .Where(e => e.Tipo == "WINDOWS_NLA_PASSWORD_CHANGE_CONFLICT" && e.Timestamp.HasValue)
+                .Where(e => DiagnosticTimeWindow.IsEventInside(report, e.Timestamp!.Value))
                 .OrderByDescending(e => e.Timestamp)
                 .FirstOrDefault();
+            var anchored = nlaEvent is not null;
             drafts.Add(new CandidateDraft(
                 "ROOT-WINDOWS-NLA-PASSWORD-CHANGE",
                 "Windows NLA / Active Directory / contraseña",
                 DiagnosticLayer.Windows,
-                is2019 ? 98 : 91,
-                is2019 ? ConfidenceLevel.Alta : ConfidenceLevel.Media,
+                anchored ? (is2019 ? 98 : 91) : 84,
+                anchored && is2019 ? ConfidenceLevel.Alta : ConfidenceLevel.Media,
                 "Windows rechazó la autenticación remota por estado de contraseña antes de completar la sesión TSplus.",
-                "La evidencia Security indica contraseña expirada o cambio obligatorio y TDM observó el estado de NLA. NLA autentica antes de crear la sesión RDP completa, por lo que TSplus queda clasificado como afectado/víctima cuando el rechazo ocurre en esta fase. El patrón específico de Windows Server 2019 se eleva sólo cuando el sistema, NLA y el código de autenticación coinciden.",
+                anchored
+                    ? "La evidencia Security indica contraseña expirada o cambio obligatorio y TDM observó el estado de NLA. NLA autentica antes de crear la sesión RDP completa, por lo que TSplus queda clasificado como afectado/víctima cuando el rechazo ocurre en esta fase. El patrón específico de Windows Server 2019 se eleva sólo cuando el sistema, NLA y el código de autenticación coinciden."
+                    : "La evidencia Security indica contraseña expirada o cambio obligatorio y TDM observó el estado de NLA, pero el conflicto no está anclado dentro de la ventana analizada. TDM conserva la condición como hipótesis de compatibilidad y no la declara causa del incidente.",
                 Merge(
                     nlaPasswordIssue.Evidencia,
                     new EvidenceItem("Originador específico", "Windows NLA / autenticación de credenciales"),
+                    new EvidenceItem("Conflicto NLA en la ventana", anchored ? nlaEvent!.Tipo : "No observado"),
                     new EvidenceItem("Rol de TSplus", "VÍCTIMA / sesión no completada"),
                     new EvidenceItem("Rol de Windows", "ORIGINADOR")),
                 null,

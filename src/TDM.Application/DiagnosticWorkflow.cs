@@ -47,7 +47,10 @@ public static class DiagnosticWorkflow
                 primary = causalCandidates[0];
         }
         report = report with { CausasRaiz = causes, CausaRaizPrincipal = primary };
-        report = report with { PatronesFalla = FailurePatternAnalyzer.Analyze(report) };
+        // B#19: los patrones de falla se calculan sobre la lista completa de candidatos
+        // calibrados; el recorte Take(8) es sólo presentación del informe y no debe ocultar
+        // recurrencias de candidatos fuera del top 8.
+        report = report with { PatronesFalla = FailurePatternAnalyzer.Analyze(report with { CausasRaiz = calibrated }) };
         report = report with { Incidentes = IncidentClusterAnalyzer.Analyze(report) };
         report = report with { PrecisionDiagnostica = DiagnosticPrecisionAnalyzer.Analyze(report) };
         report = report with { ImpactoFuncional = FunctionalImpactAnalyzer.Analyze(report) };

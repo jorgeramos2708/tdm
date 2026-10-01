@@ -25,6 +25,12 @@ public static class ReportConsistencyAnalyzer
             && report.CausaRaizPrincipal is null)
             tensions.Add($"Impacto funcional {report.ImpactoFuncional.EstadoGeneral} sin origen demostrado: impacto confirmado, causa no demostrada.");
         var principal = report.CausaRaizPrincipal;
+        // B#14: el marcado [PRINCIPAL] no puede convivir en silencio con la evidencia de que
+        // la causa principal carece de fuente primaria independiente; la limitación se declara.
+        if (principal is not null
+            && principal.Evidencia.Any(e => e.Clave.Equals("Evidencia primaria independiente", StringComparison.OrdinalIgnoreCase)
+                                         && e.Valor.Equals("No", StringComparison.OrdinalIgnoreCase)))
+            tensions.Add("La causa principal se declara [PRINCIPAL] sin evidencia primaria independiente: es una hipótesis sustentada, no una causa confirmada.");
         if (principal?.HoraIncidente.HasValue == true && report.PeriodoAnalizadoFin != default &&
             (principal.HoraIncidente.Value < report.PeriodoAnalizadoInicio || principal.HoraIncidente.Value > report.PeriodoAnalizadoFin))
             tensions.Add("La hora del incidente principal cae fuera de la ventana analizada: verifique la ventana antes de actuar.");

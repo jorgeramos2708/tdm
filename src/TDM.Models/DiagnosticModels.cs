@@ -266,3 +266,14 @@ public sealed record DiagnosticReport(
     /// <summary> Tensiones explícitas de coherencia interna ( auto-chequeo del reporte ). Vacío = sin tensiones. </summary>
     public IReadOnlyList<string> Tensiones { get; init; } = [];
 }
+
+/// <summary>
+/// Fallback único del cierre de ventana del reporte (B#20): export, narrativa, GUI,
+/// ledger y servicio deben medir el mismo fin de periodo. Si el reporte no declara
+/// PeriodoAnalizadoFin se usa el fin de captura (Fin); nunca Inicio ni "ahora".
+/// </summary>
+public static class DiagnosticReportWindow
+{
+    public static DateTimeOffset EffectivePeriodEnd(DiagnosticReport report)
+        => report.PeriodoAnalizadoFin != default ? report.PeriodoAnalizadoFin : report.Fin;
+}

@@ -312,7 +312,7 @@ public sealed class IntegratedMonitoringService : IDisposable
             .Where(x => x.Severidad is DiagnosticSeverity.Advertencia or DiagnosticSeverity.Error or DiagnosticSeverity.Critico)
             .Select(x => new AlertSignal(
                 $"finding|{x.Id}",
-                report.PeriodoAnalizadoFin != default ? report.PeriodoAnalizadoFin : DateTimeOffset.Now,
+                DiagnosticReportWindow.EffectivePeriodEnd(report),
                 x.Severidad.ToString(),
                 AlertTitleFormatter.ForFinding(x),
                 x.Resumen,

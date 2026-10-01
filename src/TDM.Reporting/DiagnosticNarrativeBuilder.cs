@@ -16,7 +16,7 @@ public static class DiagnosticNarrativeBuilder
         sb.AppendLine($"Sistema: {report.Sistema.SistemaOperativo} {report.Sistema.Version} (build {report.Sistema.Build}, {report.Sistema.Arquitectura})");
         sb.AppendLine($"Remote Access: {(report.Sistema.TsplusDetectado ? $"Detectado ({report.Sistema.TsplusVersion ?? "versión N/D"})" : report.Sistema.EstadoDeteccionTexto())}");
         var periodoInicio = report.PeriodoAnalizadoInicio == default ? report.Inicio - report.Lookback : report.PeriodoAnalizadoInicio;
-        var periodoFin = report.PeriodoAnalizadoFin == default ? report.Inicio : report.PeriodoAnalizadoFin;
+        var periodoFin = DiagnosticReportWindow.EffectivePeriodEnd(report);
         var evidenceLookback = report.EvidenciaDisponibleLookback <= TimeSpan.Zero ? report.Lookback : report.EvidenciaDisponibleLookback;
         var evidenceStart = report.PeriodoEvidenciaInicio == default ? periodoInicio : report.PeriodoEvidenciaInicio;
         var evidenceEnd = report.PeriodoEvidenciaFin == default ? periodoFin : report.PeriodoEvidenciaFin;

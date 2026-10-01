@@ -53,7 +53,7 @@ public static class TsplusGuidedTroubleshooter
     private static bool IsNearAnalysisEnd(DiagnosticReport report, DiagnosticEvent e, TimeSpan maxAge)
     {
         if (e.Timestamp is not DateTimeOffset ts) return false;
-        var end = report.PeriodoAnalizadoFin != default ? report.PeriodoAnalizadoFin : report.Fin;
+        var end = DiagnosticReportWindow.EffectivePeriodEnd(report);
         return ts <= end && end - ts <= maxAge;
     }
 

@@ -258,7 +258,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
                         }
 
                         var transitionsFrom = (report.PeriodoAnalizadoInicio == default ? report.Inicio : report.PeriodoAnalizadoInicio) - TimeSpan.FromMinutes(15);
-                        var transitionsTo = report.PeriodoAnalizadoFin == default ? report.Fin : report.PeriodoAnalizadoFin;
+                        var transitionsTo = DiagnosticReportWindow.EffectivePeriodEnd(report);
                         report = await StateReportIntegrator.AddRecentMonitorTransitionsAsync(report, transitionsFrom, transitionsTo, stoppingToken, _root).ConfigureAwait(false);
 
                         report = DiagnosticWorkflow.Analyze(report, includeGuidedResolution: false, verifiedHitRates: verifiedHitRates);
@@ -445,7 +445,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
         var preRecordedResult = await stateStore.RecordAsync(preRecordedSnapshot, "service-monitor", ct).ConfigureAwait(false);
         report = StateReportIntegrator.AddTransitionsFromRecordResult(report, preRecordedResult, "service-monitor");
         var transitionsFrom = (report.PeriodoAnalizadoInicio == default ? report.Inicio : report.PeriodoAnalizadoInicio) - TimeSpan.FromMinutes(15);
-        var transitionsTo = report.PeriodoAnalizadoFin == default ? report.Fin : report.PeriodoAnalizadoFin;
+        var transitionsTo = DiagnosticReportWindow.EffectivePeriodEnd(report);
         report = await StateReportIntegrator.AddRecentMonitorTransitionsAsync(report, transitionsFrom, transitionsTo, ct, _root).ConfigureAwait(false);
 
         report = DiagnosticWorkflow.Analyze(report, includeGuidedResolution: false);
@@ -498,7 +498,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
             .Where(IsPreventiveFinding)
             .Select(f => new AlertSignal(
                 $"finding|{f.Id}",
-                report.PeriodoAnalizadoFin != default ? report.PeriodoAnalizadoFin : DateTimeOffset.Now,
+                DiagnosticReportWindow.EffectivePeriodEnd(report),
                 f.Severidad.ToString(),
                 AlertTitleFormatter.ForFinding(f),
                 f.Resumen,
