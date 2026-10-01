@@ -87,7 +87,8 @@ public static class StateReportIntegrator
                         new EvidenceItem("Tipo", transition.Type),
                         new EvidenceItem("Estado anterior", transition.PreviousValue),
                         new EvidenceItem("Estado actual", transition.CurrentValue),
-                        new EvidenceItem("Severidad actual", transition.CurrentSeverity)
+                        new EvidenceItem("Severidad actual", transition.CurrentSeverity),
+                        new EvidenceItem("Cambio después de", transition.ChangedAfter?.ToString("O") ?? "No disponible")
                     ],
                     Producto: ParseProduct(transition.Product)));
             }
@@ -181,7 +182,8 @@ public static class StateReportIntegrator
                     new EvidenceItem("Estado anterior", transition.PreviousValue),
                     new EvidenceItem("Estado actual", transition.CurrentValue),
                     new EvidenceItem("Canal", channel),
-                    new EvidenceItem("Origen de evidencia", "Journal longitudinal TDM")
+                    new EvidenceItem("Origen de evidencia", "Journal longitudinal TDM"),
+                    new EvidenceItem("Cambio después de", transition.ChangedAfter?.ToString("O") ?? "No disponible")
                 ],
                 Producto: ParseProduct(transition.Product)));
         }
@@ -246,16 +248,37 @@ public static class StateReportIntegrator
                         new EvidenceItem("Estado anterior", transition.PreviousValue),
                         new EvidenceItem("Estado actual", transition.CurrentValue),
                         new EvidenceItem("Canal", item.Channel),
-                        new EvidenceItem("Origen de evidencia", "Journal longitudinal TDM")
+                        new EvidenceItem("Origen de evidencia", "Journal longitudinal TDM"),
+                        new EvidenceItem("Cambio después de", transition.ChangedAfter?.ToString("O") ?? "No disponible")
                     ],
                     Producto: ParseProduct(transition.Product)));
             }
 
             return report with { Eventos = events.OrderBy(e => e.Timestamp ?? DateTimeOffset.MaxValue).ToList() };
         }
-        catch
+        catch (Exception ex)
         {
-            return report;
+            // §2: antes era un catch vacío; un fallo de lectura del journal desaparecía
+            // sin telemetría y el reporte no declaraba la pérdida de continuidad
+            // histórica. Espejo de TDM_LOCAL_HISTORY_UNAVAILABLE en RecordAndEnrich.
+            System.Diagnostics.Trace.TraceWarning($"[TDM] Journal de transiciones recientes ilegible: {ex.Message}");
+            var partial = report.Eventos.ToList();
+            partial.Add(new DiagnosticEvent(
+                to,
+                "TDM",
+                "Historial local TDM",
+                DiagnosticLayer.Desconocida,
+                DiagnosticSeverity.Advertencia,
+                "TDM_RECENT_TRANSITIONS_UNAVAILABLE",
+                "No fue posible leer el journal reciente de transiciones de estado; el diagnóstico de Windows/TSplus continúa siendo válido con la evidencia recopilada, pero la continuidad histórica de este ciclo no está evaluada.",
+                Evidencia:
+                [
+                    new EvidenceItem("Detalle", ex.Message),
+                    new EvidenceItem("Cobertura historial reciente", "No evaluado"),
+                    new EvidenceItem("Desde", from.ToString("O")),
+                    new EvidenceItem("Hasta", to.ToString("O"))
+                ]));
+            return report with { Eventos = partial.OrderBy(e => e.Timestamp ?? DateTimeOffset.MaxValue).ToList() };
         }
     }
 

@@ -129,7 +129,10 @@ public sealed class WindowsForensicEventCollector : IReadOnlyCollector
                     ? $"Parcial; eventos relevantes>={count}; límite adaptativo={limit} alcanzado"
                     : $"Disponible; eventos relevantes={count}"));
             }
-            catch (EventLogNotFoundException) { coverage.Add(new EvidenceItem(spec.Area, "Canal no disponible")); }
+            // C#11: un canal inexistente en este SKU (p.ej. AppLocker sin rol) no es
+            // evidencia bloqueada ni disponible; marcarlo como "Canal no disponible"
+            // hundía la fuente crítica a "Parcial" permanente en el analizador.
+            catch (EventLogNotFoundException) { coverage.Add(new EvidenceItem(spec.Area, "No existe en este SO")); }
             catch (UnauthorizedAccessException) { coverage.Add(new EvidenceItem(spec.Area, "Sin permisos de lectura")); }
             catch (EventLogException ex) { coverage.Add(new EvidenceItem(spec.Area, $"No legible: {ex.Message}")); }
         }

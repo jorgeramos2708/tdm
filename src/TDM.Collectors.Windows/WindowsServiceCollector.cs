@@ -12,7 +12,27 @@ public sealed class WindowsServiceCollector : IReadOnlyCollector
     {
         var findings = new List<DiagnosticFinding>();
         var events = new List<DiagnosticEvent>();
-        var serviceNames = DiscoverServiceNames();
+        var (serviceNames, catalogFallback) = DiscoverServiceNames();
+
+        // C#7: si el descubrimiento dinámico falla, el catálogo fijo sólo cubre los
+        // servicios requeridos con TSplus. Sin esta declaración la fuente parecería
+        // "Disponible" mientras el resto de servicios quedó sin evaluar.
+        if (catalogFallback)
+        {
+            findings.Add(new DiagnosticFinding(
+                "SVC-DISCOVERY-COVERAGE",
+                "Servicios Windows",
+                DiagnosticSeverity.Advertencia,
+                "No fue posible enumerar los servicios instalados; la evaluación se limitó al catálogo fijo.",
+                "El descubrimiento dinámico vía Service Control Manager falló. TDM sólo evaluó los servicios requeridos cuando TSplus está presente y declara esa fuente como NO EVALUADA: la ausencia de hallazgos sobre el resto de servicios no es evidencia de salud.",
+                [
+                    new EvidenceItem("Cobertura", "No evaluado"),
+                    new EvidenceItem("Servicios evaluados", serviceNames.Count.ToString()),
+                    new EvidenceItem("Fuente de nombres", "Catálogo fijo TDM")
+                ],
+                ConfidenceLevel.Media,
+                Capa: DiagnosticLayer.Windows));
+        }
 
         foreach (var name in serviceNames)
         {
@@ -89,18 +109,18 @@ public sealed class WindowsServiceCollector : IReadOnlyCollector
         return Task.FromResult(new CollectorResult(findings, events));
     }
 
-    private static IReadOnlyList<string> DiscoverServiceNames()
+    private static (IReadOnlyList<string> Names, bool CatalogFallback) DiscoverServiceNames()
     {
         ServiceController[] services;
         try { services = ServiceController.GetServices(); }
         catch
         {
-            return WindowsServiceCatalog.Targets
+            return (WindowsServiceCatalog.Targets
                 .Where(x => x.RequiredWhenTsplus)
                 .Select(x => x.Name)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+                .ToList(), true);
         }
 
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -119,7 +139,7 @@ public sealed class WindowsServiceCollector : IReadOnlyCollector
             foreach (var service in services) service.Dispose();
         }
 
-        return names.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+        return (names.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(), false);
     }
 
     private static string SafeDisplayName(ServiceController service)

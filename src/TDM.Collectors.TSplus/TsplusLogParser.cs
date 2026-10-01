@@ -75,14 +75,18 @@ public static partial class TsplusLogParser
     private static DiagnosticSeverity ClassifySeverity(string line)
     {
         // Si el propio log declara un nivel, éste manda. Evita etiquetar como Error
-        // una línea WARN sólo porque el texto contiene la palabra "error".
-        if (Regex.IsMatch(line, @"^\s*(?:\[[^\]]+\]\s*)?DEBUG\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        // una línea WARN sólo porque el texto contiene la palabra "error". El prefijo
+        // acepta cero o más grupos "[...]" y un corchete opcional alrededor del nivel
+        // para entender "[fecha] [ERROR]" (C#12): con un solo grupo y el nivel desnudo
+        // esas líneas caían al barrido de tokens y "[fecha] [DEBUG] ...timeout..." se
+        // clasificaba Error/Advertencia en vez de honrar el nivel declarado.
+        if (Regex.IsMatch(line, @"^\s*(?:\[[^\]]+\]\s*)*\[?\s*DEBUG\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
             return DiagnosticSeverity.Informativo;
-        if (Regex.IsMatch(line, @"^\s*(?:\[[^\]]+\]\s*)?(?:FATAL|CRITICAL|CRÍTICO|CRITICO)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        if (Regex.IsMatch(line, @"^\s*(?:\[[^\]]+\]\s*)*\[?\s*(?:FATAL|CRITICAL|CRÍTICO|CRITICO)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
             return DiagnosticSeverity.Critico;
-        if (Regex.IsMatch(line, @"^\s*(?:\[[^\]]+\]\s*)?(?:ERROR|ERR)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        if (Regex.IsMatch(line, @"^\s*(?:\[[^\]]+\]\s*)*\[?\s*(?:ERROR|ERR)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
             return DiagnosticSeverity.Error;
-        if (Regex.IsMatch(line, @"^\s*(?:\[[^\]]+\]\s*)?(?:WARNING|WARN|ADVERTENCIA|AVISO)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        if (Regex.IsMatch(line, @"^\s*(?:\[[^\]]+\]\s*)*\[?\s*(?:WARNING|WARN|ADVERTENCIA|AVISO)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
             return DiagnosticSeverity.Advertencia;
 
         // Resúmenes sanos como "errors: 0", "0 failures" o "without error" no deben

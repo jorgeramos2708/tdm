@@ -146,7 +146,16 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("PrincipalWithoutIndependentEvidenceRaisesTension", PrincipalWithoutIndependentEvidenceRaisesTension),
     ("FailurePatternsUseFullCandidateList", FailurePatternsUseFullCandidateList),
     ("RemoteLogonFailuresCoverEachCorrelatedUser", RemoteLogonFailuresCoverEachCorrelatedUser),
-    ("PeriodEndFallbackIsUnifiedAcrossNarrativeAndExport", PeriodEndFallbackIsUnifiedAcrossNarrativeAndExport)
+    ("PeriodEndFallbackIsUnifiedAcrossNarrativeAndExport", PeriodEndFallbackIsUnifiedAcrossNarrativeAndExport),
+    ("ServiceDiscoveryFallbackDeclaresCoverage", ServiceDiscoveryFallbackDeclaresCoverage),
+    ("LogIntegrityBudgetIsPerChannelAndDeclared", LogIntegrityBudgetIsPerChannelAndDeclared),
+    ("RegistryBaselineInitializationIsDeclared", RegistryBaselineInitializationIsDeclared),
+    ("ForensicMissingChannelIsNotPermanentPartial", ForensicMissingChannelIsNotPermanentPartial),
+    ("LogParserHonorsBracketedDeclaredLevel", LogParserHonorsBracketedDeclaredLevel),
+    ("UndatedLogEventsExpireWithTheWindow", UndatedLogEventsExpireWithTheWindow),
+    ("TransitionCarriesObservationInterval", TransitionCarriesObservationInterval),
+    ("LongitudinalPrecedenceUsesIntervalLowerBound", LongitudinalPrecedenceUsesIntervalLowerBound),
+    ("RecentTransitionReadFailureIsDeclared", RecentTransitionReadFailureIsDeclared)
 };
 
 var failed = 0;
@@ -3374,6 +3383,209 @@ static async Task PeriodEndFallbackIsUnifiedAcrossNarrativeAndExport()
             "El periodo rápido del export no cerró con el fin de captura.");
     }
     finally { TryDelete(dir); }
+}
+
+// Fase 14 (P6): §1 C#7-8, C#9,11 · §2 CapturedAt + catch vacío · §3 C#12.
+static Task ServiceDiscoveryFallbackDeclaresCoverage()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del descubrimiento de servicios no ejecutable.");
+    var collector = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsServiceCollector.cs"));
+    True(collector.Contains("SVC-DISCOVERY-COVERAGE", StringComparison.Ordinal),
+        "El fallback al catálogo fijo no emite el hallazgo de cobertura SVC-DISCOVERY-COVERAGE.");
+    True(collector.Contains("\"Cobertura\", \"No evaluado\"", StringComparison.Ordinal),
+        "El fallback del descubrimiento no declara la fuente como No evaluado.");
+    True(collector.Contains("CatalogFallback", StringComparison.Ordinal),
+        "El descubrimiento no distingue el catálogo fijo del inventario dinámico.");
+    return Task.CompletedTask;
+}
+
+static Task LogIntegrityBudgetIsPerChannelAndDeclared()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de integridad de logs no ejecutable.");
+    var collector = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsLogIntegrityCollector.cs"));
+    False(collector.Contains("findings.Count < MaxFindings", StringComparison.Ordinal),
+        "El presupuesto de hallazgos de integridad sigue compartido entre canales.");
+    True(collector.Contains("MaxFindingsPerChannel", StringComparison.Ordinal),
+        "El presupuesto de hallazgos no es por canal.");
+    True(collector.Contains("channelFindings >= MaxFindingsPerChannel", StringComparison.Ordinal),
+        "El corte por presupuesto no se detecta dentro de la lectura del canal.");
+    True(collector.Contains("Parcial; límite de", StringComparison.Ordinal),
+        "El corte por presupuesto no se declara en la cobertura del canal.");
+    return Task.CompletedTask;
+}
+
+static async Task RegistryBaselineInitializationIsDeclared()
+{
+    var stateRoot = TempDir();
+    var install = TempDir();
+    var prior = Environment.GetEnvironmentVariable("TDM_STATE_ROOT");
+    try
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", stateRoot);
+        SeedMinimalInstall(install, out _, out _);
+
+        var collector = new TsplusConfigurationDriftCollector();
+        var ctx = InstallContext(install);
+        var first = await collector.CollectAsync(ctx);
+        True(first.Eventos.Any(e => e.Tipo == "TSPLUS_CONFIG_BASELINE_INITIALIZED"),
+            "precondición: la primera ejecución debe inicializar la línea base.");
+        True(CollectorCursorStore.TryLoad<ConfigBaselineState>("tsplus-config-baseline", out var baseline, out _) && baseline is not null,
+            "precondición: la línea base no es reescribible en el state root aislado.");
+
+        // Simula una línea base anterior a la Fase 14: existe pero sin campo Registry.
+        ConfigurationHistoryStore.Instance.SaveAsync(baseline! with { Registry = null });
+
+        var second = await collector.CollectAsync(ctx);
+        True(second.Eventos.Any(e => e.Tipo == "TSPLUS_CONFIG_REGISTRY_BASELINE_INITIALIZED"),
+            "El salto de la comparación de registro (baseline sin Registry) no se declaró.");
+        False(second.Hallazgos.Any(f => f.Id == "TSPLUS-CONFIG-DRIFT-REGISTRY"),
+            "Con baseline sin Registry no debe emitirse deriva de registro.");
+        True(second.Eventos.Any(e => e.Tipo == "TSPLUS_CONFIG_STABLE"),
+            "La corrida con baseline de registro ausente dejó de emitir el estado estable de archivos.");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", prior);
+        TryDelete(stateRoot);
+        TryDelete(install);
+    }
+}
+
+static Task ForensicMissingChannelIsNotPermanentPartial()
+{
+    var now = DateTimeOffset.Now;
+    DiagnosticEvent Coverage(params EvidenceItem[] items) => new(now, "TDM", "Cobertura forense Windows",
+        DiagnosticLayer.Windows, DiagnosticSeverity.Informativo, "WINDOWS_FORENSIC_COVERAGE",
+        "Cobertura de registros Windows consultados por TDM.", Evidencia: items);
+
+    var notApplicable = DiagnosticCoverageAnalyzer.Analyze(Report(
+        [Coverage(new EvidenceItem("AppLocker EXE and DLL", "No existe en este SO"),
+                  new EvidenceItem("Firewall de Windows", "Disponible; eventos relevantes=3"))], now));
+    var source = notApplicable.Fuentes.Single(x => x.Fuente == "Windows Event Log forense");
+    Equal("Disponible", source.Estado,
+        "Un canal inexistente en este SKU hundió la fuente forense crítica a Parcial.");
+    True(source.Detalle.Contains("no aplicables=1", StringComparison.Ordinal),
+        "El desglose de cobertura no declara los canales no aplicables.");
+
+    var legacyUnavailable = DiagnosticCoverageAnalyzer.Analyze(Report(
+        [Coverage(new EvidenceItem("AppLocker EXE and DLL", "Canal no disponible"))], now));
+    Equal("Parcial", legacyUnavailable.Fuentes.Single(x => x.Fuente == "Windows Event Log forense").Estado,
+        "Un canal realmente no disponible dejó de marcar la fuente como Parcial.");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del collector forense no ejecutable.");
+    var collector = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsForensicEventCollector.cs"));
+    True(collector.Contains("\"No existe en este SO\"", StringComparison.Ordinal),
+        "El collector forense no distingue el canal inexistente del no disponible.");
+    return Task.CompletedTask;
+}
+
+static Task LogParserHonorsBracketedDeclaredLevel()
+{
+    var context = Context(TimeSpan.FromHours(1));
+    var stamp = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+    var declaredError = TsplusLogParser.ParseLine("Remote Access", "x.log", $"[{stamp}] [ERROR] cache warmed", 1, context);
+    NotNull(declaredError, "[fecha] [ERROR] sin términos de error no pasó el atajo de nivel declarado.");
+    Equal(DiagnosticSeverity.Error, declaredError!.Severidad, "El [ERROR] declarado no manda sobre el barrido de tokens.");
+
+    var declaredDebug = TsplusLogParser.ParseLine("Remote Access", "x.log", $"[{stamp}] [DEBUG] timeout while loading", 2, context);
+    True(declaredDebug is null, "[fecha] [DEBUG] con 'timeout' en el texto se clasificó por tokens en vez del nivel declarado.");
+
+    var declaredWarn = TsplusLogParser.ParseLine("Remote Access", "x.log", $"[{stamp}] [WARN] application error detected", 3, context);
+    NotNull(declaredWarn, "[fecha] [WARN] no pasó el atajo de nivel declarado.");
+    Equal(DiagnosticSeverity.Advertencia, declaredWarn!.Severidad, "El [WARN] declarado perdió ante el token 'error'.");
+
+    var declaredFatal = TsplusLogParser.ParseLine("Remote Access", "x.log", $"[{stamp}] [FATAL] routine stop", 4, context);
+    NotNull(declaredFatal, "[fecha] [FATAL] no pasó el atajo de nivel declarado.");
+    Equal(DiagnosticSeverity.Critico, declaredFatal!.Severidad, "El [FATAL] declarado no clasificó como Crítico.");
+
+    var bare = TsplusLogParser.ParseLine("Remote Access", "x.log", "ERROR plain failure", 5, context);
+    NotNull(bare, "El formato sin corchetes dejó de clasificarse.");
+    Equal(DiagnosticSeverity.Error, bare!.Severidad, "ERROR sin corchetes cambió de severidad.");
+    return Task.CompletedTask;
+}
+
+static Task UndatedLogEventsExpireWithTheWindow()
+{
+    var now = DateTimeOffset.Now;
+    DiagnosticEvent Undated(string id, DateTimeOffset? ingested) => new(null, "TSplus Log", $"App {id}",
+        DiagnosticLayer.Tsplus, DiagnosticSeverity.Error, "LOG_ERROR", $"fallo {id}", IngestedAt: ingested);
+    var recentUndated = Undated("recent", now.AddHours(-1));
+    var staleUndated = Undated("stale", now.AddHours(-8));
+    var legacyUndated = Undated("legacy", null);
+    var inWindow = new DiagnosticEvent(now.AddMinutes(-30), "Service Control Manager", "svcA", DiagnosticLayer.Windows,
+        DiagnosticSeverity.Error, "SERVICE_START_FAILURE", "fallo", "7000");
+
+    var baseline = Report([recentUndated, staleUndated, legacyUndated, inWindow], now.AddMinutes(-5));
+    var merged = ContinuousDiagnosticMerger.Merge(baseline, Report([], now), TimeSpan.FromHours(4));
+
+    True(merged.Eventos.Any(e => e.Componente == "App recent"),
+        "La evidencia sin timestamp ingerida dentro de la ventana se perdió al fusionar.");
+    False(merged.Eventos.Any(e => e.Componente == "App stale"),
+        "La evidencia sin timestamp ingerida antes de la ventana sobrevivió a la fusión.");
+    True(merged.Eventos.Any(e => e.Componente == "App legacy"),
+        "Un evento sin IngestedAt no puede ubicarse y no debe descartarse.");
+    True(merged.Eventos.Any(e => e.Tipo == "SERVICE_START_FAILURE"),
+        "El evento fechado dentro de la ventana se perdió en la fusión.");
+    return Task.CompletedTask;
+}
+
+static async Task TransitionCarriesObservationInterval()
+{
+    var root = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var store = new LocalStateStore(root);
+        var snapA = StateSnapshotBuilder.Build(Report([ServiceStateEvent(now, "Running")], now), "1.0.0");
+        await store.RecordAsync(snapA, "service-monitor");
+        var snapB = StateSnapshotBuilder.Build(Report([ServiceStateEvent(now.AddSeconds(5), "Stopped")], now.AddSeconds(5)), "1.0.0");
+        var result = await store.RecordAsync(snapB, "service-monitor");
+        Equal(1, result.Transitions.Count, "precondición: Running→Stopped debe producir una transición.");
+        True(result.Transitions[0].ChangedAfter == snapA.CapturedAt,
+            "La transición no conserva la foto anterior como cota inferior del cambio.");
+        Equal(snapB.CapturedAt, result.Transitions[0].Timestamp,
+            "La transición dejó de fecharse en la foto actual (cota superior).");
+
+        var report = StateReportIntegrator.AddTransitionsFromRecordResult(
+            Report([ServiceStateEvent(now.AddSeconds(5), "Stopped")], now.AddSeconds(5)), result, "service-monitor");
+        var transition = report.Eventos.Single(e => e.Tipo == "TDM_MONITOR_STATE_TRANSITION");
+        True(transition.Evidencia!.Any(x => x.Clave == "Cambio después de" && x.Valor == snapA.CapturedAt.ToString("O")),
+            "El evento de transición no declara la cota inferior del intervalo de cambio.");
+    }
+    finally { TryDelete(root); }
+}
+
+static Task LongitudinalPrecedenceUsesIntervalLowerBound()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de la regla longitudinal no ejecutable.");
+    var rules = File.ReadAllText(Path.Combine(root!, "src", "TDM.Correlation", "RootCauseCorrelator.Rules.Longitudinal.cs"));
+    True(rules.Contains("\"Cambio después de\"", StringComparison.Ordinal),
+        "La regla longitudinal no lee la cota inferior del intervalo de cambio.");
+    True(rules.Contains("earliestPossible", StringComparison.Ordinal),
+        "La precedencia de la transición no usa la cota inferior del intervalo.");
+    return Task.CompletedTask;
+}
+
+static async Task RecentTransitionReadFailureIsDeclared()
+{
+    var now = DateTimeOffset.Now;
+    var report = Report([ServiceStateEvent(now, "Running")], now);
+    var result = await StateReportIntegrator.AddRecentMonitorTransitionsAsync(
+        report, now.AddHours(-1), now, CancellationToken.None, "\0");
+    True(result.Eventos.Any(e => e.Tipo == "TDM_RECENT_TRANSITIONS_UNAVAILABLE"),
+        "Un fallo al leer el journal reciente se tragó sin declararlo.");
+    var unavailable = result.Eventos.Single(e => e.Tipo == "TDM_RECENT_TRANSITIONS_UNAVAILABLE");
+    True(unavailable.Evidencia!.Any(x => x.Clave == "Cobertura historial reciente" && x.Valor == "No evaluado"),
+        "El fallo de lectura del journal no dejó la cobertura declarada como No evaluado.");
+    Equal(report.Eventos.Count + 1, result.Eventos.Count,
+        "El reporte original no quedó intacto al declarar el fallo del journal.");
+    True(result.Eventos.Any(e => e.Componente == "Spooler"),
+        "Los eventos originales desaparecieron cuando el journal falló.");
 }
 
 static string? FindRepoRoot()

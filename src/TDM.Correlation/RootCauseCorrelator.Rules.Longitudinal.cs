@@ -1,3 +1,4 @@
+using System.Globalization;
 using TDM.Models;
 
 namespace TDM.Correlation;
@@ -21,6 +22,15 @@ public static partial class RootCauseCorrelator
             var stateType = EvidenceValue(transition, "Tipo") ?? string.Empty;
             if (!IsCausalLongitudinalType(stateType)) continue;
             if (transition.Timestamp is not DateTimeOffset changedAt) continue;
+
+            // §2/CapturedAt: la transición se fecha en la cota superior (la foto), pero el
+            // cambio ocurrió en (Cambio después de, Timestamp]. La precedencia y el delta
+            // usan la cota inferior: con la foto, los fallos del mismo ciclo quedaban
+            // "antes" del cambio y el vínculo se perdía. Journals previos sin la evidencia
+            // conservan la fecha de la foto (fallback al comportamiento anterior).
+            var lowerBound = EvidenceValue(transition, "Cambio después de");
+            if (DateTimeOffset.TryParse(lowerBound, CultureInfo.InvariantCulture, DateTimeStyles.None, out var earliestPossible))
+                changedAt = earliestPossible;
 
             // Un servicio que cambia de Running a otro estado es causalmente interesante;
             // un arranque de servicio se conserva como contexto, no como causa automática.

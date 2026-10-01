@@ -81,9 +81,16 @@ public static class ContinuousDiagnosticMerger
     public static bool IsCurrentStateEvent(DiagnosticEvent e) => DiagnosticEventCatalog.IsMergeCurrentState(e.Tipo);
 
     private static bool KeepEvent(DiagnosticEvent e, DateTimeOffset start, DateTimeOffset end)
-        => IsCurrentStateEvent(e)
-           || !e.Timestamp.HasValue
-           || (e.Timestamp.Value >= start && e.Timestamp.Value <= end);
+    {
+        if (IsCurrentStateEvent(e)) return true;
+        if (e.Timestamp.HasValue) return e.Timestamp.Value >= start && e.Timestamp.Value <= end;
+        // C#12: una línea de log sin timestamp entraba a la ventana sin cotejo y
+        // sobrevivía a cualquier fusión (|| !Timestamp.HasValue la conservaba para
+        // siempre). Ahora caduca cuando su hora de ingesta queda antes de la ventana;
+        // una ingesta posterior al cierre se conserva porque es evidencia reciente,
+        // no residual. Sin IngestedAt no hay cómo ubicarla y se arrastra (legacy).
+        return e.IngestedAt is null || e.IngestedAt >= start;
+    }
 
     private static bool IsSameCurrentState(DiagnosticEvent a, DiagnosticEvent b)
     {

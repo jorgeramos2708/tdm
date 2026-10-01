@@ -210,7 +210,7 @@ public sealed class LocalStateStore
             if (!oldMap.TryGetValue(item.Key, out var old)) continue; // RC18.4 evita falsos "eliminados" si un collector quedó sin cobertura.
             if (string.Equals(old.Value, item.Value, StringComparison.Ordinal)) continue;
             output.Add(new StateTransition(current.CapturedAt, item.Key, item.Type, item.Component, item.Layer, item.Product,
-                old.Value, item.Value, old.Severity, item.Severity));
+                old.Value, item.Value, old.Severity, item.Severity, previous.CapturedAt));
         }
         return output;
     }

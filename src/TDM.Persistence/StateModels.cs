@@ -34,7 +34,11 @@ public sealed record StateTransition(
     string PreviousValue,
     string CurrentValue,
     string PreviousSeverity,
-    string CurrentSeverity);
+    string CurrentSeverity,
+    // §2/CapturedAt: el cambio real ocurrió en (ChangedAfter, Timestamp]; Timestamp
+    // es la cota superior (la foto) y ChangedAfter la anterior (primer instante
+    // posible). Null en journals previos a la Fase 14 (JSON backward-compatible).
+    DateTimeOffset? ChangedAfter = null);
 
 public sealed record BaselineDifference(
     string Key,

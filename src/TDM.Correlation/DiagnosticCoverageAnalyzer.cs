@@ -125,11 +125,15 @@ public static class DiagnosticCoverageAnalyzer
         var discovery = coverage.Evidencia.FirstOrDefault(x => x.Clave.Equals("Descubrimiento dinámico de canales", StringComparison.OrdinalIgnoreCase));
         var blocked = channelEvidence.Where(x => IsBlocked(x.Valor)).ToList();
         var unavailable = channelEvidence.Where(x => x.Valor.StartsWith("Canal no disponible", StringComparison.OrdinalIgnoreCase)).ToList();
-        var available = channelEvidence.Count - blocked.Count - unavailable.Count;
+        // C#11: un canal que no existe en este SKU no está "no disponible": no hay
+        // evidencia que leer allí. Contarlo como unavailable dejaba la fuente crítica
+        // en "Parcial" permanente sin que nada pudiera sanearla.
+        var notApplicable = channelEvidence.Where(x => x.Valor.StartsWith("No existe en este SO", StringComparison.OrdinalIgnoreCase)).ToList();
+        var available = channelEvidence.Count - blocked.Count - unavailable.Count - notApplicable.Count;
         var discoveryUnavailable = discovery is not null && (discovery.Valor.Contains("No evaluado", StringComparison.OrdinalIgnoreCase) || IsBlocked(discovery.Valor));
         var status = blocked.Count > 0 ? "Bloqueada" : unavailable.Count > 0 || discoveryUnavailable ? "Parcial" : "Disponible";
         sources.Add(new("Windows Event Log forense", status,
-            $"Canales disponibles={available}; no disponibles={unavailable.Count}; bloqueados/no legibles={blocked.Count}.", true));
+            $"Canales disponibles={available}; no disponibles={unavailable.Count}; no aplicables={notApplicable.Count}; bloqueados/no legibles={blocked.Count}.", true));
         if (blocked.Count > 0) limitations.Add("Uno o más canales Windows no pudieron leerse por permisos/error; una ausencia de evento en ellos no descarta la hipótesis.");
         if (discoveryUnavailable) limitations.Add("No se pudo inventariar dinámicamente canales adicionales de Event Viewer relacionados con TSplus/RDP/AppLocker/Code Integrity.");
     }

@@ -189,6 +189,22 @@ public sealed class TsplusConfigurationDriftCollector : IReadOnlyCollector
                     ConfidenceLevel.Media,
                     Capa: DiagnosticLayer.Tsplus));
             }
+            else if (baseline.Registry is null)
+            {
+                // C#9: con una línea base antigua (sin campo Registry) la comparación se
+                // salta; si los archivos están estables antes era 100% silencioso. La
+                // inicialización ocurre en esta corrida (baselineFinal) y se declara aquí.
+                events.Add(new DiagnosticEvent(
+                    DateTimeOffset.Now, "TDM", "Deriva de configuración TSplus", DiagnosticLayer.Tsplus,
+                    DiagnosticSeverity.Informativo, "TSPLUS_CONFIG_REGISTRY_BASELINE_INITIALIZED",
+                    "La línea base de registro TSplus no existía en la muestra anterior; esta ejecución sólo la inicializa, sin comparar. La deriva de registro se evaluará a partir de la próxima muestra.",
+                    Evidencia:
+                    [
+                        new EvidenceItem("Registro TSplus", registryNote),
+                        new EvidenceItem("Comparación", "No realizada en esta muestra")
+                    ],
+                    Producto: TsplusProduct.RemoteAccess));
+            }
 
             var finalHashes = new Dictionary<string, string>(current, StringComparer.OrdinalIgnoreCase);
             var finalIni = new Dictionary<string, Dictionary<string, List<string>>>(currentIni, StringComparer.OrdinalIgnoreCase);

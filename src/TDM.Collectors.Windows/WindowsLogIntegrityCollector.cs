@@ -18,7 +18,9 @@ public sealed class WindowsLogIntegrityCollector : IReadOnlyCollector
     public string Nombre => "Integridad de logs Windows";
 
     private const int MaxRecordsPerChannel = 200;
-    private const int MaxFindings = 8;
+    // C#8: presupuesto por canal; con un contador global, System llenaba los 8 y
+    // Security (1100/1102) quedaba sin examinar pero aún declarado "Disponible".
+    private const int MaxFindingsPerChannel = 8;
     private const string CanarySource = "TDM Canary";
     private const string CanaryMarker = "TDM-SELFTEST-CANARY";
     private const string CursorKey = "tdm-canary-state";
@@ -54,7 +56,9 @@ public sealed class WindowsLogIntegrityCollector : IReadOnlyCollector
                 var query = new EventLogQuery(channel.Name, PathType.LogName, xpath) { ReverseDirection = true };
                 using var reader = new EventLogReader(query);
                 var read = 0;
-                while (reader.ReadEvent() is { } record && findings.Count < MaxFindings)
+                var channelFindings = 0;
+                var budgetReached = false;
+                while (reader.ReadEvent() is { } record)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     using (record)
@@ -62,11 +66,18 @@ public sealed class WindowsLogIntegrityCollector : IReadOnlyCollector
                         if (read++ >= MaxRecordsPerChannel) break;
                         var time = record.TimeCreated?.ToUniversalTime();
                         if (time.HasValue && time.Value < windowStart.UtcDateTime) break;
+                        if (channelFindings >= MaxFindingsPerChannel)
+                        {
+                            budgetReached = true;
+                            break;
+                        }
                         var finding = ToTamperFinding(channel, record);
-                        if (finding is not null) { findings.Add(finding); tamper++; }
+                        if (finding is not null) { findings.Add(finding); channelFindings++; tamper++; }
                     }
                 }
-                coverage.Add(new EvidenceItem(channel.Name, "Disponible"));
+                coverage.Add(new EvidenceItem(channel.Name, budgetReached
+                    ? $"Parcial; límite de {MaxFindingsPerChannel} hallazgos por canal alcanzado"
+                    : "Disponible"));
             }
             catch (EventLogNotFoundException ex)
             {
