@@ -36,6 +36,20 @@ internal static class DashboardRules
     public static int DroppedIncidents(IReadOnlyList<ObservabilitySample> samples)
         => samples.Sum(s => Math.Max(0, s.IncidentsDropped));
 
+    // §1/P8: el catálogo ligero (monitor de 5 s) no incluye dependencias ni salud, así que
+    // los paneles sirven el último ciclo completo que sí las evaluó. Cuando esos datos tienen
+    // más de 2 min de antigüedad deben declararlo en vez de presentarlos como actuales.
+    public static string StaleDataAge(DateTimeOffset latestTimestamp, ObservabilitySample? dataSample)
+    {
+        if (dataSample is null) return string.Empty;
+        var age = latestTimestamp - dataSample.Timestamp;
+        if (age < TimeSpan.FromMinutes(2)) return string.Empty;
+        return FormatAge(age);
+    }
+
+    public static string FormatAge(TimeSpan age)
+        => age.TotalMinutes >= 1 ? $"{(int)age.TotalMinutes} min" : $"{Math.Max(0, (int)age.TotalSeconds)} s";
+
     private static string DisplayIncidentKey(ObservabilityIncident incident)
     {
         var rawKey = $"incident|LOCAL|{incident.Component}|{incident.Kind}";

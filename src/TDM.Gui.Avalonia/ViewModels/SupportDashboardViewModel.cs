@@ -52,6 +52,7 @@ public partial class SupportDashboardViewModel : ObservableObject
         }
 
         var incidents = DashboardRules.UniqueOperationalIncidents(samples);
+        var latestTimestamp = samples.Max(x => x.Timestamp);
         var serviceSample = samples.LastOrDefault(x => x.ServiceStates is { Count: > 0 });
         var dependencySample = samples.LastOrDefault(x => x.DependencyStates is { Count: > 0 });
         var moduleSample = samples.LastOrDefault(x => x.ModuleHealth.Count > 0);
@@ -103,7 +104,7 @@ public partial class SupportDashboardViewModel : ObservableObject
             : $"{review} revisar";
         ServiceExtra = total == 0
             ? string.Empty
-            : $"Servicios {healthyServices}/{services.Count} · Dependencias {healthyDependencies}/{dependencies.Count}";
+            : $"Servicios {healthyServices}/{services.Count} · Dependencias {healthyDependencies}/{dependencies.Count}{StaleDataSuffix(latestTimestamp, dependencySample, moduleSample)}";
         ServiceAccent = total == 0 ? DashboardPalette.Muted : stopped > 0 ? DashboardPalette.Warn : review > 0 ? DashboardPalette.Warn : DashboardPalette.Good;
         // P4/§10: el tramo "no afectado" del aro sólo es verde si hay elementos realmente
         // sanos/neutrales; con todo afectado o sin evaluar, el aro queda gris (antes siempre
@@ -284,6 +285,16 @@ public partial class SupportDashboardViewModel : ObservableObject
 
     private static string SeverityLabel(string severity)
         => severity.Equals("Critico", StringComparison.OrdinalIgnoreCase) ? "Crítico" : severity;
+
+    private static string StaleDataSuffix(DateTimeOffset latestTimestamp, ObservabilitySample? dependencySample, ObservabilitySample? moduleSample)
+    {
+        var parts = new List<string>();
+        var dependencyAge = DashboardRules.StaleDataAge(latestTimestamp, dependencySample);
+        if (dependencyAge.Length > 0) parts.Add($"dependencias hace {dependencyAge}");
+        var moduleAge = DashboardRules.StaleDataAge(latestTimestamp, moduleSample);
+        if (moduleAge.Length > 0) parts.Add($"salud hace {moduleAge}");
+        return parts.Count == 0 ? string.Empty : " · " + string.Join(" · ", parts);
+    }
 
     private void Reset()
     {

@@ -295,6 +295,13 @@ public static async Task<ReportExportResult> ExportAsync(
             Row("Transiciones nuevas", localHistory.Evidencia.FirstOrDefault(x => x.Clave == "Transiciones detectadas")?.Valor ?? "0");
             Row("Baseline sano", localHistory.Evidencia.FirstOrDefault(x => x.Clave == "Baseline sano")?.Valor ?? "No configurado");
         }
+        else if (report.Eventos.LastOrDefault(e => e.Tipo == "TDM_LOCAL_HISTORY_UNAVAILABLE") is { } localHistoryUnavailable)
+        {
+            // §2/P8: el fallo del historial local no puede quedar en silencio en el HTML.
+            var detail = localHistoryUnavailable.Evidencia?.FirstOrDefault(x => x.Clave == "Detalle")?.Valor
+                ?? "error desconocido al actualizar el historial local.";
+            Row("Historial local TDM", $"No disponible — {detail}");
+        }
         if (report.RendimientoDiagnostico is { } performance)
         {
             Row("Rendimiento TDM", $"{performance.DuracionTotalMs / 1000d:F1} s · collectors={performance.CollectorsEjecutados} · timeout={performance.CollectorsConTimeout} · errores={performance.CollectorsConError}");

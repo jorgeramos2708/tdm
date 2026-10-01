@@ -19,5 +19,6 @@
     <ProjectReference Include="..\..\src\TDM.Notifications\TDM.Notifications.csproj" />
     <ProjectReference Include="..\..\src\TDM.Persistence\TDM.Persistence.csproj" />
     <ProjectReference Include="..\..\src\TDM.Reporting\TDM.Reporting.csproj" />
+    <ProjectReference Include="..\..\src\TDM.Gui.Avalonia\TDM.Gui.Avalonia.csproj" />
   </ItemGroup>
 </Project>

@@ -58,8 +58,10 @@ public partial class PreventiveDashboardViewModel : ObservableObject
         var cpuLatest = samples.LastOrDefault(x => x.CpuPercent.HasValue) ?? latest;
         var memoryLatest = samples.LastOrDefault(x => x.MemoryFreePercent.HasValue) ?? latest;
         var resourceLatest = samples.LastOrDefault(x => x.DiskFreePercent.Count > 0 || x.TcpEphemeralUsagePercent.HasValue) ?? latest;
+        var dependencyDataSample = samples.LastOrDefault(x => x.DependencyStates is { Count: > 0 });
+        var moduleDataSample = samples.LastOrDefault(x => x.ModuleHealth.Count > 0);
         var lastServiceStates = DashboardRules.TargetServiceStates(samples.LastOrDefault(x => x.ServiceStates is { Count: > 0 })?.ServiceStates);
-        var lastDependencyStates = samples.LastOrDefault(x => x.DependencyStates is { Count: > 0 })?.DependencyStates;
+        var lastDependencyStates = dependencyDataSample?.DependencyStates;
         // P4/§10: el score evalúa el MISMO subgrafo TSplus que los paneles Soporte y Servicios;
         // con el diccionario SCM crudo, un servicio sin relación con TSplus penalizaba aquí
         // aunque el resto de paneles ni siquiera lo mostrara.
@@ -104,6 +106,13 @@ public partial class PreventiveDashboardViewModel : ObservableObject
         ApplyDependencyCard(scoringLatest, currentServiceIssues, currentDependencyIssues, serviceInstability, dependencyInstability);
         ApplyInstabilityCard(samples, serviceInstability, dependencyInstability);
         ApplySaturationCard(samples, forecasts);
+
+        // §1/P8: dependencias/salud pueden venir del último ciclo completo (cada 10 min);
+        // se declara su antigüedad cuando supera el umbral del monitor.
+        var dependencyAge = DashboardRules.StaleDataAge(latest.Timestamp, dependencyDataSample);
+        if (dependencyAge.Length > 0) DependencyDetail += $" · datos hace {dependencyAge}";
+        var moduleAge = DashboardRules.StaleDataAge(latest.Timestamp, moduleDataSample);
+        if (moduleAge.Length > 0) ModuleDetail += $" · datos hace {moduleAge}";
 
         var score = CalculatePreventiveScore(
             scoringLatest,

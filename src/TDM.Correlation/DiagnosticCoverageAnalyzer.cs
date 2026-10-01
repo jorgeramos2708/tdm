@@ -242,8 +242,28 @@ public static class DiagnosticCoverageAnalyzer
 
     private static void AddLocalHistory(DiagnosticReport report, List<CoverageSourceAssessment> sources, List<string> limitations)
     {
-        var e = report.Eventos.LastOrDefault(x => x.Tipo == "TDM_LOCAL_HISTORY_STATUS");
-        if (e is null)
+        var statusIndex = -1;
+        var unavailableIndex = -1;
+        for (var i = 0; i < report.Eventos.Count; i++)
+        {
+            if (report.Eventos[i].Tipo == "TDM_LOCAL_HISTORY_STATUS") statusIndex = i;
+            else if (report.Eventos[i].Tipo == "TDM_LOCAL_HISTORY_UNAVAILABLE") unavailableIndex = i;
+        }
+
+        // §2/P8: si la última actualización falló se emite UNAVAILABLE y NO se reemite STATUS;
+        // declarar "Parcial/no integrado" ocultaba el fallo real de la fuente.
+        if (unavailableIndex > statusIndex)
+        {
+            var unavailable = report.Eventos[unavailableIndex];
+            var detail = unavailable.Evidencia?.FirstOrDefault(x => x.Clave == "Detalle")?.Valor
+                ?? "error desconocido al actualizar el historial local.";
+            sources.Add(new("Historial local TDM", "No disponible",
+                $"No fue posible actualizar el historial local propio de TDM: {detail}", false));
+            limitations.Add("Sin historial local TDM actualizado, las muestras y transiciones propias de TDM pueden estar incompletas o atrasadas; el diagnóstico de Windows/TSplus no depende de esta fuente.");
+            return;
+        }
+
+        if (statusIndex < 0)
         {
             sources.Add(new("Historial local TDM", "Parcial", "No se integró estado de historial local en esta vista.", false));
             return;

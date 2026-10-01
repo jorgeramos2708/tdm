@@ -6,6 +6,7 @@ using TDM.Collectors.TSplus;
 using TDM.Collectors.Windows;
 using TDM.Core;
 using TDM.Correlation;
+using TDM.Gui.Avalonia.ViewModels;
 using TDM.Models;
 using TDM.Notifications;
 using TDM.Persistence;
@@ -159,7 +160,10 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("WindowsEventCollectorPinsSecurityAuditIdsEndToEnd", WindowsEventCollectorPinsSecurityAuditIdsEndToEnd),
     ("ForensicCollectorEndToEndDeclaresEveryChannelState", ForensicCollectorEndToEndDeclaresEveryChannelState),
     ("MergerPreservesRequestedLookbackAndDeclaresExpansion", MergerPreservesRequestedLookbackAndDeclaresExpansion),
-    ("DependencyNotEvaluatedGuardChecksDependentsToo", DependencyNotEvaluatedGuardChecksDependentsToo)
+    ("DependencyNotEvaluatedGuardChecksDependentsToo", DependencyNotEvaluatedGuardChecksDependentsToo),
+    ("RecentTransitionReadSkipsFilesOutsideWindow", RecentTransitionReadSkipsFilesOutsideWindow),
+    ("LocalHistoryUnavailableIsDeclaredInCoverage", LocalHistoryUnavailableIsDeclaredInCoverage),
+    ("DashboardDeclaresDependencyDataFreshness", DashboardDeclaresDependencyDataFreshness)
 };
 
 var failed = 0;
@@ -3707,6 +3711,167 @@ static async Task DependencyNotEvaluatedGuardChecksDependentsToo()
         TryDelete(dir);
         TryDelete(emptyDir);
     }
+}
+
+static async Task RecentTransitionReadSkipsFilesOutsideWindow()
+{
+    var now = DateTimeOffset.Now;
+    var today = now.LocalDateTime.Date;
+    var names = new List<string>();
+    for (var i = 0; i < 30; i++) names.Add($"transitions-{today.AddDays(-i):yyyy-MM-dd}.jsonl");
+    names.Add("transitions-diagnostic-notadate.jsonl");
+    names.Add("notes.txt");
+
+    var selected = LocalStateStore.SelectRecentTransitionFiles(names, now.AddHours(-2), now);
+    True(selected.Contains($"transitions-{today:yyyy-MM-dd}.jsonl"),
+        "El archivo de hoy quedó fuera de la selección.");
+    True(selected.Contains($"transitions-{today.AddDays(-1):yyyy-MM-dd}.jsonl"),
+        "El archivo de ayer (holgura de 1 día) debía conservarse.");
+    False(selected.Contains($"transitions-{today.AddDays(-2):yyyy-MM-dd}.jsonl"),
+        "Un archivo de hace 2 días no debe abrirse para una ventana de 2 horas.");
+    False(selected.Contains($"transitions-{today.AddDays(-29):yyyy-MM-dd}.jsonl"),
+        "La retención completa (30 días) volvió a leerse para una ventana corta.");
+    True(selected.Any(x => x.Contains("notadate", StringComparison.Ordinal)),
+        "Un nombre de archivo no reconocido debe conservarse por seguridad.");
+    True(selected.Any(x => x.Contains("notes", StringComparison.Ordinal)),
+        "Un archivo sin fecha en el nombre debe conservarse por seguridad.");
+    Equal(4, selected.Count, "La selección esperaba hoy + ayer + dos no reconocidos.");
+
+    var root = TempDir();
+    try
+    {
+        var store = new LocalStateStore(root);
+        await store.RecordAsync(StateSnapshotBuilder.Build(
+            Report([ServiceStateEvent(now, "Running")], now), "1.0.0"), "service-monitor");
+        var resultB = await store.RecordAsync(StateSnapshotBuilder.Build(
+            Report([ServiceStateEvent(now.AddSeconds(5), "Stopped")], now.AddSeconds(5)), "1.0.0"), "service-monitor");
+        Equal(1, resultB.Transitions.Count, "precondición: Running→Stopped debe producir una transición.");
+
+        var historyDir = Path.Combine(root, "history");
+        var originals = Directory.GetFiles(historyDir, "transitions-service-monitor-*.jsonl");
+        Equal(1, originals.Length, "precondición: el registro debió dejar un solo archivo de transiciones.");
+        File.Copy(originals[0], Path.Combine(historyDir,
+            $"transitions-service-monitor-{today.AddDays(-5):yyyy-MM-dd}.jsonl"));
+
+        var rows = await store.ReadRecentTransitionsAsync(now.AddMinutes(-5), now.AddSeconds(30), "service-monitor");
+        Equal(1, rows.Count,
+            "El duplicado en un archivo con fecha de hace 5 días no debía leerse: la ventana corta ya no barre 30 días.");
+    }
+    finally { TryDelete(root); }
+}
+
+static async Task LocalHistoryUnavailableIsDeclaredInCoverage()
+{
+    var now = DateTimeOffset.Now;
+    DiagnosticEvent Unavailable(string detail) => new(now, "TDM", "Historial local TDM",
+        DiagnosticLayer.Desconocida, DiagnosticSeverity.Advertencia, "TDM_LOCAL_HISTORY_UNAVAILABLE",
+        "No fue posible actualizar el historial local propio de TDM. El diagnóstico de Windows/TSplus continúa siendo válido con la evidencia recopilada.",
+        Evidencia: [new EvidenceItem("Detalle", detail)]);
+    DiagnosticEvent Status(string detail) => new(now, "TDM", "Historial local TDM",
+        DiagnosticLayer.Desconocida, DiagnosticSeverity.Informativo, "TDM_LOCAL_HISTORY_STATUS",
+        "Historial local actualizado",
+        Evidencia: [new EvidenceItem("Almacén", "history"), new EvidenceItem("Detalle", detail)]);
+
+    var unavailableReport = Report([Unavailable("Acceso denegado al historial")], now);
+    var failed = DiagnosticCoverageAnalyzer.Analyze(unavailableReport);
+    var source = failed.Fuentes.Single(x => x.Fuente == "Historial local TDM");
+    Equal("No disponible", source.Estado,
+        "El fallo del historial local no se declaró como fuente No disponible.");
+    True(source.Detalle.Contains("Acceso denegado al historial", StringComparison.Ordinal),
+        "El detalle del fallo no llegó a la fuente de cobertura.");
+    True(failed.Limitaciones.Any(l => l.Contains("historial local TDM", StringComparison.OrdinalIgnoreCase)),
+        "El fallo del historial local no dejó limitación declarada.");
+    False(source.Critica, "El historial local propio no debe bloquear el score como fuente crítica.");
+
+    var mixed = DiagnosticCoverageAnalyzer.Analyze(Report(
+        [Status("actualizado"), Unavailable("fallo posterior")], now));
+    Equal("No disponible",
+        mixed.Fuentes.Single(x => x.Fuente == "Historial local TDM").Estado,
+        "Un UNAVAILABLE posterior al STATUS debe prevalecer como estado final de la fuente.");
+
+    var ok = DiagnosticCoverageAnalyzer.Analyze(Report([Status("actualizado")], now));
+    Equal("Disponible", ok.Fuentes.Single(x => x.Fuente == "Historial local TDM").Estado,
+        "El STATUS normal dejó de declarar la fuente Disponible.");
+
+    var none = DiagnosticCoverageAnalyzer.Analyze(Report([], now));
+    Equal("Parcial", none.Fuentes.Single(x => x.Fuente == "Historial local TDM").Estado,
+        "Sin eventos de historial la fuente dejó de ser Parcial.");
+
+    var dir = TempDir();
+    try
+    {
+        var result = await ReportExporter.ExportAsync(unavailableReport, dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("Historial local TDM", StringComparison.Ordinal),
+            "El HTML dejó de mostrar la fila de historial local TDM.");
+        True(html.Contains("No disponible — Acceso denegado al historial", StringComparison.Ordinal),
+            "El HTML no declaró el fallo del historial local con su detalle.");
+    }
+    finally { TryDelete(dir); }
+}
+
+static Task DashboardDeclaresDependencyDataFreshness()
+{
+    var now = DateTimeOffset.Now;
+    var stale = new ObservabilitySample
+    {
+        Timestamp = now.AddMinutes(-10),
+        SampleKind = "diagnostic",
+        ServiceStates = new Dictionary<string, string>
+        {
+            ["TermService"] = "Running",
+            ["RemoteSupportUnattended-Service"] = "Running",
+            ["TSplusGateway"] = "Running",
+            ["gpsvc"] = "Stopped"
+        },
+        DependencyStates = new Dictionary<string, string>
+        {
+            ["gpsvc  ProfSvc"] = "Running"
+        },
+        ModuleHealth = new Dictionary<string, string>
+        {
+            ["RDP / Remote Access Core"] = "Saludable"
+        }
+    };
+    var light = new ObservabilitySample
+    {
+        Timestamp = now,
+        SampleKind = "monitor",
+        ServiceStates = new Dictionary<string, string>
+        {
+            ["TermService"] = "Running",
+            ["RemoteSupportUnattended-Service"] = "Running",
+            ["TSplusGateway"] = "Running",
+            ["gpsvc"] = "Stopped"
+        }
+    };
+
+    var support = new SupportDashboardViewModel();
+    support.Apply(new[] { stale, light });
+    True(support.ServiceExtra.Contains("dependencias hace 10 min", StringComparison.Ordinal),
+        $"Soporte no declaró la antigüedad de dependencias: '{support.ServiceExtra}'");
+    True(support.ServiceExtra.Contains("salud hace 10 min", StringComparison.Ordinal),
+        $"Soporte no declaró la antigüedad de salud: '{support.ServiceExtra}'");
+
+    var preventive = new PreventiveDashboardViewModel();
+    preventive.Apply(new[] { stale, light });
+    True(preventive.DependencyDetail.Contains("datos hace 10 min", StringComparison.Ordinal),
+        $"Preventivo no declaró la antigüedad de dependencias: '{preventive.DependencyDetail}'");
+    True(preventive.ModuleDetail.Contains("datos hace 10 min", StringComparison.Ordinal),
+        $"Preventivo no declaró la antigüedad de salud: '{preventive.ModuleDetail}'");
+
+    var freshSupport = new SupportDashboardViewModel();
+    freshSupport.Apply(new[] { stale });
+    False(freshSupport.ServiceExtra.Contains("hace", StringComparison.Ordinal),
+        $"Con datos del mismo instante no debe haber aviso de antigüedad: '{freshSupport.ServiceExtra}'");
+
+    var freshPreventive = new PreventiveDashboardViewModel();
+    freshPreventive.Apply(new[] { stale });
+    False(freshPreventive.DependencyDetail.Contains("hace", StringComparison.Ordinal),
+        $"Con datos del mismo instante no debe haber aviso en dependencias: '{freshPreventive.DependencyDetail}'");
+    False(freshPreventive.ModuleDetail.Contains("hace", StringComparison.Ordinal),
+        $"Con datos del mismo instante no debe haber aviso en salud: '{freshPreventive.ModuleDetail}'");
+    return Task.CompletedTask;
 }
 
 static string? FindRepoRoot()

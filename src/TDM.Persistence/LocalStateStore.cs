@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using TDM.Models;
@@ -98,7 +99,8 @@ public sealed class LocalStateStore
         if (!Directory.Exists(historyDir)) return Array.Empty<StateTransition>();
 
         var output = new List<StateTransition>();
-        foreach (var path in Directory.EnumerateFiles(historyDir, $"transitions{suffix}-*.jsonl").OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+        foreach (var path in SelectRecentTransitionFiles(
+            Directory.EnumerateFiles(historyDir, $"transitions{suffix}-*.jsonl"), from, to))
         {
             ct.ThrowIfCancellationRequested();
             try
@@ -124,6 +126,46 @@ public sealed class LocalStateStore
             .OrderBy(x => x.Timestamp)
             .ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    // A#4/P8: ReadRecentTransitionsAsync se invoca en cada enriquecimiento y abría todos los
+    // transitions*.jsonl de la retención (30 días) aunque la ventana fuera de minutos. El nombre
+    // codifica la fecha (transitions[-canal]-yyyy-MM-dd.jsonl), así que sólo se abren los
+    // archivos que pueden caer en la ventana (±1 día de holgura por zona horaria/canal) y los
+    // nombres no reconocidos se conservan por seguridad. El filtro exacto por Timestamp sigue
+    // aplicándose dentro de cada archivo leído.
+    internal static IReadOnlyList<string> SelectRecentTransitionFiles(
+        IEnumerable<string> paths,
+        DateTimeOffset from,
+        DateTimeOffset to)
+    {
+        var minDate = from.LocalDateTime.Date.AddDays(-1);
+        var maxDate = to.LocalDateTime.Date.AddDays(1);
+        var selected = new List<string>();
+        foreach (var path in paths.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+        {
+            if (TryParseTransitionFileNameDate(Path.GetFileName(path), out var date) &&
+                (date < minDate || date > maxDate))
+            {
+                continue;
+            }
+
+            selected.Add(path);
+        }
+
+        return selected;
+    }
+
+    private static bool TryParseTransitionFileNameDate(string fileName, out DateTime date)
+    {
+        date = default;
+        const string extension = ".jsonl";
+        if (!fileName.EndsWith(extension, StringComparison.OrdinalIgnoreCase)) return false;
+        var stem = fileName[..^extension.Length];
+        // La fecha es siempre el tramo final "…-yyyy-MM-dd"; el último guion separa "dd".
+        if (stem.Length <= 11 || stem[stem.Length - 11] != '-') return false;
+        return DateTime.TryParseExact(stem[^10..], "yyyy-MM-dd",
+            CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
     }
 
     public async Task<IReadOnlyList<PersistentStateSnapshot>> ReadRecentSnapshotsAsync(
