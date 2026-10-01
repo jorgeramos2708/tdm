@@ -8,14 +8,14 @@
 
 | Sev | Hallazgo | Lugar |
 |---|---|---|
-| **Alta ✅** | Colector "push" se suscribe y drena en la misma llamada → ~0 eventos por ventana + acumula `EventLogWatcher` por ciclo sin dispose | `WindowsPushEventCollector.cs:30,44` |
-| Media | `requiredNow` calculado distinto por `ServiceDependencyGraphCollector` vs `WindowsServiceCollector` → la misma fuente dice "sano" y "crítico" | C#4 |
+| **Alta ✅** | Colector "push" se suscribe y drena en la misma llamada → ~0 eventos por ventana + acumula `EventLogWatcher` por ciclo sin dispose → **corregido en Fase 8** (dreno real de la suscripción compartida por proceso con `StopWatchers`, test `WindowsPushSubscriptionIsSharedAcrossInstances`) | `WindowsPushEventCollector.cs:30,44` |
+| Media | `requiredNow` calculado distinto por `ServiceDependencyGraphCollector` vs `WindowsServiceCollector` → la misma fuente dice "sano" y "crítico" → **corregido en Fase 9** (política única `WindowsServiceCatalog.RequiredNow`/`StoppedSeverity`, test `UnifiedServiceRequiredNowPolicyMatchesSeverity`) | C#4 |
 | Media | `ServiceDependencyGraphCollector` sin try/catch por servicio + `ServiceController` sin dispose (hasta ~320 handles/ciclo) → **corregido en Fase 12** (cualquier excepción no-cancelación aísla por servicio en los 4 puntos; dispose verificado por gate) | C#5 |
-| Media | Lectura fallida de dependencias persistida como baseline vacía → drift falso o perdido | C#6 |
+| Media | Lectura fallida de dependencias persistida como baseline vacía → drift falso o perdido → **corregido en Fase 9** (baseline fallida no persistida, hallazgo `SCM_GRAPH_BASELINE_STALE`) | C#6 |
 | Media | Descubrimiento cae a catálogo fijo sin señal de cobertura (C#7); contador compartido en integridad de logs deja Security 1102 sin examinar con cobertura "Disponible" (C#8) → **corregido en Fase 14** (hallazgo `SVC-DISCOVERY-COVERAGE` con `Cobertura=No evaluado`; presupuesto `MaxFindingsPerChannel` con corte y cobertura `Parcial; límite de 8 hallazgos por canal alcanzado`) | C#7-8 |
 | Media | Drift de registro saltado con `baseline.Registry` null (bases viejas, C#9); canales forenses inexistentes hunden fuente a "Parcial" permanente (C#11) → **corregido en Fase 14** (evento `TSPLUS_CONFIG_REGISTRY_BASELINE_INITIALIZED` + snapshot persistido para comparar; distinción `No existe en este SO` con bucket `no aplicables` en `DiagnosticCoverageAnalyzer`) | C#9,11 |
 | Media | Muestras de emergencia no escriben journal/canal longitudinal ni transiciones → monitor congelado en ventanas de carga; ciclo longitudinal saltado a >45s con presupuesto 180s → **corregido en Fase 12** (emergencia espeja el ciclo normal; gate `HasBudgetForLongitudinal` con reserva de 23 s) | A#9-10 |
-| Baja | Catálogo ligero no incluye dependencias/salud (ciclo pesado ~10min vs 5min de GUI) | `CollectorCatalog.cs:73-80` ✅ |
+| Baja | Catálogo ligero no incluye dependencias/salud (ciclo pesado ~10min vs 5min de GUI) → **abierto** (ver "Abiertos tras P7") | `CollectorCatalog.cs:73-80` ✅ |
 
 ## 2. Transiciones de estado
 
@@ -23,9 +23,9 @@
 |---|---|---|
 | Media ✅ | Transiciones se fechan con `CapturedAt` de la foto, no con el momento del cambio (rompe cercanía temporal) → **corregido en Fase 14** (`StateTransition.ChangedAfter` = cota inferior, evidencia "Cambio después de" en los 3 eventos, precedencia longitudinal por `earliestPossible`) | `LocalStateStore.cs:207` |
 | Media ✅ | Snapshot corrupto → `return null` silencioso, sin log ni hallazgo → **corregido en Fase 10** (contador `CorruptSnapshotReadCount`, `Trace.TraceWarning` con la ruta y `LocalStoreStatus.CorruptSnapshotReads`) | `LocalStateStore.cs:242-249` |
-| Media | Tolerancia de dedup 5s vs cadencias 60/120s → misma transición doble-contada en RCA (A#3, **corregido en Fase 9** con tolerancia 10 min + guardia de inversión); lectura barre 30 días completos por ciclo (A#4); canal `diagnostic-avalonia` excluido de lecturas (A#5, **corregido en Fase 10**) | A#3-5 |
+| Media | Tolerancia de dedup 5s vs cadencias 60/120s → misma transición doble-contada en RCA (A#3, **corregido en Fase 9** con tolerancia 10 min + guardia de inversión); lectura barre 30 días completos por ciclo (A#4, **abierto**); canal `diagnostic-avalonia` excluido de lecturas (A#5, **corregido en Fase 10**) | A#3-5 |
 | Media | Fallo al leer transiciones recientes traga sin límite → **corregido en Fase 14** (`TDM_RECENT_TRANSITIONS_UNAVAILABLE` con `Cobertura historial reciente=No evaluado` + `Trace.TraceWarning`, eventos originales intactos) | `StateReportIntegrator.cs:254-257` |
-| Baja ✅ | `TDM_LOCAL_HISTORY_UNAVAILABLE`: grep en todo `src/` → 1 sola aparición (emisión), cero consumidores | `StateReportIntegrator.cs:142` |
+| Baja ✅ | `TDM_LOCAL_HISTORY_UNAVAILABLE`: grep en todo `src/` → 1 sola aparición (emisión), cero consumidores → **abierto** (ver "Abiertos tras P7") | `StateReportIntegrator.cs:142` |
 
 ## 3. Detección — eventos Windows
 
@@ -46,8 +46,8 @@
 
 | Sev | Hallazgo | Lugar |
 |---|---|---|
-| Media | **Dos universos sin puente**: la GUI jamás lee `report.Incidentes` (HTML/narrativo sí) — métricas incompatibles sin explicación | D#5 |
-| Media | Señales de incidente no se recortan a `PeriodoAnalizado` (amplificado por candidatos con `IncidentTime=null`) | `IncidentClusterAnalyzer.cs:85-91` ✅ |
+| Media | **Dos universos sin puente**: la GUI jamás lee `report.Incidentes` (HTML/narrativo sí) — métricas incompatibles sin explicación → **corregido en Fase 9** (puente de "Incidentes agrupados" en `BuildSummary` + rótulo de alcance operativo en los dashboards) | D#5 |
+| Media | Señales de incidente no se recortan a `PeriodoAnalizado` (amplificado por candidatos con `IncidentTime=null`) → **corregido en Fase 9** (`DiagnosticTimeWindow.IsEventInside` recorta señales/clusters/RCA al periodo; fallback histórico AD intacto) | `IncidentClusterAnalyzer.cs:85-91` ✅ |
 | Media | Contrato de severidad ledger vs clusters divergente (B#16); sólo el logon-failure más antiguo genera candidato (B#23) → **corregido en Fase 13** (B#16 `IsOperationalImpact` exige `IsIncidentSeverity` más `SERVICE_STATE` RemoteAccess no-Running / `GAP|DELAY` / `WINDOWS_AD_*`: stages de éxito y states en Advertencia quedan `EVIDENCIA_CORRELACIONABLE`; B#23 un candidato por usuario con síntoma vía `emittedLogonUsers` sin `break`, deduplicado y sin ruido) | B#16,23 |
 | Baja | IDs posicionales `INC-GRP-NNN` cambian de significado entre ejecuciones (D#6); ráfaga etiquetada `/60s` abarca minutos y hereda `Subject` del último (D#7); `TakeLast(120)` sin aviso en los 3 dashboards (D#13); ramas muertas en `IncidentLedger` (D#8) — **corregido en Fase 11** (D#6 IDs content-derived con `SHA256(dominio|identidad|timestamp)`, D#7 span real + `MergeBurstSubject` con tope 6 y regex de legado, D#13 `ObservabilitySample.IncidentsDropped` + `DashboardRules.DroppedIncidents` en los 3 paneles, D#8 bloque muerto eliminado y constante `Persistent`) | D#6-8,13 |
 
@@ -55,15 +55,15 @@
 
 | Sev | Hallazgo | Lugar |
 |---|---|---|
-| **Alta ✅** | Candidatos **estáticos** de compatibilidad Windows (RDP 96/Alta, RDS 97/Alta) se promueven con sólo existir el hallazgo: sin ventana temporal, sin síntoma; el texto `:20` promete gating "sólo cuando el síntoma requiere crear sesión RDP" que **no existe** (`IsPrimaryEligible` sólo mira confianza) | `Rules.WindowsFarm.cs:10-44`, `DiagnosticWorkflow.cs:62-68` |
+| **Alta ✅** | Candidatos **estáticos** de compatibilidad Windows (RDP 96/Alta, RDS 97/Alta) se promueven con sólo existir el hallazgo: sin ventana temporal, sin síntoma; el texto `:20` promete gating "sólo cuando el síntoma requiere crear sesión RDP" que **no existe** (`IsPrimaryEligible` sólo mira confianza) → **corregido en Fase 8** (gating sintomático+ventana en los candidatos Windows estáticos; cobertura pineada por `StaticWindowsConfigCandidatesNeedRemoteSessionSymptom`) | `Rules.WindowsFarm.cs:10-44`, `DiagnosticWorkflow.cs:62-68` |
 | Media | `[PRINCIPAL]` coexiste con "Evidencia primaria independiente: No" (B#14); logons RDP **exitosos** cuentan como señal causal e impacto → infla score y fabrica `INCIDENTE_OPERATIVO` (B#15); NLA-password-change 98/Alta sin ventana (B#17); candidatos de config ≥75 sin correlación disparan conflicto de origen −15 (B#18) → **corregido en Fase 13** (B#14 tensión explícita en `ReportConsistencyAnalyzer`; B#15 stages 1149/21/22 fuera de `IsCausalSignal`, sólo `GAP|DELAY` siguen causales; B#17 98/Alta y `HoraIncidente` exigen `WINDOWS_NLA_PASSWORD_CHANGE_CONFLICT` en la ventana con evidencia "No observado" sin ella; B#18 `HasOriginConflict` exige `HoraIncidente` en ambos); exclusión WMI/DCOM distinta entre analizadores (intencional, pineada por `ObservabilityClusterIsNotFunctionalCause`) | B#14-18 |
 | Baja | Patrones de falla sólo sobre los 8 primeros candidatos (B#19); tres fallbacks incompatibles de `PeriodoAnalizadoFin` (B#20) → **corregido en Fase 13** (B#19 `PatronesFalla` se calcula sobre la lista calibrada completa y `CausasRaiz` conserva el recorte `Take(8)` de presentación; B#20 helper único `DiagnosticReportWindow.EffectivePeriodEnd` (`PeriodoAnalizadoFin → Fin`) en los 14 sitios; `ReportDiffer.EffectiveTimestamp` conserva su cadena `→ Inicio` de la Fase 12) | B#19-20 |
 
 ## 8. Impacto → dependencias
 
-- **Media ✅**: tabla SCM del HTML imprime `N/D` en "Servicio" para todas las transitivas (clave `"Servicio"` vs `"Servicio origen"`) — `ReportExporter.cs:893` vs `ServiceDependencyGraphCollector.cs:259-262`.
-- **Media**: el "Mapa de dependencias" pinta de **verde** los `No evaluado/No identificado` (`DependencyClassForReport` cae a `ok`, `ReportExporter.cs:1228-1234`) — contrapuesta del conocido que los pintaba rojo.
-- Media: `requiredNow` no se aplica en profundidad ≥1 del grafo → Advertencia espuria (C#10); aviso de truncamiento calculado **sin** el filtro mientras `Take()` va **después** (`:901` vs `:890,:895`) ✅ — con 130/150 filas relevantes se ocultan 10 **sin aviso**.
+- **Media ✅**: tabla SCM del HTML imprime `N/D` en "Servicio" para todas las transitivas (clave `"Servicio"` vs `"Servicio origen"`) → **corregido en Fase 9** (respaldo `Servicio origen` cuando `Servicio` es `N/D`) — `ReportExporter.cs:893` vs `ServiceDependencyGraphCollector.cs:259-262`.
+- **Media**: el "Mapa de dependencias" pinta de **verde** los `No evaluado/No identificado` (`DependencyClassForReport` cae a `ok`, `ReportExporter.cs:1228-1234`) — contrapuesta del conocido que los pintaba rojo → **corregido en Fase 9** (`No evaluado`/`No identificado`/`Parcial` clasifican como `warn`, nunca `ok`).
+- Media: `requiredNow` no se aplica en profundidad ≥1 del grafo → Advertencia espuria (C#10) → **corregido en Fase 9** (depth≥1 evalúa con el modo de inicio, sin Advertencia espuria); aviso de truncamiento calculado **sin** el filtro mientras `Take()` va **después** (`:901` vs `:890,:895`) ✅ — con 130/150 filas relevantes se ocultan 10 **sin aviso** → **corregido en Fase 9** (el pie calcula las ocultas **tras** el filtro sobre los topes 120/60).
 - Baja: "No evaluado" y la tabla coexisten (`:873-874` vs `:887-899`, D#3) → **corregido en Fase 15** (el guard de "Salud y dependencias" exige ahora las 4 colecciones vacías, incluida `SERVICE_DEPENDENT_STATE`, con test `DependencyNotEvaluatedGuardChecksDependentsToo`); "No disponible" en rojo = falla real (`:1204-1210`, conocido, sin cambio).
 
 ## 9. Consistencia del reporte y precisión
@@ -75,11 +75,11 @@
 
 | Sev | Hallazgo | Lugar |
 |---|---|---|
-| Media | Contadores **CRÍTICOS/ERRORES** suman hallazgos+eventos → `14+11 > 20`; no cuadran con HTML ni JSON | `DiagnosticWorkspaceViewModel.cs:478-481` |
+| Media | Contadores **CRÍTICOS/ERRORES** suman hallazgos+eventos → `14+11 > 20`; no cuadran con HTML ni JSON → **corregido en Fase 9** (contadores GUI sólo sobre hallazgos, `ApplyReport` alineado con `ApplyBaselineIndicator`) | `DiagnosticWorkspaceViewModel.cs:478-481` |
 | Media | Donut "SERVICIOS/DEPENDENCIAS" mide 3 cosas (centro=sanos, arco=afectados, aro verde siempre; `healthy` incluye "No requerido") → contradice el panel Servicios → **corregido en Fase 12** (centro `afectados/total` como arco y módulos; aro verde sólo con sanos/neutrales reales) | `SupportDashboardViewModel.cs:92-103,64` |
 | Media | Score **preventivo** evalúa el diccionario SCM crudo sin el subgrafo TSplus que aplican los demás paneles → se contradicen sobre el mismo dato → **corregido en Fase 12** (`scoringLatest` e inestabilidad pasan por `TsplusOperationalStates`) | `PreventiveDashboardViewModel.cs:94-95,352` |
 | Media ✅ | Truncados sin aviso (`Take(60)`/`Take(30)`); "y N más" calculado sobre 10 filas pero se muestran 30 → **corregido en Fase 10** (`TruncationNotice` + detalle de sesiones a 30) | `IncidentsDashboardViewModel.cs:41-44`, `SessionsDashboardViewModel.cs:51-54,92-99` |
-| Media | GUI sin pre-record antes de `Analyze` (paridad rota vs servicio); feedback escrito en `MachineRootPath` pero leído de otra raíz → la GUI ignora veredictos verificados (A#6-8) | A#6-8 |
+| Media | GUI sin pre-record antes de `Analyze` (paridad rota vs servicio); feedback escrito en `MachineRootPath` pero leído de otra raíz → la GUI ignora veredictos verificados (A#6-8) → **corregido en Fase 8** (pre-record de la GUI + margen −15 min + raíz de feedback unificada) | A#6-8 |
 | Baja ✅ | `SERVICE_STATE` sin sección HTML y fuera de ambas timelines; sin sección de procesos afectados en HTML (la GUI sí lista "Proceso:") → **corregido en Fase 10** (tabla en "Salud y dependencias" + tarjeta "Procesos afectados") | `ReportExporter.cs:903-925,560-577` |
 
 ## 11. Huecos de tests
@@ -106,3 +106,4 @@
 - **P5 ✅ cerrado en Fase 13 (`1554726`)**: tensión `[PRINCIPAL]` sin evidencia primaria independiente (B#14) · stages RDP exitosos fuera de `IsCausalSignal` (B#15) · contrato `IsIncidentSeverity` en `IsOperationalImpact` de clusters (B#16) · NLA anclado a la ventana con evidencia "No observado" sin ella (B#17, cierra el hueco §11.5-5) · conflicto de origen exige `HoraIncidente` en ambos candidatos (B#18) · `PatronesFalla` sobre la lista calibrada completa (B#19) · helper único `DiagnosticReportWindow.EffectivePeriodEnd` en los 14 sitios de cierre de periodo (B#20) · candidato de logon por usuario con síntoma, sin `break` ni duplicados (B#23). 7 tests nuevos (129/129), Parity 47/47, VERIFY 7/7.
 - **P6 ✅ cerrado en Fase 14 (`5c880d6`)**: cobertura declarada en el fallback del catálogo de servicios (C#7) · presupuesto de hallazgos de integridad por canal (C#8) · inicialización del snapshot de registro TSplus con evento (C#9) · canal inexistente en el SO como "no aplicable" en vez de Parcial permanente (C#11) · atajo de nivel `[fecha] [NIVEL]` en `TsplusLogParser` + caducidad de eventos sin timestamp por `IngestedAt` (C#12/B#21) · `StateTransition.ChangedAfter` como cota inferior del cambio con precedencia longitudinal por `earliestPossible` (§2) · fallo del journal reciente declarado como `TDM_RECENT_TRANSITIONS_UNAVAILABLE` (§2). 9 tests nuevos (138/138), Parity 47/47, VERIFY 7/7, publish 138960071.
 - **P7 ✅ cerrado en Fase 15 (`a5ad69d`)**: guard de "No evaluado" exige `SERVICE_DEPENDENT_STATE` vacío (§8 D#3) · `VentanaAutoAmpliada`/`MotivoAmpliacion` cableados en la fusión continua y renderizados en HTML+narrativa (§9) · relevancia Security pineada por EventID + collector end-to-end (§11.1) · caminos de fallo de colectores con test behavior del forense y permisos de Security (§11.4) · hueco de source-text gates mitigado con tests behavior (§11.3). 4 tests nuevos (142/142), Parity 47/47, VERIFY 7/7, publish 138960071.
+- **Abiertos tras P7** (todos Baja, sin fase asignada): catálogo ligero sin dependencias/salud — ciclo pesado ~10 min vs 5 min de GUI (§1) · lectura de transiciones que barre 30 días completos por ciclo (A#4, §2) · `TDM_LOCAL_HISTORY_UNAVAILABLE` emitido pero sin consumidores (§2).
