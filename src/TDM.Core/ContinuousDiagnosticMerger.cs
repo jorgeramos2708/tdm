@@ -56,6 +56,12 @@ public static class ContinuousDiagnosticMerger
             .Take(4_000)
             .ToList();
 
+        // Si la ventana continua es mayor que la solicitada, el reporte consolidado cubre
+        // más de lo pedido: declararlo en los campos de auto-ampliación en vez de
+        // enmascarar el lookback solicitado con el máximo de la ventana.
+        var requestedWindow = incremental.LookbackSolicitado > TimeSpan.Zero ? incremental.LookbackSolicitado : boundedWindow;
+        var windowExpanded = boundedWindow > requestedWindow;
+
         return incremental with
         {
             Hallazgos = findings,
@@ -67,7 +73,11 @@ public static class ContinuousDiagnosticMerger
             PeriodoEvidenciaFin = end,
             EvidenciaDisponibleLookback = boundedWindow,
             Lookback = boundedWindow,
-            LookbackSolicitado = boundedWindow,
+            LookbackSolicitado = requestedWindow,
+            VentanaAutoAmpliada = windowExpanded,
+            MotivoAmpliacion = windowExpanded
+                ? $"La ventana de monitoreo continuo se amplió de {requestedWindow.TotalMinutes:g} a {boundedWindow.TotalMinutes:g} min para cubrir la ventana máxima configurada."
+                : null,
             CausasRaiz = [],
             PatronesFalla = [],
             PrecisionDiagnostica = null,

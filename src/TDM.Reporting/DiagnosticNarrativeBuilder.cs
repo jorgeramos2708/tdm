@@ -22,6 +22,8 @@ public static class DiagnosticNarrativeBuilder
         var evidenceEnd = report.PeriodoEvidenciaFin == default ? periodoFin : report.PeriodoEvidenciaFin;
         sb.AppendLine($"Evidencia disponible: últimas {FormatLookback(evidenceLookback)} ({evidenceStart.ToLocalTime():dd/MM/yyyy HH:mm:ss} - {evidenceEnd.ToLocalTime():dd/MM/yyyy HH:mm:ss})");
         sb.AppendLine($"Vista actual: últimos {FormatLookback(report.Lookback)}");
+        if (report.VentanaAutoAmpliada)
+            sb.AppendLine($"Ventana autoampliada: de {FormatLookback(report.LookbackSolicitado)} a {FormatLookback(report.Lookback)}{(string.IsNullOrWhiteSpace(report.MotivoAmpliacion) ? string.Empty : $" — {report.MotivoAmpliacion}")}");
         sb.AppendLine($"Periodo visible: {periodoInicio.ToLocalTime():dd/MM/yyyy HH:mm:ss} - {periodoFin.ToLocalTime():dd/MM/yyyy HH:mm:ss}");
         sb.AppendLine("Modo de vista: FILTRO EN MEMORIA — cambiar el periodo no vuelve a consultar Windows ni TSplus.");
         sb.AppendLine($"Ejecución TDM: {report.Inicio.ToLocalTime():dd/MM/yyyy HH:mm:ss} - {report.Fin.ToLocalTime():dd/MM/yyyy HH:mm:ss} (duración {(report.Fin - report.Inicio).TotalSeconds:F1} s)");

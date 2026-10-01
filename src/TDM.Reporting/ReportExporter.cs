@@ -157,7 +157,10 @@ public static async Task<ReportExportResult> ExportAsync(
         sb.Append("<h1>TSplus Diagnostic Monitor (TDM)</h1>");
         var quickPeriodStart = report.PeriodoAnalizadoInicio == default ? report.Inicio - report.Lookback : report.PeriodoAnalizadoInicio;
         var quickPeriodEnd = DiagnosticReportWindow.EffectivePeriodEnd(report);
-        sb.Append($"<p class='report-sub'>Reporte de soporte · {H(report.Sistema.Equipo)} · {quickPeriodStart.ToLocalTime():dd/MM/yyyy HH:mm}–{quickPeriodEnd.ToLocalTime():HH:mm}</p>");
+        var expansionNote = report.VentanaAutoAmpliada
+            ? $" · Ventana ampliada de {FormatLookback(report.LookbackSolicitado)} a {FormatLookback(report.Lookback)}{(string.IsNullOrWhiteSpace(report.MotivoAmpliacion) ? string.Empty : $" ({H(report.MotivoAmpliacion)})")}"
+            : string.Empty;
+        sb.Append($"<p class='report-sub'>Reporte de soporte · {H(report.Sistema.Equipo)} · {quickPeriodStart.ToLocalTime():dd/MM/yyyy HH:mm}–{quickPeriodEnd.ToLocalTime():HH:mm}{expansionNote}</p>");
         if (sanitized) sb.Append("<div class='card warn'><strong>PAQUETE SANITIZADO</strong><span class='muted'> · Revise antes de compartir.</span></div>");
 
         var quickCause = report.CausaRaizPrincipal;
@@ -931,7 +934,7 @@ public static async Task<ReportExportResult> ExportAsync(
             if (serviceStateEvents.Count > 40)
                 sb.Append($"<p class='muted'>Mostrando 40 de {serviceStateEvents.Count} servicios; el JSON conserva todos los estados observados.</p>");
         }
-        if (dependencyHealth is null && scmDependencyCoverage is null && scmDependencies.Count == 0)
+        if (dependencyHealth is null && scmDependencyCoverage is null && scmDependencies.Count == 0 && scmDependents.Count == 0)
             sb.Append("<p>No evaluado: no se obtuvo evidencia suficiente de dependencias.</p>");
         if (dependencyHealth is not null)
         {

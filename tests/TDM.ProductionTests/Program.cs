@@ -155,7 +155,11 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("UndatedLogEventsExpireWithTheWindow", UndatedLogEventsExpireWithTheWindow),
     ("TransitionCarriesObservationInterval", TransitionCarriesObservationInterval),
     ("LongitudinalPrecedenceUsesIntervalLowerBound", LongitudinalPrecedenceUsesIntervalLowerBound),
-    ("RecentTransitionReadFailureIsDeclared", RecentTransitionReadFailureIsDeclared)
+    ("RecentTransitionReadFailureIsDeclared", RecentTransitionReadFailureIsDeclared),
+    ("WindowsEventCollectorPinsSecurityAuditIdsEndToEnd", WindowsEventCollectorPinsSecurityAuditIdsEndToEnd),
+    ("ForensicCollectorEndToEndDeclaresEveryChannelState", ForensicCollectorEndToEndDeclaresEveryChannelState),
+    ("MergerPreservesRequestedLookbackAndDeclaresExpansion", MergerPreservesRequestedLookbackAndDeclaresExpansion),
+    ("DependencyNotEvaluatedGuardChecksDependentsToo", DependencyNotEvaluatedGuardChecksDependentsToo)
 };
 
 var failed = 0;
@@ -3586,6 +3590,123 @@ static async Task RecentTransitionReadFailureIsDeclared()
         "El reporte original no quedó intacto al declarar el fallo del journal.");
     True(result.Eventos.Any(e => e.Componente == "Spooler"),
         "Los eventos originales desaparecieron cuando el journal falló.");
+}
+
+// Fase 15 (P7): §11 huecos 1 y 4 (canales reales/fallos) · §8a guard de dependencias · §9a auto-ampliación.
+static async Task WindowsEventCollectorPinsSecurityAuditIdsEndToEnd()
+{
+    True(WindowsEventCollector.IsRelevant("Microsoft-Windows-Security-Auditing", 4625, "Security"),
+        "El 4625 dejó de ser relevante en el canal Security.");
+    True(WindowsEventCollector.IsRelevant("Microsoft-Windows-Security-Auditing", 4740, "Security"),
+        "El 4740 dejó de ser relevante en el canal Security.");
+    True(WindowsEventCollector.IsRelevant("Microsoft-Windows-Security-Auditing", 4771, "Security"),
+        "El 4771 dejó de ser relevante en el canal Security.");
+    True(WindowsEventCollector.IsRelevant("Microsoft-Windows-Security-Auditing", 4776, "Security"),
+        "El 4776 dejó de ser relevante en el canal Security.");
+    False(WindowsEventCollector.IsRelevant("Some Provider", 4625, "System"),
+        "Un 4625 fuera de Security no debe pasar por la cláusula de auditoría.");
+    False(WindowsEventCollector.IsRelevant("Microsoft-Windows-Security-Auditing", 4624, "Security"),
+        "El canal Security dejó de restringirse a los IDs de auditoría relevantes.");
+
+    var result = await new WindowsEventCollector().CollectAsync(Context(TimeSpan.FromHours(1)));
+    var coverage = result.Eventos.LastOrDefault(e => e.Tipo == "WINDOWS_EVENT_COVERAGE");
+    NotNull(coverage, "El collector base no emitió WINDOWS_EVENT_COVERAGE.");
+    var channels = coverage!.Evidencia!
+        .Where(x => x.Clave is "System" or "Application" or "Security").ToList();
+    Equal(3, channels.Count, "Faltan canales base en la cobertura de eventos de Windows.");
+    var security = channels.Single(x => x.Clave == "Security");
+    if (security.Valor.StartsWith("Sin permisos", StringComparison.Ordinal))
+    {
+        True(result.Hallazgos.Any(f => f.Id == "EVT-Security-ACCESS"),
+            "Security sin permisos no emitió el hallazgo EVT-Security-ACCESS.");
+        True(WindowsEventCollector.IsPartialCoverage([security]),
+            "Security sin permisos no dejó la cobertura parcial.");
+    }
+    else
+    {
+        foreach (var ev in result.Eventos.Where(e => e.Evidencia?.Any(x => x.Clave == "Log" && x.Valor == "Security") == true))
+            True(ev.Codigo is "4625" or "4740" or "4771" or "4776",
+                $"El canal Security emitió un evento fuera del conjunto de auditoría: ID {ev.Codigo}.");
+    }
+}
+
+static async Task ForensicCollectorEndToEndDeclaresEveryChannelState()
+{
+    var result = await new WindowsForensicEventCollector().CollectAsync(Context(TimeSpan.FromHours(1)));
+    var coverage = result.Eventos.LastOrDefault(e => e.Tipo == "WINDOWS_FORENSIC_COVERAGE");
+    NotNull(coverage, "El collector forense no emitió su cobertura.");
+    string[] expectedAreas =
+        ["Sistema", "Aplicación", "RDP/LocalSessionManager", "Firewall de Windows",
+         "AppLocker EXE/DLL", "AppLocker MSI/Script", "Rendimiento de Windows"];
+    foreach (var area in expectedAreas)
+        True(coverage!.Evidencia!.Any(x => x.Clave == area),
+            $"La cobertura forense dejó de declarar el canal {area}.");
+    foreach (var item in coverage!.Evidencia!)
+    {
+        var known = item.Valor.StartsWith("Disponible", StringComparison.Ordinal)
+            || item.Valor.StartsWith("Parcial", StringComparison.Ordinal)
+            || item.Valor.StartsWith("Sin permisos", StringComparison.Ordinal)
+            || item.Valor.StartsWith("No legible", StringComparison.Ordinal)
+            || item.Valor == "No existe en este SO"
+            || item.Valor.StartsWith("No evaluado", StringComparison.Ordinal)
+            || item.Clave is "Ventana solicitada" or "Duración solicitada" or "Descubrimiento dinámico de canales";
+        True(known, $"Estado de canal inesperado para {item.Clave}: {item.Valor}");
+    }
+}
+
+static Task MergerPreservesRequestedLookbackAndDeclaresExpansion()
+{
+    var now = DateTimeOffset.Now;
+    var baseline = Report([ServiceStateEvent(now.AddHours(-1), "Running")], now.AddHours(-1));
+
+    var requestedSmall = Report([], now) with { LookbackSolicitado = TimeSpan.FromHours(1) };
+    var expanded = ContinuousDiagnosticMerger.Merge(baseline, requestedSmall, TimeSpan.FromHours(4));
+    Equal(TimeSpan.FromHours(1), expanded.LookbackSolicitado,
+        "La fusión enmascaró el lookback solicitado con el máximo de la ventana.");
+    True(expanded.VentanaAutoAmpliada,
+        "Ampliar la ventana continua más allá de lo solicitado no se declaró.");
+    NotNull(expanded.MotivoAmpliacion, "La ampliación de ventana no explicó su motivo.");
+
+    var requestedFull = Report([], now);
+    var same = ContinuousDiagnosticMerger.Merge(baseline, requestedFull, TimeSpan.FromHours(4));
+    False(same.VentanaAutoAmpliada, "Con la ventana igual a lo solicitado se declaró ampliación.");
+    True(same.MotivoAmpliacion is null, "Sin ampliación no debe haber motivo de ampliación.");
+    Equal(TimeSpan.FromHours(4), same.LookbackSolicitado, "El lookback solicitado cambió sin ampliación.");
+    return Task.CompletedTask;
+}
+
+static async Task DependencyNotEvaluatedGuardChecksDependentsToo()
+{
+    var dir = TempDir();
+    var emptyDir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var dependentsOnly = Report([new DiagnosticEvent(now, "Service Control Manager", "TermService",
+            DiagnosticLayer.Windows, DiagnosticSeverity.Informativo, "SERVICE_DEPENDENT_STATE", "dependiente",
+            Evidencia:
+            [
+                new EvidenceItem("Dependiente", "Spooler"),
+                new EvidenceItem("Servicio", "TermService"),
+                new EvidenceItem("Estado dependente", "Running")
+            ])], now);
+        var withTable = await ReportExporter.ExportAsync(dependentsOnly, dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(withTable.HtmlPath);
+        True(html.Contains("Relaciones reales del Service Control Manager", StringComparison.Ordinal),
+            "precondición: la tabla de relaciones debía renderizarse con sólo dependientes.");
+        False(html.Contains("No evaluado: no se obtuvo evidencia suficiente de dependencias", StringComparison.Ordinal),
+            "'No evaluado' coexistió con la tabla de relaciones de dependientes.");
+
+        var withoutEvidence = await ReportExporter.ExportAsync(Report([], now), emptyDir, CancellationToken.None);
+        var htmlEmpty = await File.ReadAllTextAsync(withoutEvidence.HtmlPath);
+        True(htmlEmpty.Contains("No evaluado: no se obtuvo evidencia suficiente de dependencias", StringComparison.Ordinal),
+            "Sin evidencia de dependencias el mensaje 'No evaluado' dejó de emitirse.");
+    }
+    finally
+    {
+        TryDelete(dir);
+        TryDelete(emptyDir);
+    }
 }
 
 static string? FindRepoRoot()

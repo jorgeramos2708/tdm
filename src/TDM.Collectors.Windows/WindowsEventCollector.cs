@@ -195,7 +195,7 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
         return lookbackLimit;
     }
 
-    private static bool IsRelevant(string provider, int id, string log)
+    public static bool IsRelevant(string provider, int id, string log)
     {
         string[] tokens =
         [
