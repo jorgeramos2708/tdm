@@ -415,7 +415,21 @@ public sealed class LocalStateStore
             WriteIndented = true
         };
         var json = System.Text.Json.JsonSerializer.Serialize(report, options);
-        await System.IO.File.WriteAllTextAsync(path, json, new System.Text.UTF8Encoding(false), ct);
+        // H3 (auditoría crítica FIX93): escritura atómica temp+rename. Antes un
+        // WriteAllTextAsync in-place dejaba latest-report.json truncado si el proceso
+        // moría o el CancellationToken se disparaba a mitad de escritura (el diff
+        // fallback P1-06 recibiría JSON parcial). Tras una cancelación se conserva el
+        // informe anterior y no queda residuo *.tmp en state/.
+        var tmp = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            await System.IO.File.WriteAllTextAsync(tmp, json, new System.Text.UTF8Encoding(false), ct);
+            System.IO.File.Move(tmp, path, true);
+        }
+        finally
+        {
+            try { if (System.IO.File.Exists(tmp)) System.IO.File.Delete(tmp); } catch { }
+        }
     }
 
     /// <summary>

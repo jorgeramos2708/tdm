@@ -166,7 +166,11 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("DashboardDeclaresDependencyDataFreshness", DashboardDeclaresDependencyDataFreshness),
     ("SafeWmiAppliesBoundedOptionsInBothBranches", SafeWmiAppliesBoundedOptionsInBothBranches),
     ("SingleFlightCaptureReusesPendingFlightUntilAbandonAge", SingleFlightCaptureReusesPendingFlightUntilAbandonAge),
-    ("SingleFlightCaptureTakesCompletedAndRestartsAfterFault", SingleFlightCaptureTakesCompletedAndRestartsAfterFault)
+    ("SingleFlightCaptureTakesCompletedAndRestartsAfterFault", SingleFlightCaptureTakesCompletedAndRestartsAfterFault),
+    ("IncidentLedgerGateSurvivesInterprocessLockFailure", IncidentLedgerGateSurvivesInterprocessLockFailure),
+    ("HistoricalReadFailurePreservesRetentionHistory", HistoricalReadFailurePreservesRetentionHistory),
+    ("ResourceWindowReadFailureSkipsCompaction", ResourceWindowReadFailureSkipsCompaction),
+    ("LatestReportSaveKeepsPreviousOnFailedWrite", LatestReportSaveKeepsPreviousOnFailedWrite)
 };
 
 var failed = 0;
@@ -3974,6 +3978,170 @@ static async Task SingleFlightCaptureTakesCompletedAndRestartsAfterFault()
     Equal(42, await fresh, "El vuelo fresco no produjo el resultado esperado.");
     True(ReferenceEquals(fresh, flights.TryTakeCompleted()), "El vuelo fresco no se cosechó.");
     True(flights.TryTakeCompleted() is null, "Tras cosechar no debe quedar ningún vuelo activo.");
+}
+
+static async Task IncidentLedgerGateSurvivesInterprocessLockFailure()
+{
+    var root = TempDir();
+    try
+    {
+        Directory.CreateDirectory(Path.Combine(root, "incidents"));
+        var ledger = new IncidentLedger(root);
+        var lockPath = ledger.Path + ".lock";
+
+        using (new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+            var failed = false;
+            try
+            {
+                await ledger.AddNoteAsync("TDM-2026-0001", "nota de prueba", cts.Token);
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or IOException)
+            {
+                failed = true;
+            }
+            True(failed, "La adquisición del lock interproceso no falló con el fichero bloqueado.");
+        }
+
+        // Sin C4 la cancelación anterior saltaba el finally y ProcessGate quedaba tomado
+        // para siempre: este AddNoteAsync colgaría y WaitAsync lanzaría TimeoutException.
+        await ledger.AddNoteAsync("TDM-2026-0002", "segunda nota")
+            .WaitAsync(TimeSpan.FromSeconds(5));
+    }
+    finally { TryDelete(root); }
+}
+
+static async Task HistoricalReadFailurePreservesRetentionHistory()
+{
+    var root = TempDir();
+    try
+    {
+        var store = new HistoricalTelemetryStore(root);
+        var json = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var now = DateTimeOffset.Now;
+        var hourStart = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, now.Offset);
+        const int seedCount = 5;
+        for (var i = 1; i <= seedCount; i++)
+        {
+            var hour = new HistoricalTelemetryStore.HourlyTelemetry(
+                hourStart.AddHours(-i),
+                new Dictionary<string, HistoricalTelemetryStore.MetricStats>());
+            await File.AppendAllTextAsync(store.HistoryPath, JsonSerializer.Serialize(hour, json) + "\n");
+        }
+
+        var seeded = await store.ReadAsync();
+        Equal(seedCount, seeded.Count, "El seed del histórico no superó la lectura de validación.");
+
+        // FileAccess.Read + share {Write, Delete}: la lectura del store se deniega (IO)
+        // pero un movimiento/append sobre el fichero seguiría permitido. Sin la guarda
+        // C5, el cleanup con History=[] reescribiría el fichero a 0 líneas.
+        using (new FileStream(store.HistoryPath, FileMode.Open, FileAccess.Read, FileShare.Write | FileShare.Delete))
+        {
+            var snapshot = new PersistentStateSnapshot(1, "test", now, "TEST", "Windows", "11", "22631", "x64", true, null, []);
+            await store.UpdateAndAnalyzeAsync(snapshot).WaitAsync(TimeSpan.FromSeconds(15));
+        }
+
+        var after = await store.ReadAsync();
+        Equal(seedCount, after.Count,
+            "La sesión con lectura fallida reescribió el histórico de 90 días (cleanup destructivo).");
+    }
+    finally { TryDelete(root); }
+}
+
+static async Task ResourceWindowReadFailureSkipsCompaction()
+{
+    var root = TempDir();
+    try
+    {
+        var stateDir = Path.Combine(root, "state");
+        Directory.CreateDirectory(stateDir);
+        var windowPath = Path.Combine(stateDir, "resource-window.jsonl");
+        var now = DateTimeOffset.Now;
+        var json = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var line = JsonSerializer.Serialize(
+            new { timestamp = now.AddMinutes(-5), cpuPct = 10d, memoryFreePct = 80d }, json);
+
+        var targetBytes = 4L * 1024 * 1024 + 128 * 1024;
+        var lineBytes = System.Text.Encoding.UTF8.GetByteCount(line) + 2;
+        var lineCount = (int)(targetBytes / lineBytes) + 1;
+        using (var writer = new StreamWriter(windowPath, append: false))
+        {
+            for (var i = 0; i < lineCount; i++) writer.WriteLine(line);
+        }
+        var seededBytes = new FileInfo(windowPath).Length;
+        True(seededBytes >= 4L * 1024 * 1024, $"El seed no alcanzó 4 MB ({seededBytes} bytes).");
+
+        var observation = new PersistentObservation(
+            "system-resource",
+            DiagnosticEventTypes.SystemResourceState,
+            "Recursos",
+            "Windows",
+            "Ninguno",
+            "Informativo",
+            "Metric.Cpu.Percent=10 | Metric.Memory.FreePercent=80",
+            false,
+            false);
+        var snapshot = new PersistentStateSnapshot(1, "test", now, "TEST", "Windows", "11", "22631", "x64", true, null, [observation]);
+
+        // Mismo truco de share que el test anterior: lectura denegada, movimiento permitido.
+        // Sin H2, ShouldCompact reescribiría la ventana (state.Samples=[] por el fallo de
+        // lectura) y el fichero caería de ~4 MB a unas pocas líneas.
+        using (new FileStream(windowPath, FileMode.Open, FileAccess.Read, FileShare.Write | FileShare.Delete))
+        {
+            await ResourceTrendAnalyzer.UpdateAndAnalyzeAsync(snapshot, root)
+                .WaitAsync(TimeSpan.FromSeconds(15));
+        }
+
+        var finalBytes = new FileInfo(windowPath).Length;
+        True(finalBytes >= seededBytes,
+            $"La compactación reescribió la ventana con lectura fallida: {seededBytes} -> {finalBytes} bytes.");
+    }
+    finally { TryDelete(root); }
+}
+
+static async Task LatestReportSaveKeepsPreviousOnFailedWrite()
+{
+    var root = TempDir();
+    try
+    {
+        var store = new LocalStateStore(root);
+        var now = DateTimeOffset.Now;
+        static DiagnosticEvent Event(DateTimeOffset at, string text)
+            => new(at, "TDM", "Test", DiagnosticLayer.Windows, DiagnosticSeverity.Informativo, "TEST_EVENT", text);
+
+        await store.SaveLatestReportAsync(Report([Event(now, "primer informe")], now));
+        var path = store.LatestReportPath;
+        var original = await File.ReadAllTextAsync(path);
+        True(original.Contains("primer informe", StringComparison.Ordinal),
+            "El primer informe no se persistió correctamente.");
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var canceled = false;
+        try
+        {
+            await store.SaveLatestReportAsync(
+                Report([Event(now.AddMinutes(1), "segundo informe")], now.AddMinutes(1)), cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            canceled = true;
+        }
+        True(canceled, "La escritura con token cancelado no lanzó OperationCanceledException.");
+
+        var after = await File.ReadAllTextAsync(path);
+        Equal(original, after, "El informe anterior cambió tras una escritura cancelada (H3).");
+        var stateDir = Path.Combine(root, "state");
+        False(Directory.EnumerateFiles(stateDir, "latest-report.json.tmp-*").Any(),
+            "Quedó residuo *.tmp tras la cancelación de la escritura.");
+
+        await store.SaveLatestReportAsync(Report([Event(now.AddMinutes(2), "tercer informe")], now.AddMinutes(2)))
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        var final = await store.LoadLatestReportAsync();
+        NotNull(final, "El informe no se pudo guardar tras recuperarse de la cancelación.");
+    }
+    finally { TryDelete(root); }
 }
 
 static string? FindRepoRoot()

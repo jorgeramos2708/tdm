@@ -639,18 +639,21 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
         }
         if (now >= _nextForensicStateAt)
         {
-            _nextForensicStateAt = now + ForensicStateInterval;
-            await CaptureStateChannelSafeAsync(snapshot, CollectorCatalog.CreateForensicStateMonitor(), "forensic-monitor", TimeSpan.FromSeconds(8), ct).ConfigureAwait(false);
+            // H4 (auditoría crítica FIX93): el timer avanza SÓLO si el canal se registró.
+            // Antes se adelantaba antes de la escritura, así que un fallo en RecordAsync
+            // consumía el intervalo entero y la auditoría perdía esa ventana sin reintento.
+            var recorded = await CaptureStateChannelSafeAsync(snapshot, CollectorCatalog.CreateForensicStateMonitor(), "forensic-monitor", TimeSpan.FromSeconds(8), ct).ConfigureAwait(false);
+            if (recorded) _nextForensicStateAt = now + ForensicStateInterval;
         }
 
         if (now >= _nextIntegrityStateAt)
         {
-            _nextIntegrityStateAt = now + IntegrityStateInterval;
-            await CaptureStateChannelSafeAsync(snapshot, CollectorCatalog.CreateIntegrityStateMonitor(), "integrity-monitor", TimeSpan.FromSeconds(15), ct).ConfigureAwait(false);
+            var recorded = await CaptureStateChannelSafeAsync(snapshot, CollectorCatalog.CreateIntegrityStateMonitor(), "integrity-monitor", TimeSpan.FromSeconds(15), ct).ConfigureAwait(false);
+            if (recorded) _nextIntegrityStateAt = now + IntegrityStateInterval;
         }
     }
 
-    private async Task CaptureStateChannelSafeAsync(
+    private async Task<bool> CaptureStateChannelSafeAsync(
         SystemSnapshot snapshot,
         IReadOnlyList<IReadOnlyCollector> collectors,
         string channel,
@@ -694,6 +697,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
             report = DiagnosticWorkflow.EnrichOperationalState(report);
             var state = StateSnapshotBuilder.Build(report, TdmProductInfo.Version);
             await new LocalStateStore(_root).RecordAsync(state, channel, ct).ConfigureAwait(false);
+            return true;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -702,6 +706,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Auditoría longitudinal {Channel} no disponible en este ciclo", channel);
+            return false;
         }
     }
 

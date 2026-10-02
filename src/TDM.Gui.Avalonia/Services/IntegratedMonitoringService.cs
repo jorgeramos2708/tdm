@@ -172,14 +172,18 @@ public sealed class IntegratedMonitoringService : IDisposable
 
             if (runForensic)
             {
-                _nextForensicStateAt = now + ForensicStateInterval;
                 await RecordStateChannelAsync(snapshot, CollectorCatalog.CreateForensicStateMonitor(), "forensic-monitor", TimeSpan.FromSeconds(8), ct).ConfigureAwait(false);
+                // H4 (auditoría crítica FIX93): el timer avanza SÓLO tras registrar el canal.
+                // Antes se adelantaba antes de la escritura; si RecordStateChannelAsync
+                // lanzaba, el catch externo tragaba el error y esa ventana se perdía sin
+                // reintento hasta dentro de ForensicStateInterval.
+                _nextForensicStateAt = now + ForensicStateInterval;
             }
 
             if (runIntegrity)
             {
-                _nextIntegrityStateAt = now + IntegrityStateInterval;
                 await RecordStateChannelAsync(snapshot, CollectorCatalog.CreateIntegrityStateMonitor(), "integrity-monitor", TimeSpan.FromSeconds(15), ct).ConfigureAwait(false);
+                _nextIntegrityStateAt = now + IntegrityStateInterval;
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -188,6 +192,8 @@ public sealed class IntegratedMonitoringService : IDisposable
         catch
         {
             // La auditoría longitudinal es complementaria y aislada del monitor visual de 5 s.
+            // H4: como los timers sólo avanzan tras una escritura exitosa, un fallo aquí
+            // reintenta en el siguiente tick en lugar de consumir el intervalo entero.
         }
         finally
         {

@@ -30,6 +30,10 @@ public static partial class ResourceTrendAnalyzer
         public List<ResourceSample> Samples { get; set; } = [];
         public bool Loaded { get; set; }
         public DateTimeOffset LastCompact { get; set; } = DateTimeOffset.MinValue;
+        // H2 (auditoría crítica FIX93): si la lectura inicial falla por IO/permisos, la
+        // ventana en memoria queda incompleta y NO debe compactarse: el rewrite pisaría
+        // el fichero persistido con una ventana casi vacía (pérdida de 2 h de muestras).
+        public bool ReadFailed { get; set; }
     }
 
     private static readonly ConcurrentDictionary<string, WindowState> Windows = new(StringComparer.OrdinalIgnoreCase);
@@ -59,9 +63,16 @@ public static partial class ResourceTrendAnalyzer
         await state.Gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            // H2: lock interproceso — GUI y servicio comparten resource-window.jsonl; sin
+            // bloqueo, la compactación de un proceso pisaba el apéndice del otro. Dentro
+            // del try para que su fallo libere el gate en el finally (patrón C4).
+            await using var processLock = await AcquireInterprocessLockAsync(stateDir, path, ct).ConfigureAwait(false);
+
             if (!state.Loaded)
             {
-                state.Samples = await LoadInitialWindowAsync(path, Path.Combine(stateDir, "resource-window.json"), ct).ConfigureAwait(false);
+                var (samples, readOk) = await LoadInitialWindowAsync(path, Path.Combine(stateDir, "resource-window.json"), ct).ConfigureAwait(false);
+                state.ReadFailed = !readOk;
+                state.Samples = samples;
                 state.Loaded = true;
             }
 
@@ -99,6 +110,9 @@ public static partial class ResourceTrendAnalyzer
 
     private static bool ShouldCompact(string path, WindowState state, DateTimeOffset now)
     {
+        // H2: nunca reescribir si la carga inicial falló — la ventana en memoria está
+        // incompleta y el rewrite destruiría el fichero persistido de forma irreversible.
+        if (state.ReadFailed) return false;
         try
         {
             if (!File.Exists(path) || new FileInfo(path).Length < CompactTriggerBytes) return false;
@@ -326,11 +340,16 @@ public static partial class ResourceTrendAnalyzer
             .Select(v => v!.Value)
             .ToList();
 
-    private static async Task<List<ResourceSample>> LoadInitialWindowAsync(string path, string legacyPath, CancellationToken ct)
+    private static async Task<(List<ResourceSample> Samples, bool Ok)> LoadInitialWindowAsync(string path, string legacyPath, CancellationToken ct)
     {
         var output = new List<ResourceSample>();
+        var ok = true;
         if (File.Exists(path))
-            output.AddRange(await ReadJsonLinesAsync(path, ct).ConfigureAwait(false));
+        {
+            var (items, readOk) = await ReadJsonLinesAsync(path, ct).ConfigureAwait(false);
+            output.AddRange(items);
+            ok = readOk;
+        }
         else if (File.Exists(legacyPath))
         {
             try
@@ -341,15 +360,17 @@ public static partial class ResourceTrendAnalyzer
                 if (legacy is not null) output.AddRange(legacy);
             }
             catch (JsonException) { }
-            catch (IOException) { }
+            catch (IOException) { ok = false; }
+            catch (UnauthorizedAccessException) { ok = false; }
         }
         Prune(output, DateTimeOffset.Now);
-        return output;
+        return (output, ok);
     }
 
-    private static async Task<List<ResourceSample>> ReadJsonLinesAsync(string path, CancellationToken ct)
+    private static async Task<(List<ResourceSample> Samples, bool Ok)> ReadJsonLinesAsync(string path, CancellationToken ct)
     {
         var output = new List<ResourceSample>();
+        var ok = true;
         try
         {
             await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
@@ -366,9 +387,29 @@ public static partial class ResourceTrendAnalyzer
                 catch (JsonException) { }
             }
         }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
-        return output;
+        catch (IOException) { ok = false; }
+        catch (UnauthorizedAccessException) { ok = false; }
+        return (output, ok);
+    }
+
+    private static async Task<FileStream> AcquireInterprocessLockAsync(string stateDir, string path, CancellationToken ct)
+    {
+        Directory.CreateDirectory(stateDir);
+        var lockPath = path + ".lock";
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None,
+                    1, FileOptions.Asynchronous | FileOptions.DeleteOnClose);
+            }
+            catch (IOException) when (attempt < 99)
+            {
+                await Task.Delay(50, ct).ConfigureAwait(false);
+            }
+        }
+        throw new IOException($"No fue posible adquirir el bloqueo interproceso {lockPath} en 5 s.");
     }
 
     private static async Task AppendJsonLineAsync(string path, ResourceSample sample, CancellationToken ct)

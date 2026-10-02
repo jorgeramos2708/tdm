@@ -41,6 +41,12 @@ public sealed class HistoricalTelemetryStore
         public List<HourlyTelemetry> History { get; set; } = [];
         public int SamplesSinceCurrentPersist { get; set; }
         public DateTimeOffset LastCleanup { get; set; } = DateTimeOffset.MinValue;
+        // C5 (auditoría crítica FIX93): si la carga inicial falla por IO/permisos (AV,
+        // backup, OneDrive), las escrituras destructivas de ESTA sesión quedan
+        // desactivadas hasta reiniciar: el rewrite con una lista vacía/parcial
+        // borraría 90 días de telemetría de forma irreversible.
+        public bool HistoryReadFailed { get; set; }
+        public bool CurrentReadFailed { get; set; }
     }
 
     public sealed record HistoricalTrendResult(
@@ -73,10 +79,20 @@ public sealed class HistoricalTelemetryStore
         await state.Gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            // C5: lock interproceso como el resto de stores — servicio y GUI comparten la
+            // misma raíz (append vs rewrite) y sin este bloqueo la compactación de un
+            // proceso podía pisar silenciosamente las escrituras del otro. Se adquiere
+            // dentro del try para que su fallo libere el gate en el finally (patrón C4).
+            await using var processLock = await AcquireInterprocessLockAsync(ct).ConfigureAwait(false);
+
             if (!state.Loaded)
             {
-                state.History = await ReadHistoryAsync(ct).ConfigureAwait(false);
-                state.Current = await ReadCurrentAsync(ct).ConfigureAwait(false);
+                var (history, historyOk) = await ReadHistoryAsync(ct).ConfigureAwait(false);
+                var (current, currentOk) = await ReadCurrentAsync(ct).ConfigureAwait(false);
+                state.HistoryReadFailed = !historyOk;
+                state.CurrentReadFailed = !currentOk;
+                state.History = history;
+                state.Current = current;
                 state.Loaded = true;
             }
 
@@ -110,14 +126,18 @@ public sealed class HistoricalTelemetryStore
             }
 
             state.SamplesSinceCurrentPersist++;
-            if (state.SamplesSinceCurrentPersist >= CurrentPersistEverySamples)
+            if (!state.CurrentReadFailed && state.SamplesSinceCurrentPersist >= CurrentPersistEverySamples)
             {
                 await WriteCurrentAtomicAsync(state.Current, ct).ConfigureAwait(false);
                 state.SamplesSinceCurrentPersist = 0;
             }
 
             var now = snapshot.CapturedAt;
-            if (state.LastCleanup == DateTimeOffset.MinValue || now - state.LastCleanup >= TimeSpan.FromHours(6))
+            // C5: con la carga fallida la lista en memoria está vacía/parcial; sin esta
+            // guarda la reescritura de limpieza borraría 90 días de telemetría de forma
+            // irreversible (el rewrite es destructivo, a diferencia de los apéndices).
+            if (!state.HistoryReadFailed
+                && (state.LastCleanup == DateTimeOffset.MinValue || now - state.LastCleanup >= TimeSpan.FromHours(6)))
             {
                 var cutoff = now - Retention;
                 state.History = state.History.Where(x => x.HourStart >= cutoff).OrderBy(x => x.HourStart).ToList();
@@ -136,8 +156,8 @@ public sealed class HistoricalTelemetryStore
 
     public async Task<IReadOnlyList<HourlyTelemetry>> ReadAsync(CancellationToken ct = default)
     {
-        var history = await ReadHistoryAsync(ct).ConfigureAwait(false);
-        var current = await ReadCurrentAsync(ct).ConfigureAwait(false);
+        var (history, _) = await ReadHistoryAsync(ct).ConfigureAwait(false);
+        var (current, _) = await ReadCurrentAsync(ct).ConfigureAwait(false);
         if (current is not null)
         {
             var finalized = Finalize(current);
@@ -325,10 +345,11 @@ public sealed class HistoricalTelemetryStore
         return denominator <= 0 ? 0 : numerator / denominator;
     }
 
-    private async Task<List<HourlyTelemetry>> ReadHistoryAsync(CancellationToken ct)
+    private async Task<(List<HourlyTelemetry> Items, bool Ok)> ReadHistoryAsync(CancellationToken ct)
     {
         var output = new List<HourlyTelemetry>();
-        if (!File.Exists(HistoryPath)) return output;
+        if (!File.Exists(HistoryPath)) return (output, true);
+        var ok = true;
         try
         {
             await using var stream = new FileStream(HistoryPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
@@ -345,23 +366,43 @@ public sealed class HistoricalTelemetryStore
                 catch (JsonException) { }
             }
         }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
-        return output.GroupBy(x => x.HourStart).Select(g => g.Last()).OrderBy(x => x.HourStart).ToList();
+        catch (IOException) { ok = false; }
+        catch (UnauthorizedAccessException) { ok = false; }
+        return (output.GroupBy(x => x.HourStart).Select(g => g.Last()).OrderBy(x => x.HourStart).ToList(), ok);
     }
 
-    private async Task<CurrentHour?> ReadCurrentAsync(CancellationToken ct)
+    private async Task<(CurrentHour? Value, bool Ok)> ReadCurrentAsync(CancellationToken ct)
     {
-        if (!File.Exists(CurrentHourPath)) return null;
+        if (!File.Exists(CurrentHourPath)) return (null, true);
         try
         {
             await using var stream = new FileStream(CurrentHourPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
                 16 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            return await JsonSerializer.DeserializeAsync<CurrentHour>(stream, Json, ct).ConfigureAwait(false);
+            return (await JsonSerializer.DeserializeAsync<CurrentHour>(stream, Json, ct).ConfigureAwait(false), true);
         }
-        catch (JsonException) { return null; }
-        catch (IOException) { return null; }
-        catch (UnauthorizedAccessException) { return null; }
+        catch (JsonException) { return (null, true); }
+        catch (IOException) { return (null, false); }
+        catch (UnauthorizedAccessException) { return (null, false); }
+    }
+
+    private async Task<FileStream> AcquireInterprocessLockAsync(CancellationToken ct)
+    {
+        Directory.CreateDirectory(_stateDirectory);
+        var lockPath = HistoryPath + ".lock";
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None,
+                    1, FileOptions.Asynchronous | FileOptions.DeleteOnClose);
+            }
+            catch (IOException) when (attempt < 99)
+            {
+                await Task.Delay(50, ct).ConfigureAwait(false);
+            }
+        }
+        throw new IOException($"No fue posible adquirir el bloqueo interproceso {lockPath} en 5 s.");
     }
 
     private async Task AppendHourAsync(HourlyTelemetry hour, CancellationToken ct)

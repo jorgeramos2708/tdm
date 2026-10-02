@@ -71,9 +71,14 @@ public sealed class IncidentLedger
         CancellationToken ct = default)
     {
         await ProcessGate.WaitAsync(ct).ConfigureAwait(false);
-        await using var processLock = await AcquireInterprocessLockAsync(ct).ConfigureAwait(false);
         try
         {
+        // C4 (auditoría crítica FIX93): el lock interproceso se adquiere DENTRO del try.
+        // Antes estaba entre WaitAsync y el try, de modo que un IOException (5 s de
+        // contención), una cancelación o un fallo de CreateDirectory saltaban este
+        // finally y el semáforo ESTÁTICO ProcessGate quedaba tomado para siempre: el
+        // ledger y sus llamantes (servicio/GUI) se congelaban hasta reiniciar.
+        await using var processLock = await AcquireInterprocessLockAsync(ct).ConfigureAwait(false);
         var existing = (await ReadRawAsync(ct)).ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var cooldown = TimeSpan.FromSeconds(Math.Max(30, settings.Thresholds.IncidentCooldownSeconds));
@@ -141,9 +146,14 @@ foreach (var item in ObservabilityIncidentPolicy.Normalize(observed).OrderBy(x =
     public async Task AddNoteAsync(string id, string note, CancellationToken ct = default)
     {
         await ProcessGate.WaitAsync(ct).ConfigureAwait(false);
-        await using var processLock = await AcquireInterprocessLockAsync(ct).ConfigureAwait(false);
         try
         {
+        // C4 (auditoría crítica FIX93): el lock interproceso se adquiere DENTRO del try.
+        // Antes estaba entre WaitAsync y el try, de modo que un IOException (5 s de
+        // contención), una cancelación o un fallo de CreateDirectory saltaban este
+        // finally y el semáforo ESTÁTICO ProcessGate quedaba tomado para siempre: el
+        // ledger y sus llamantes (servicio/GUI) se congelaban hasta reiniciar.
+        await using var processLock = await AcquireInterprocessLockAsync(ct).ConfigureAwait(false);
             var existing = (await ReadRawAsync(ct)).ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
             if (!existing.TryGetValue(id, out var item)) return;
             existing[id] = item with { TechnicianNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim() };
@@ -155,9 +165,14 @@ foreach (var item in ObservabilityIncidentPolicy.Normalize(observed).OrderBy(x =
     public async Task CloseAsync(string id, CancellationToken ct = default)
     {
         await ProcessGate.WaitAsync(ct).ConfigureAwait(false);
-        await using var processLock = await AcquireInterprocessLockAsync(ct).ConfigureAwait(false);
         try
         {
+        // C4 (auditoría crítica FIX93): el lock interproceso se adquiere DENTRO del try.
+        // Antes estaba entre WaitAsync y el try, de modo que un IOException (5 s de
+        // contención), una cancelación o un fallo de CreateDirectory saltaban este
+        // finally y el semáforo ESTÁTICO ProcessGate quedaba tomado para siempre: el
+        // ledger y sus llamantes (servicio/GUI) se congelaban hasta reiniciar.
+        await using var processLock = await AcquireInterprocessLockAsync(ct).ConfigureAwait(false);
             var existing = (await ReadRawAsync(ct)).ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
             if (!existing.TryGetValue(id, out var item)) return;
             existing[id] = item with { State = ManagedIncidentState.Closed, ClosedAt = DateTimeOffset.Now };
