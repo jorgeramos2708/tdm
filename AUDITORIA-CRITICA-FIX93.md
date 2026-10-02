@@ -1,11 +1,11 @@
-# Auditoría de criticidad — TDM v1.0-rc18.21.0-FIX93 (tras Fase 17)
+# Auditoría de criticidad — TDM v1.0-rc18.21.0-FIX93 (tras Fase 18)
 
 **Fecha**: 01/10/2026 · **HEAD auditado**: `97bb496` (árbol limpio, gates 145/145 · 47/47 · 7/7 · publish 138968263).
-**Remediación**: Fase 17 (`9fb13a6`) corrigió **C1+C2+C3+H5**; gates tras la fase: 148/148 · 47/47 · 7/7 · publish 139013319.
+**Remediación**: Fase 18 (`b4c9da7`) corrigió **C4+C5+H2+H3+H4** (gates 152/152 · 47/47 · 7/7 · publish 139041991); Fase 17 (`9fb13a6`) corrigió C1+C2+C3+H5 (148/148 · publish 139013319).
 **Objetivo**: eliminar errores **críticos** que puedan alterar el funcionamiento y el objetivo principal de la herramienta (diagnóstico fiable de servidores Windows/TSplus: monitorización continua, detección, correlación, causa raíz, reportes sanearizados).
 **Método**: 5 agentes de exploración en paralelo (persistencia · diagnóstico/correlación · reporting/seguridad · concurrencia/ciclos · collectors) sobre ~48 000 líneas de `src/`, con **verificación manual** de todos los hallazgos CRITICAL y de los HIGH clave por parte del auditor principal. Cada hallazgo incluye evidencia (`archivo:línea`) y escenario concreto de fallo. Se cruzó contra las auditorías previas (`AUDITORIA-SENIOR-FIX93.md`, `AUDITORIA-EFECTIVIDAD.md`): **ninguno de los 7 críticos consta anteriormente**.
 
-**Recuento**: 7 CRITICAL (todos verificados manualmente ✓; **C1+C2+C3 corregidos en Fase 17**) · 10 HIGH (**H5 corregido en Fase 17**) · ~22 MEDIUM · ~4 LOW/LATENT.
+**Recuento**: 7 CRITICAL (todos verificados manualmente ✓; **C1+C2+C3 corregidos en Fase 17 · C4+C5 en Fase 18**) · 10 HIGH (**H5 en Fase 17 · H2+H3+H4 en Fase 18**) · ~22 MEDIUM · ~4 LOW/LATENT.
 
 ---
 
@@ -68,7 +68,7 @@ try { ... } finally { ProcessGate.Release(); }          // :138  Release SÓLO d
 ```
 `AcquireInterprocessLockAsync` lanza `IOException` a los 5 s de contención interproceso (`:186`), `OperationCanceledException` (`:175,183`) o fallos de `Directory.CreateDirectory` (`:171`).
 **Escenario**: un solo fallo transitorio → `ProcessGate` (semáforo **estático** de 1 en 1) queda tomado para siempre → toda llamada posterior (`ReconcileAsync`/`AddNoteAsync`/`CloseAsync`) espera infinitamente → el ciclo del servicio (`TdmWorker:323/469`) o el bucle GUI (`IntegratedMonitoringService:279`, que además retiene `_captureGate`) **se cuelgan sin recuperación**.
-**Fix**: envolver `:74` dentro del `try` (o `Release` en un `finally` externo que sólo libere si el gate se tomó).
+**Fix**: envolver `:74` dentro del `try` (o `Release` en un `finally` externo que sólo libere si el gate se tomó). → **corregido en Fase 18** (`b4c9da7`): el lock interproceso se adquiere como primera línea DENTRO del `try` en `ReconcileAsync`/`AddNoteAsync`/`CloseAsync`, de modo que cualquier fallo (IOException/OCE/CreateDirectory) pasa por el `finally` que libera `ProcessGate`; test `IncidentLedgerGateSurvivesInterprocessLockFailure`.
 
 ### C5 — `HistoricalTelemetryStore`: lectura fallida tragada + rewrite en la primera llamada → 90 días de telemetría pueden borrarse
 **Lugar**: `src\TDM.Persistence\HistoricalTelemetryStore.cs:76-81, 120-126, 328-351, 396`
@@ -79,7 +79,7 @@ state.History = await ReadHistoryAsync(ct); state.Loaded = true;                
 state.History = state.History.Where(...); await RewriteHistoryAsync(state.History);   // File.Move(tmp, path, true)
 ```
 **Escenario**: primer ciclo con `historical-hourly.jsonl` bloqueado (AV/backup/OneDrive) → lectura tragada → lista vacía → el rewrite de limpieza **sobrescribe el archivo de 90 días con uno vacío**, de forma **irreversible** y con `Loaded=true` (nunca relee). Además la clase **no tiene lock interproceso**, y la misma raíz la escriben servicio y GUI (append vs rewrite → pérdida silenciosa).
-**Fix**: señal de fallo de lectura (flag `ReadFailed`) que desactive cleanup/rewrite en esa sesión; añadir lock de archivo como el resto de stores.
+**Fix**: señal de fallo de lectura (flag `ReadFailed`) que desactive cleanup/rewrite en esa sesión; añadir lock de archivo como el resto de stores. → **corregido en Fase 18** (`b4c9da7`): `ReadHistoryAsync`/`ReadCurrentAsync` devuelven `ok` y la sesión marca `HistoryReadFailed`/`CurrentReadFailed` (cleanup de 6 h y sobrescritura de hora actual desactivados en esa sesión); `UpdateAndAnalyzeAsync` gana lock interproceso `.lock` + `DeleteOnClose` adquirido dentro del `try`; test `HistoricalReadFailurePreservesRetentionHistory`.
 
 ### C6 — `IncrementalTsplusLogCollector`: cursor persistido sobre eventos que sólo viven en RAM
 **Lugar**: `src\TDM.Collectors.TSplus\IncrementalTsplusLogCollector.cs:207-223` (+ `:50`, `:301`)
@@ -111,9 +111,9 @@ nla ? $"Windows NLA / credenciales / {user}" : ...                              
 | # | Hallazgo | Lugar | Escenario |
 |---|---|---|---|
 | H1 | **Filtro de ventana con cultura actual** — `DateTimeOffset.TryParse(raw)` (sin cultura) contra escrituras `dd/MM/yyyy HH:mm:ss`; y fallo de parse ⇒ `return true` (hallazgo se conserva siempre) ✓ verificado | `TDM.Core\DiagnosticTimeWindow.cs:31,36` | En locale `en-US`/`InvariantCulture` (los tests fuerzan `InvariantCulture`): fechas ≤12 se interpretan al revés (hallazgo RDP/NLA **fuera** de ventana → descartado → causa NLA 98/91 nunca se crea); fechas ≥13 no parsean → hallazgos antiguos sobreviven a la ventana |
-| H2 | **Compacción sobre estado parcial sin lock interproceso** — lectura con IO tragada + `Rewrite` con sólo las muestras de esta sesión | `TDM.Persistence\ResourceTrendAnalyzer.cs:35,64-74,350-372` | Servicio+GUI sobre la misma raíz: la ventana de recursos (≈2 h) puede truncarse a vacío/parcial |
-| H3 | **Única escritura no atómica del módulo** — `WriteAllPlainTextAsync` in-place de `latest-report.json` (el resto usa temp+rename) | `TDM.Persistence\LocalStateStore.cs:418` | Corte de energía durante export → informe previo destruido (el lector tolera, degrada el diff) |
-| H4 | **Temporizadores forense/integridad avanzados antes de escribir + `catch {}` vacío en GUI** — un `IOException` de `.store.lock` descarta la muestra de 2 min/10 min **sin reintento ni log** | `IntegratedMonitoringService.cs:161-177`, `TdmWorker.cs:637-647,699-702` | Huecos permanentes en cobertura longitudinal ("Parcial") por contención ordinaria |
+| H2 | **Compacción sobre estado parcial sin lock interproceso** — lectura con IO tragada + `Rewrite` con sólo las muestras de esta sesión | `TDM.Persistence\ResourceTrendAnalyzer.cs:35,64-74,350-372` | Servicio+GUI sobre la misma raíz: la ventana de recursos (≈2 h) puede truncarse a vacío/parcial → **corregido en Fase 18** (`b4c9da7`: `WindowState.ReadFailed` condiciona `ShouldCompact` + lock interproceso como C5; test `ResourceWindowReadFailureSkipsCompaction`) |
+| H3 | **Única escritura no atómica del módulo** — `WriteAllPlainTextAsync` in-place de `latest-report.json` (el resto usa temp+rename) | `TDM.Persistence\LocalStateStore.cs:418` | Corte de energía durante export → informe previo destruido (el lector tolera, degrada el diff) → **corregido en Fase 18** (`b4c9da7`: temp+rename con limpieza de residuos en `finally`; test `LatestReportSaveKeepsPreviousOnFailedWrite`) |
+| H4 | **Temporizadores forense/integridad avanzados antes de escribir + `catch {}` vacío en GUI** — un `IOException` de `.store.lock` descarta la muestra de 2 min/10 min **sin reintento ni log** | `IntegratedMonitoringService.cs:161-177`, `TdmWorker.cs:637-647,699-702` | Huecos permanentes en cobertura longitudinal ("Parcial") por contención ordinaria → **corregido en Fase 18** (`b4c9da7`: en servicio y GUI los timers avanzan sólo tras registrar el canal —el servicio devuelve `bool`—; el avance en timeout de snapshot (C3) se conserva) |
 | H5 | **`CollectorExecutionBoundary`: slots estáticos sin reaper + cancelación inútil** — 8 colgados (vía C1) ⇒ `CapacityException`/`StillRunning` **para siempre** | `TDM.Core\CollectorExecutionBoundary.cs:14-16,41-48,72-76` | Diagnósticos con resultados vacíos indefinidos sin autorecuperación → **corregido en Fase 17** (`9fb13a6`: la admisión retira los vuelos con más de 10 min sin completar; la continuación original queda protegida por `ReferenceEquals` y observa su excepción si termina) |
 | H6 | **Canal nuevo sin cursor ⇒ rastreo oldest-first sin ventana** — `loaded=true` siembra `cursor=0`, sin `RecordID` ni filtro temporal, 250 registros **más antiguos** por ciclo | `TDM.Collectors.Windows\IncrementalWindowsEventCollector.cs:84-90,127,187,191` | Upgrade que añade canal → cientos de ciclos antes de leer los eventos recientes (con cobertura "Parcial" declarada) |
 | H7 | **Fallos de enumeración reportados como "Disponible / Ninguno identificado"** — `catch` vacíos en escaneo de módulos/servicios + evento incondicional | `TDM.Collectors.Windows\ThirdPartyInterferenceCollector.cs:140-141,262,278,296` vs `DiagnosticCoverageAnalyzer.cs:306-311` | Sin admin: "0 módulos externos" y cobertura `Disponible` cuando no se pudo evaluar |
@@ -165,7 +165,7 @@ nla ? $"Windows NLA / credenciales / {user}" : ...                              
 ## Plan de remediación propuesto (orden de ataque)
 
 1. **Fase 17 (C1+C2+C3+H5)** — cadena WMI/timeout: aplicar `options` en ambas ramas de `SafeWmi`, descartar/reemitir tareas colgadas en `TdmWorker` e `IntegratedMonitoringService`, avanzar temporizadores en timeout, reaper/`IsCompleted` para `CollectorExecutionBoundary`. *Objetivo: la monitorización nunca puede quedarse muerta.* **(✅ ejecutada — `9fb13a6`, gates 148/148 · 47/47 · 7/7 · publish 139013319)**
-2. **Fase 18 (C4+C5+H2+H3+H4)** — integridad de datos: `finally` global del `ProcessGate`, flag de lectura fallida en `HistoricalTelemetryStore` + lock interproceso, lock/compactación condicionada en `ResourceTrendAnalyzer`, write atómico de `latest-report.json`, temporizadores tras escritura exitosa.
+2. **Fase 18 (C4+C5+H2+H3+H4)** — integridad de datos: `finally` global del `ProcessGate`, flag de lectura fallida en `HistoricalTelemetryStore` + lock interproceso, lock/compactación condicionada en `ResourceTrendAnalyzer`, write atómico de `latest-report.json`, temporizadores tras escritura exitosa. **(✅ ejecutada — `b4c9da7`, gates 152/152 · 47/47 · 7/7 · publish 139041991)**
 3. **Fase 19 (C6+H6)** — cursores: cursor TSplus acotado a lo entregado; canal nuevo sin cursor con ventana temporal desde el inicio.
 4. **Fase 20 (C7+H8)** — sanearización: `Id`/`Componente` en origen + `Id` en el sanitizador + claves de evidencia faltantes + SID en Ids de hallazgo.
 5. **Fase 21 (H1+diagnóstico MEDIUM)** — `TryParseExact` Invariant en `DiagnosticTimeWindow` (o fechas "O" en el origen), filtro de rol antes de `Take(8)`, exclusión de `Fuente="TDM"` en `IsCausalSignal`, Ids de candidato únicos.
