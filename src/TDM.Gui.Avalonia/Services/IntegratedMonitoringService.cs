@@ -27,6 +27,11 @@ public sealed class IntegratedMonitoringService : IDisposable
     private static readonly TimeSpan ForensicProbeInterval = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan ForensicStateInterval = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan IntegrityStateInterval = TimeSpan.FromMinutes(10);
+    // C2/C3 (auditoría crítica FIX93): edades de abandono para capturas de snapshot que
+    // no terminan — 2 min en el monitor de 5 s y 2× el intervalo forense en el bucle
+    // forense. Un vuelo que las supera se descarta observado y se reemplaza.
+    private static readonly TimeSpan SnapshotAbandonAge = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan ForensicSnapshotAbandonAge = TimeSpan.FromMinutes(4);
     private static readonly TimeSpan PortableNotificationInterval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan AnomalyAlertCooldown = TimeSpan.FromMinutes(5);
 
@@ -54,7 +59,11 @@ public sealed class IntegratedMonitoringService : IDisposable
 
     private SystemSnapshot? _cachedSnapshot;
     private DateTimeOffset? _cachedSnapshotAt;
-    private Task<SystemSnapshot>? _snapshotTask;
+    // C2/C3 (auditoría crítica FIX93): single-flight con cosecha/abandono — la GUI no
+    // re-awaitea para siempre una captura muerta ni recrea una nueva cada minuto.
+    private readonly SingleFlightCapture<SystemSnapshot> _snapshotFlights = new();
+    private readonly SingleFlightCapture<SystemSnapshot> _forensicFlights = new();
+    private readonly object _forensicSnapshotSync = new();
 
     private DateTimeOffset? _tdmProcessMetricAt;
     private TimeSpan _tdmProcessCpuTotal;
@@ -148,11 +157,16 @@ public sealed class IntegratedMonitoringService : IDisposable
             SystemSnapshot snapshot;
             try
             {
-                snapshot = await Task.Run(SystemSnapshotReader.Capture, CancellationToken.None)
-                    .WaitAsync(TimeSpan.FromSeconds(8), ct).ConfigureAwait(false);
+                snapshot = await GetForensicSnapshotAsync(now, ct).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
+                // C3 (auditoría crítica FIX93): avanzar los timers también en timeout y
+                // conservar el vuelo en curso (single-flight). Antes cada tick de 1 min
+                // creaba una tarea nueva abandonando la anterior: fugas ilimitadas de
+                // tareas y hilos cuando la captura no terminaba.
+                if (runForensic) _nextForensicStateAt = now + ForensicStateInterval;
+                if (runIntegrity) _nextIntegrityStateAt = now + IntegrityStateInterval;
                 return;
             }
 
@@ -179,6 +193,24 @@ public sealed class IntegratedMonitoringService : IDisposable
         {
             _forensicGate.Release();
         }
+    }
+
+    private async Task<SystemSnapshot> GetForensicSnapshotAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        Task<SystemSnapshot> task;
+        lock (_forensicSnapshotSync)
+        {
+            // Cosechar un vuelo que terminó tras un timeout anterior: su resultado es
+            // reciente (completó después del último vencimiento) y evita una captura nueva.
+            var taken = _forensicFlights.TryTakeCompleted();
+            if (taken is { IsCompletedSuccessfully: true } completed)
+                return completed.Result;
+            task = _forensicFlights.Start(SystemSnapshotReader.Capture, ForensicSnapshotAbandonAge, now);
+        }
+
+        var result = await task.WaitAsync(TimeSpan.FromSeconds(8), ct).ConfigureAwait(false);
+        _ = _forensicFlights.TryTakeCompleted();
+        return result;
     }
 
     private async Task RecordStateChannelAsync(
@@ -326,17 +358,13 @@ public sealed class IntegratedMonitoringService : IDisposable
     {
         var now = DateTimeOffset.Now;
 
-        if (_snapshotTask is { IsCompletedSuccessfully: true } completed)
+        var taken = _snapshotFlights.TryTakeCompleted();
+        if (taken is { IsCompletedSuccessfully: true } completed)
         {
             _cachedSnapshot = completed.Result;
             _cachedSnapshotAt = now;
-            _snapshotTask = null;
         }
-        else if (_snapshotTask is { IsFaulted: true } faulted)
-        {
-            _ = faulted.Exception;
-            _snapshotTask = null;
-        }
+        // Un vuelo fallido/cancelado queda observado y descartado (Q1): se reintenta abajo.
 
         var stale = _cachedSnapshot is null
                     || !_cachedSnapshotAt.HasValue
@@ -344,23 +372,24 @@ public sealed class IntegratedMonitoringService : IDisposable
 
         if (stale)
         {
-            _snapshotTask ??= Task.Run(SystemSnapshotReader.Capture, CancellationToken.None);
+            var task = _snapshotFlights.Start(SystemSnapshotReader.Capture, SnapshotAbandonAge, now);
             try
             {
-                _cachedSnapshot = await _snapshotTask.WaitAsync(SnapshotAcquisitionBudget, ct).ConfigureAwait(false);
+                _cachedSnapshot = await task.WaitAsync(SnapshotAcquisitionBudget, ct).ConfigureAwait(false);
                 _cachedSnapshotAt = now;
-                _snapshotTask = null;
+                _ = _snapshotFlights.TryTakeCompleted();
             }
             catch (TimeoutException)
             {
+                // El vuelo se conserva: si termina, el próximo tick lo cosechará. Con
+                // SnapshotAbandonAge un vuelo colgado no retiene la captura para siempre
+                // (antes el ??= re-awaiteaba la misma tarea muerta hasta reiniciar).
                 _cachedSnapshot ??= BuildFallbackSnapshot(now);
                 _cachedSnapshotAt ??= now;
             }
             catch (Exception) when (!ct.IsCancellationRequested)
             {
-                if (_snapshotTask?.IsFaulted == true)
-                    _ = _snapshotTask.Exception;
-                _snapshotTask = null;
+                _ = _snapshotFlights.TryTakeCompleted();
                 _cachedSnapshot ??= BuildFallbackSnapshot(now);
                 _cachedSnapshotAt ??= now;
             }

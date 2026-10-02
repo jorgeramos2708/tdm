@@ -163,7 +163,10 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("DependencyNotEvaluatedGuardChecksDependentsToo", DependencyNotEvaluatedGuardChecksDependentsToo),
     ("RecentTransitionReadSkipsFilesOutsideWindow", RecentTransitionReadSkipsFilesOutsideWindow),
     ("LocalHistoryUnavailableIsDeclaredInCoverage", LocalHistoryUnavailableIsDeclaredInCoverage),
-    ("DashboardDeclaresDependencyDataFreshness", DashboardDeclaresDependencyDataFreshness)
+    ("DashboardDeclaresDependencyDataFreshness", DashboardDeclaresDependencyDataFreshness),
+    ("SafeWmiAppliesBoundedOptionsInBothBranches", SafeWmiAppliesBoundedOptionsInBothBranches),
+    ("SingleFlightCaptureReusesPendingFlightUntilAbandonAge", SingleFlightCaptureReusesPendingFlightUntilAbandonAge),
+    ("SingleFlightCaptureTakesCompletedAndRestartsAfterFault", SingleFlightCaptureTakesCompletedAndRestartsAfterFault)
 };
 
 var failed = 0;
@@ -3872,6 +3875,105 @@ static Task DashboardDeclaresDependencyDataFreshness()
     False(freshPreventive.ModuleDetail.Contains("hace", StringComparison.Ordinal),
         $"Con datos del mismo instante no debe haber aviso en salud: '{freshPreventive.ModuleDetail}'");
     return Task.CompletedTask;
+}
+
+static Task SafeWmiAppliesBoundedOptionsInBothBranches()
+{
+    // C1 (auditoría crítica FIX93): las opciones acotadas deben aplicarse en AMBAS ramas
+    // (con y sin scope); antes la rama sin alcance las descartaba y perdía el timeout.
+    using var withoutScope = SafeWmi.CreateSearcher("SELECT Name FROM Win32_OperatingSystem", null, null);
+    Equal(TimeSpan.FromSeconds(15), withoutScope.Options.Timeout,
+        "La rama sin scope no aplicó el timeout por defecto de 15 s.");
+    True(withoutScope.Options.ReturnImmediately,
+        "La rama sin scope no aplicó ReturnImmediately (operación semisíncrona acotada).");
+
+    using var withScope = SafeWmi.CreateSearcher(
+        "SELECT Name FROM Win32_OperatingSystem", @"\\.\root\cimv2", TimeSpan.FromSeconds(3));
+    Equal(TimeSpan.FromSeconds(3), withScope.Options.Timeout,
+        "La rama con scope no aplicó el timeout explícito.");
+    True(withScope.Options.ReturnImmediately,
+        "La rama con scope dejó ReturnImmediately en falso: la operación quedaría sin acotar.");
+
+    Equal(TimeSpan.FromSeconds(15), SafeWmi.CreateOptions(null).Timeout,
+        "CreateOptions(null) dejó de declarar el timeout por defecto de 15 s.");
+    return Task.CompletedTask;
+}
+
+static Task SingleFlightCaptureReusesPendingFlightUntilAbandonAge()
+{
+    var flights = new SingleFlightCapture<int>();
+    var calls = 0;
+    using var gate = new ManualResetEventSlim(false);
+    var startedAt = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+    var abandonAge = TimeSpan.FromMinutes(2);
+
+    int Factory()
+    {
+        var n = Interlocked.Increment(ref calls);
+        gate.Wait();
+        return n;
+    }
+
+    var first = flights.Start(Factory, abandonAge, startedAt);
+    var reused = flights.Start(Factory, abandonAge, startedAt.AddMinutes(1));
+    True(ReferenceEquals(first, reused),
+        "Un vuelo pendiente y joven se duplicó en lugar de reutilizarse.");
+
+    SpinUntil(() => Volatile.Read(ref calls) >= 1);
+    Equal(1, Volatile.Read(ref calls), "La fábrica se invocó más de una vez para el mismo vuelo.");
+
+    var replaced = flights.Start(Factory, abandonAge, startedAt.AddMinutes(2));
+    True(!ReferenceEquals(first, replaced),
+        "Un vuelo que superó la edad de abandono no fue reemplazado.");
+    SpinUntil(() => Volatile.Read(ref calls) >= 2);
+    Equal(2, Volatile.Read(ref calls), "El reemplazo no emitió una captura fresca.");
+    True(ReferenceEquals(replaced, flights.InFlight),
+        "El vuelo reemplazado no quedó registrado como activo.");
+
+    gate.Set();
+    True(first.Result == 1, "El vuelo original perdió su resultado.");
+    True(replaced.Result == 2, "El vuelo reemplazado perdió su resultado.");
+    True(ReferenceEquals(replaced, flights.TryTakeCompleted()),
+        "El vuelo terminado no se cosechó.");
+    True(flights.TryTakeCompleted() is null,
+        "Tras cosechar no debe quedar ningún vuelo activo.");
+    return Task.CompletedTask;
+
+    static void SpinUntil(Func<bool> condition)
+    {
+        var deadline = Environment.TickCount64 + 10_000;
+        while (!condition() && Environment.TickCount64 < deadline)
+            Thread.Sleep(5);
+    }
+}
+
+static async Task SingleFlightCaptureTakesCompletedAndRestartsAfterFault()
+{
+    var flights = new SingleFlightCapture<int>();
+    var abandonAge = TimeSpan.FromMinutes(2);
+    var now = DateTimeOffset.Now;
+
+    var faulted = flights.Start(() => throw new InvalidOperationException("captura fallida"), abandonAge, now);
+    var sawFault = false;
+    try
+    {
+        await faulted;
+    }
+    catch (InvalidOperationException)
+    {
+        sawFault = true;
+    }
+    True(sawFault, "El vuelo fallido no propagó su excepción.");
+
+    var taken = flights.TryTakeCompleted();
+    NotNull(taken, "El vuelo terminado no se cosechó tras el fallo.");
+    True(taken!.IsFaulted, "El vuelo cosechado dejó de estar en estado de fallo.");
+
+    var fresh = flights.Start(() => 42, abandonAge, now);
+    True(ReferenceEquals(fresh, flights.InFlight), "Tras el fallo no se emitió un vuelo fresco.");
+    Equal(42, await fresh, "El vuelo fresco no produjo el resultado esperado.");
+    True(ReferenceEquals(fresh, flights.TryTakeCompleted()), "El vuelo fresco no se cosechó.");
+    True(flights.TryTakeCompleted() is null, "Tras cosechar no debe quedar ningún vuelo activo.");
 }
 
 static string? FindRepoRoot()

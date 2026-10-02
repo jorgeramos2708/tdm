@@ -7,13 +7,19 @@ namespace TDM.Core;
 /// Aísla collectors potencialmente síncronos del hilo llamador y aplica un límite real
 /// al tiempo que el motor espera por cada fuente. Si una API nativa no coopera con
 /// CancellationToken, la tarea queda registrada hasta terminar y no se vuelve a lanzar
-/// el mismo tipo de collector en paralelo.
+/// el mismo tipo de collector en paralelo. Como último recurso, un vuelo que ignora la
+/// cancelación durante demasiado tiempo se retira (reaper por edad) para no consumir el
+/// cupo estático hasta reiniciar (auditoría crítica FIX93, H5).
 /// </summary>
 public static class CollectorExecutionBoundary
 {
-    private static readonly ConcurrentDictionary<string, Task<CollectorResult>> InFlight = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, (Task<CollectorResult> Task, DateTimeOffset StartedAt)> InFlight = new(StringComparer.Ordinal);
     private static readonly object AdmissionSync = new();
     private const int MaxInFlightCollectors = 8;
+
+    // Un collector legítimo tarda como máximo unos segundos (timeouts de 1-15 s); 10 min
+    // sin completar sólo puede deberse a una API nativa colgada que ignoró la cancelación.
+    private static readonly TimeSpan MaxFlightAge = TimeSpan.FromMinutes(10);
 
     public static int InFlightCount => InFlight.Count;
 
@@ -35,9 +41,20 @@ public static class CollectorExecutionBoundary
         // mismo tipo de collector entre TryGetValue y TryAdd.
         lock (AdmissionSync)
         {
+            // H5: reaper perezoso — un vuelo que nunca termina no debe consumir el cupo
+            // hasta reiniciar. Tras MaxFlightAge se retira; la continuación original del
+            // vuelo retirado sigue protegida por ReferenceEquals (no borrará el vuelo
+            // nuevo) y observará su excepción si algún día termina.
+            var now = DateTimeOffset.Now;
+            foreach (var entry in InFlight)
+            {
+                if (now - entry.Value.StartedAt >= MaxFlightAge)
+                    InFlight.TryRemove(new KeyValuePair<string, (Task<CollectorResult>, DateTimeOffset)>(entry.Key, entry.Value));
+            }
+
             if (InFlight.TryGetValue(key, out var previous))
             {
-                if (!previous.IsCompleted)
+                if (!previous.Task.IsCompleted)
                     throw new CollectorStillRunningException(collector.Nombre);
 
                 // La continuación puede no haber retirado todavía una tarea ya terminada.
@@ -50,15 +67,15 @@ public static class CollectorExecutionBoundary
             work = Task.Run(
                 async () => await collector.CollectAsync(context, collectorCts.Token).ConfigureAwait(false),
                 CancellationToken.None);
-            InFlight[key] = work;
+            InFlight[key] = (work, now);
         }
 
         _ = work.ContinueWith(
             static (completed, state) =>
             {
-                var tuple = ((ConcurrentDictionary<string, Task<CollectorResult>> map, string key))state!;
-                if (tuple.map.TryGetValue(tuple.key, out var current) && ReferenceEquals(current, completed))
-                    tuple.map.TryRemove(tuple.key, out _);
+                var tuple = ((ConcurrentDictionary<string, (Task<CollectorResult> Task, DateTimeOffset StartedAt)> map, string key))state!;
+                if (tuple.map.TryGetValue(tuple.key, out var current) && ReferenceEquals(current.Task, completed))
+                    tuple.map.TryRemove(new KeyValuePair<string, (Task<CollectorResult>, DateTimeOffset)>(tuple.key, current));
                 // Observar la excepción evita UnobservedTaskException si el motor dejó de esperar por timeout.
                 _ = completed.Exception;
             },

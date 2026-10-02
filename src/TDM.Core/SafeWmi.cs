@@ -25,28 +25,22 @@ public static class SafeWmi
     {
         try
         {
-            var options = new System.Management.EnumerationOptions
-            {
-                ReturnImmediately = false,
-                BlockSize = 100,
-                Timeout = timeout ?? TimeSpan.FromSeconds(15),
-                Rewindable = false
-            };
-
-            var searcher = string.IsNullOrWhiteSpace(scope)
-                ? new ManagementObjectSearcher(wql)
-                : new ManagementObjectSearcher(new ManagementScope(scope), new ObjectQuery(wql), options);
+            using var searcher = CreateSearcher(wql, scope, timeout);
+            using var collection = searcher.Get();
 
             var results = new List<T>();
-            foreach (ManagementObject obj in searcher.Get())
+            foreach (ManagementObject obj in collection)
             {
-                try
+                using (obj)
                 {
-                    results.Add(selector(obj));
-                }
-                catch
-                {
-                    // Ignorar objetos individuales que fallen
+                    try
+                    {
+                        results.Add(selector(obj));
+                    }
+                    catch
+                    {
+                        // Ignorar objetos individuales que fallen
+                    }
                 }
             }
             return results;
@@ -77,6 +71,40 @@ public static class SafeWmi
             throw;
         }
     }
+
+    /// <summary>
+    /// Namespace por defecto local equivalente al alcance implícito de
+    /// <c>new ManagementObjectSearcher(query)</c> (raíz local, CIMV2).
+    /// </summary>
+    internal const string DefaultScopePath = @"root\CIMV2";
+
+    /// <summary>
+    /// Opciones acotadas aplicadas a TODAS las búsquedas (doc oficial Microsoft:
+    /// learn.microsoft.com/dotnet/api/system.management.managementoptions.timeout y
+    /// .../enumerationoptions). <c>ReturnImmediately</c> gobierna la OPERACIÓN (modo
+    /// semisíncrono: <c>Get()</c> no bloquea hasta recibir todos los resultados) y
+    /// <c>Timeout</c> acota el recorrido de la COLECCIÓN durante la enumeración.
+    /// Con <c>ReturnImmediately = false</c> la operación misma quedaba sin acotar y
+    /// un proveedor WMI colgado bloqueaba el hilo para siempre.
+    /// </summary>
+    internal static System.Management.EnumerationOptions CreateOptions(TimeSpan? timeout) => new()
+    {
+        ReturnImmediately = true,
+        BlockSize = 100,
+        Timeout = timeout ?? TimeSpan.FromSeconds(15),
+        Rewindable = false
+    };
+
+    /// <summary>
+    /// Crea el searcher con las opciones acotadas en ambas ramas (con y sin
+    /// <c>scope</c>). Antes la rama sin alcance descartaba las opciones y perdía
+    /// el timeout (auditoría crítica FIX93, C1).
+    /// </summary>
+    internal static ManagementObjectSearcher CreateSearcher(string wql, string? scope, TimeSpan? timeout)
+        => new(
+            string.IsNullOrWhiteSpace(scope) ? DefaultScopePath : scope!,
+            wql,
+            CreateOptions(timeout));
 
     /// <summary>
     /// Ejecuta una query WMI y retorna la primera propiedad de tipo string.
@@ -145,7 +173,7 @@ public static class SafeWmi
     {
         try
         {
-            using var searcher = new ManagementObjectSearcher("SELECT Name FROM Win32_OperatingSystem");
+            using var searcher = CreateSearcher("SELECT Name FROM Win32_OperatingSystem", null, null);
             using var results = searcher.Get();
             return results.Count > 0;
         }

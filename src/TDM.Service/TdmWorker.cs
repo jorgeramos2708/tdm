@@ -33,7 +33,9 @@ public sealed class TdmWorker : BackgroundService
     private DateTimeOffset? _lastHeavySampleAt;
     private TimeSpan _lastSleepInterval = NormalInterval;
     private readonly object _snapshotSync = new();
-    private Task<SystemSnapshot>? _snapshotTask;
+    // C2 (auditoría crítica FIX93): single-flight con cosecha/abandono en lugar de la
+    // tarea cruda — un vuelo colgado nunca se re-awaitea para siempre ni se duplica.
+    private readonly SingleFlightCapture<SystemSnapshot> _snapshotFlights = new();
     private SystemSnapshot? _snapshot;
     private DateTimeOffset _snapshotCapturedAt;
     private DateTimeOffset _nextHeavyAt = DateTimeOffset.MinValue;
@@ -582,21 +584,16 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
         Task<SystemSnapshot> task;
         lock (_snapshotSync)
         {
-            if (_snapshotTask is { IsCompletedSuccessfully: true })
+            // Cosechar un vuelo terminado: el exitoso alimenta la caché y el fallido
+            // (Q1) queda observado y descartado para reintentar en este mismo ciclo.
+            var taken = _snapshotFlights.TryTakeCompleted();
+            if (taken is { IsCompletedSuccessfully: true } completed)
             {
-                _snapshot = _snapshotTask.Result;
+                _snapshot = completed.Result;
                 _snapshotCapturedAt = now;
-                _snapshotTask = null;
-            }
-            if (_snapshotTask is { IsCompleted: true })
-            {
-                // Q1: una captura fallida/cancelada nunca se reutiliza; se descarta aquí para
-                // reintentar en este mismo ciclo en vez de degradar crónicamente hasta reiniciar.
-                _snapshotTask = null;
             }
             if (_snapshot is not null && now - _snapshotCapturedAt < SnapshotRefresh) return _snapshot;
-            _snapshotTask ??= Task.Run(SystemSnapshotReader.Capture, CancellationToken.None);
-            task = _snapshotTask;
+            task = _snapshotFlights.Start(SystemSnapshotReader.Capture, SnapshotRefresh, now);
         }
 
         try
@@ -606,7 +603,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
             {
                 _snapshot = result;
                 _snapshotCapturedAt = DateTimeOffset.Now;
-                if (ReferenceEquals(_snapshotTask, task)) _snapshotTask = null;
+                _ = _snapshotFlights.TryTakeCompleted();
             }
             return result;
         }
@@ -614,6 +611,12 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
         {
             lock (_snapshotSync)
             {
+                // C2 (auditoría crítica FIX93): extender Q1 al timeout — el vuelo excedido
+                // se observa y se suelta para que el siguiente ciclo emita una captura
+                // fresca. Antes la tarea muerta se re-awaiteaba cada ciclo (+8 s) hasta
+                // degradar el servicio de forma permanente (TDM-SNAPSHOT-STALE) sin
+                // autorecuperación posible salvo reinicio.
+                _snapshotFlights.Abandon(task);
                 if (_snapshot is not null) return _snapshot;
             }
             throw new TimeoutException($"SystemSnapshotReader no terminó dentro de {SnapshotTimeout.TotalSeconds:0} s. La captura queda aislada y no se duplica.");
