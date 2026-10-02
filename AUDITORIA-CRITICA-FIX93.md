@@ -1,0 +1,174 @@
+# Auditoría de criticidad — TDM v1.0-rc18.21.0-FIX93 (tras Fase 17)
+
+**Fecha**: 01/10/2026 · **HEAD auditado**: `97bb496` (árbol limpio, gates 145/145 · 47/47 · 7/7 · publish 138968263).
+**Remediación**: Fase 17 (`9fb13a6`) corrigió **C1+C2+C3+H5**; gates tras la fase: 148/148 · 47/47 · 7/7 · publish 139013319.
+**Objetivo**: eliminar errores **críticos** que puedan alterar el funcionamiento y el objetivo principal de la herramienta (diagnóstico fiable de servidores Windows/TSplus: monitorización continua, detección, correlación, causa raíz, reportes sanearizados).
+**Método**: 5 agentes de exploración en paralelo (persistencia · diagnóstico/correlación · reporting/seguridad · concurrencia/ciclos · collectors) sobre ~48 000 líneas de `src/`, con **verificación manual** de todos los hallazgos CRITICAL y de los HIGH clave por parte del auditor principal. Cada hallazgo incluye evidencia (`archivo:línea`) y escenario concreto de fallo. Se cruzó contra las auditorías previas (`AUDITORIA-SENIOR-FIX93.md`, `AUDITORIA-EFECTIVIDAD.md`): **ninguno de los 7 críticos consta anteriormente**.
+
+**Recuento**: 7 CRITICAL (todos verificados manualmente ✓; **C1+C2+C3 corregidos en Fase 17**) · 10 HIGH (**H5 corregido en Fase 17**) · ~22 MEDIUM · ~4 LOW/LATENT.
+
+---
+
+## Resumen ejecutivo
+
+Los 7 críticos caen en 3 patrones que comparten raíz:
+
+1. **Tiempo de espera ilusorio en WMI** — `SafeWmi` construye un timeout de 15 s y lo descarta en el 100 % de los call sites reales; no acepta cancelación. Es el habilitador de las colgadas infinitas de los incisos 2-5.
+2. **Estados que avanzan antes que sus escrituras** — cursores, temporizadores y flags se persisten/avanzan antes (o sin) persistir los datos que cubren → pérdida **permanente** de evidencia tras un fallo transitorio o un reinicio.
+3. **El contrato de sanearización no cubre `Id`/`Componente` de causas ni nombres "desnudos"** — el bundle exportado y el HTML siguen llevando identidad real.
+
+Además, dos fallos **congelan la monitorización de forma permanente hasta reiniciar** (deadlock de `IncidentLedger`; snapshot de servicio nunca reemplazado).
+
+---
+
+## CRITICAL (7) — todos verificados ✓ en código
+
+### C1 — `SafeWmi.Query`: el timeout de 15 s se construye y se descarta; sin cancelación
+**Lugar**: `src\TDM.Core\SafeWmi.cs:28-41`
+```csharp
+var options = new EnumerationOptions { Timeout = timeout ?? TimeSpan.FromSeconds(15), ... };
+var searcher = string.IsNullOrWhiteSpace(scope)
+    ? new ManagementObjectSearcher(wql)              // ← options DESCARTADO
+    : new ManagementObjectSearcher(new ManagementScope(scope), new ObjectQuery(wql), options);
+foreach (ManagementObject obj in searcher.Get())     // sin ct, sin timeout
+```
+**Verificado**: ningún call site de los 6 existentes (`PrintingHealthCollector:254`, `SystemResourceCollector:56,115`, `SystemSnapshotReader:35`, `TsplusWindowsFunctionalDependencyCollector:248`, `WindowsCompatibilityProbeSource:87`) pasa `scope:` ni `timeout:` → todos caen en la rama sin opciones → timeout infinito por defecto. El método no recibe `CancellationToken`.
+**Escenario**: proveedor WMI colgado/repositorio dañado → `searcher.Get()` bloquea **para siempre**; ningún ciclo, gate ni cancelación lo desbloquea.
+**Es el habilitador de C2, C3, H5.** **Fix**: pasar `options` también en la rama sin `scope` y acotar la ejecución (hilo con `WaitAsync` + abandono observado, o `EnumerationOptions.Timeout` efectivo + reintentos acotados). → **corregido en Fase 17** (`9fb13a6`): `SafeWmi.CreateSearcher` aplica las opciones acotadas en **ambas** ramas (alcance por defecto `root\CIMV2`) con `ReturnImmediately = true` (doc. Microsoft: gobierna la OPERACIÓN, semisíncrona) y `Timeout` efectivo (acota el recorrido de la colección); searcher, colección y cada `ManagementObject` se disponen con `using`, e `IsAvailable` queda igualmente acotado. El acote de las tareas que rodean a la captura lo cubren C2/C3.
+
+### C2 — Servicio: una tarea de snapshot colgada jamás se reemplaza → degradación permanente
+**Lugar**: `src\TDM.Service\TdmWorker.cs:591-619`
+```csharp
+if (_snapshotTask is { IsCompleted: true }) _snapshotTask = null;   // sólo si COMPLETADA
+_snapshotTask ??= Task.Run(SystemSnapshotReader.Capture, CancellationToken.None);
+var result = await task.WaitAsync(SnapshotTimeout /*8s*/, ct);
+catch (TimeoutException) { if (_snapshot is not null) return _snapshot; throw ...; }  // NO limpia _snapshotTask
+```
+**Escenario A** (primer capture colgado, `_snapshot == null`): cada ciclo espera 8 s y lanza `TimeoutException` → `catch` genérico (`:349`) → estado `DEGRADED` **para siempre**: sin reportes, sin alertas.
+**Escenario B** (colgado tras un buen snapshot): pasado `SnapshotRefresh` (10 min) cada ciclo re-awaits **la misma tarea muerta** (+8 s/ciclo); a los 20 min `TDM-SNAPSHOT-STALE` permanente → `heavyIncomplete` → a los 40 min se borran `_lastHeavyPreventiveSignals` y **no se repueblan**: pérdida permanente de alertas preventivas (disco/memoria/TCP/certificados). **Sólo lo cura reiniciar el proceso.**
+**Fix**: en `TimeoutException`, marcar la tarea para descartarla (patrón Q1 de `:593` ya existe — extenderlo al timeout) y reemitir una captura fresca en el siguiente ciclo. → **corregido en Fase 17** (`9fb13a6`): `GetSystemSnapshotAsync` usa la nueva `SingleFlightCapture<T>` de `TDM.Core` — cosecha los vuelos terminados (el exitoso alimenta la caché; el fallido queda observado y descartado, Q1) y en `TimeoutException` ejecuta `Abandon(task)` (observa el vuelo y lo suelta) para reemitir una captura fresca en el siguiente ciclo.
+
+### C3 — GUI: el bucle forense abandona y **recrea** una tarea de snapshot cada minuto → fuga no acotada
+**Lugar**: `src\TDM.Gui.Avalonia\Services\IntegratedMonitoringService.cs:144-157`
+```csharp
+var runForensic = now >= _nextForensicStateAt;      // se avanza SÓLO en :161
+snapshot = await Task.Run(SystemSnapshotReader.Capture, CancellationToken.None)
+    .WaitAsync(TimeSpan.FromSeconds(8), ct);
+catch (TimeoutException) { return; }                // abandona la tarea, NO avanza _nextForensicStateAt
+```
+**Escenario**: con C1 activo (WMI colgado), cada tick de 1 min crea una tarea nueva que nunca termina: **60/h, 1 440/día** de tareas+hilos huérfanos con `CancellationToken.None`. Al saturar el thread pool, el bucle de 5 s deja de agendarse → **la monitorización se detiene lentamente**.
+**Fix**: no crear una nueva tarea mientras la previa siga viva (reutilizar/reintentar con alias), avanzar `_nextForensicStateAt` también en el timeout, y cancelar/abandonar observando la tarea. → **corregido en Fase 17** (`9fb13a6`): el bucle forense usa su propio single-flight (`GetForensicSnapshotAsync`): cosecha el vuelo que terminó tras un timeout anterior, conserva el pendiente en lugar de recrearlo, avanza `_nextForensicStateAt`/`_nextIntegrityStateAt` también en timeout, y sólo reemplaza un vuelo que no termina a los 4 min (observándolo); el monitor de 5 s aplica el mismo patrón con abandono a los 2 min en lugar del `??=` que re-awaiteaba la misma tarea muerta.
+
+### C4 — `IncidentLedger`: `ProcessGate` se adquiere ANTES del `try` → deadlock permanente del ledger
+**Lugar**: `src\TDM.Persistence\IncidentLedger.cs:73-75, 138` (idéntico en `:143-145` y `:157-159`)
+```csharp
+await ProcessGate.WaitAsync(ct);                        // :73  gate adquirido
+await using var processLock = await AcquireInterprocessLockAsync(ct);  // :74 ← PUEDE LANZAR
+try { ... } finally { ProcessGate.Release(); }          // :138  Release SÓLO dentro del finally del try
+```
+`AcquireInterprocessLockAsync` lanza `IOException` a los 5 s de contención interproceso (`:186`), `OperationCanceledException` (`:175,183`) o fallos de `Directory.CreateDirectory` (`:171`).
+**Escenario**: un solo fallo transitorio → `ProcessGate` (semáforo **estático** de 1 en 1) queda tomado para siempre → toda llamada posterior (`ReconcileAsync`/`AddNoteAsync`/`CloseAsync`) espera infinitamente → el ciclo del servicio (`TdmWorker:323/469`) o el bucle GUI (`IntegratedMonitoringService:279`, que además retiene `_captureGate`) **se cuelgan sin recuperación**.
+**Fix**: envolver `:74` dentro del `try` (o `Release` en un `finally` externo que sólo libere si el gate se tomó).
+
+### C5 — `HistoricalTelemetryStore`: lectura fallida tragada + rewrite en la primera llamada → 90 días de telemetría pueden borrarse
+**Lugar**: `src\TDM.Persistence\HistoricalTelemetryStore.cs:76-81, 120-126, 328-351, 396`
+```csharp
+// ReadHistoryAsync: catch (IOException) { } catch (UnauthorizedAccessException) { }  → devuelve [] SIN señal
+state.History = await ReadHistoryAsync(ct); state.Loaded = true;                      // primera carga
+// cleanup: state.LastCleanup == MinValue SIEMPRE true en la 1ª llamada →
+state.History = state.History.Where(...); await RewriteHistoryAsync(state.History);   // File.Move(tmp, path, true)
+```
+**Escenario**: primer ciclo con `historical-hourly.jsonl` bloqueado (AV/backup/OneDrive) → lectura tragada → lista vacía → el rewrite de limpieza **sobrescribe el archivo de 90 días con uno vacío**, de forma **irreversible** y con `Loaded=true` (nunca relee). Además la clase **no tiene lock interproceso**, y la misma raíz la escriben servicio y GUI (append vs rewrite → pérdida silenciosa).
+**Fix**: señal de fallo de lectura (flag `ReadFailed`) que desactive cleanup/rewrite en esa sesión; añadir lock de archivo como el resto de stores.
+
+### C6 — `IncrementalTsplusLogCollector`: cursor persistido sobre eventos que sólo viven en RAM
+**Lugar**: `src\TDM.Collectors.TSplus\IncrementalTsplusLogCollector.cs:207-223` (+ `:50`, `:301`)
+```csharp
+_offsets[candidate.Path] = previous + readResult.BytesConsumed;   // :207 cursor avanza sobre TODOS los bytes
+... queue.Enqueue(evt);                                           // :214 eventos → cola en memoria
+DrainPending(candidate.Path, events);                             // :218 drena con tope (_maxEvents-1 = 299)
+PersistCursorState(...);                                          // :223 persiste sólo _offsets (no _pendingEvents)
+```
+**Escenario**: fichero TSplus nuevo con tormenta de errores (varios miles de líneas en 256 KB) → el cursor salta al final del chunk y se persiste; sólo 299 eventos salen en el ciclo; el resto queda en `_pendingEvents`. **Reinicio del servicio/GUI** → `Prime()` limpia la cola y el offset ya está al final: **los miles de eventos restantes se pierden para siempre** y la cobertura pasa de `Parcial` (con backlog) a **`Disponible`** (falso "todo leído"). Pérdida directa de evidencia de fallos TSplus.
+**Fix**: persistir cursor sólo hasta el punto de los eventos realmente entregados (o serializar `_pendingEvents`), y no avanzar el offset sobre lo que queda en cola.
+
+### C7 — Identidad real en el bundle exportado: `Id`/`Componente` de causas RCA con usuario en claro
+**Lugar**: `src\TDM.Correlation\RootCauseCorrelator.Rules.IdentitySecurity.cs:28-29, 70-71, 116-117, 168` + `src\TDM.Reporting\SupportBundleSanitizer.cs:147-173, 303-328`
+```csharp
+nla ? $"ROOT-WINDOWS-NLA-CREDENTIALS-{user}" : $"ROOT-WINDOWS-CREDENTIAL-VALIDATION-{user}"   // :28  Id
+nla ? $"Windows NLA / credenciales / {user}" : ...                                            // :29  Componente
+// SanitizeCause: sanitizea Componente/Resumen/Explicacion/Evidencia/Solucion — NUNCA Id
+// SanitizeText: sólo formas etiquetadas ("Usuario: x", "DOM\x", rutas, SID, email, IP…) → "jsmith" suelto NO matchea
+```
+**Verificado además**: `ReportExporter.cs:23-50` exporta `safeReport = Sanitize(report)` a JSON (`:36`) y HTML (`:42`), por lo que ambos artefactos llevan `causasRaiz[].id = ROOT-WINDOWS-NLA-CREDENTIALS-jsmith` y encabezados `Windows NLA / credenciales / jsmith` **en claro**. Las claves `USER-REMOTE-LOGON-FAILURE-*`, `TSPLUS-PUBLISHED-APP-USER-*` y los SID en `hallazgos[].id` (`UserSessionProfileCollector:500-503, 219-276`) repiten el patrón (HIGH H8).
+**Impacto**: rompe el contrato acordado de sanearización/seudonimización en el artefacto principal que sale de la máquina.
+**Fix**: sanitizar `Id` en `SanitizeFinding`/`SanitizeCause` (o dejar de incrustar identidad en el `Id` en origen) y añadir detección de nombre suelto/dominio en `SanitizeText`.
+
+---
+
+## HIGH (10) — verificados o con evidencia de agente
+
+| # | Hallazgo | Lugar | Escenario |
+|---|---|---|---|
+| H1 | **Filtro de ventana con cultura actual** — `DateTimeOffset.TryParse(raw)` (sin cultura) contra escrituras `dd/MM/yyyy HH:mm:ss`; y fallo de parse ⇒ `return true` (hallazgo se conserva siempre) ✓ verificado | `TDM.Core\DiagnosticTimeWindow.cs:31,36` | En locale `en-US`/`InvariantCulture` (los tests fuerzan `InvariantCulture`): fechas ≤12 se interpretan al revés (hallazgo RDP/NLA **fuera** de ventana → descartado → causa NLA 98/91 nunca se crea); fechas ≥13 no parsean → hallazgos antiguos sobreviven a la ventana |
+| H2 | **Compacción sobre estado parcial sin lock interproceso** — lectura con IO tragada + `Rewrite` con sólo las muestras de esta sesión | `TDM.Persistence\ResourceTrendAnalyzer.cs:35,64-74,350-372` | Servicio+GUI sobre la misma raíz: la ventana de recursos (≈2 h) puede truncarse a vacío/parcial |
+| H3 | **Única escritura no atómica del módulo** — `WriteAllPlainTextAsync` in-place de `latest-report.json` (el resto usa temp+rename) | `TDM.Persistence\LocalStateStore.cs:418` | Corte de energía durante export → informe previo destruido (el lector tolera, degrada el diff) |
+| H4 | **Temporizadores forense/integridad avanzados antes de escribir + `catch {}` vacío en GUI** — un `IOException` de `.store.lock` descarta la muestra de 2 min/10 min **sin reintento ni log** | `IntegratedMonitoringService.cs:161-177`, `TdmWorker.cs:637-647,699-702` | Huecos permanentes en cobertura longitudinal ("Parcial") por contención ordinaria |
+| H5 | **`CollectorExecutionBoundary`: slots estáticos sin reaper + cancelación inútil** — 8 colgados (vía C1) ⇒ `CapacityException`/`StillRunning` **para siempre** | `TDM.Core\CollectorExecutionBoundary.cs:14-16,41-48,72-76` | Diagnósticos con resultados vacíos indefinidos sin autorecuperación → **corregido en Fase 17** (`9fb13a6`: la admisión retira los vuelos con más de 10 min sin completar; la continuación original queda protegida por `ReferenceEquals` y observa su excepción si termina) |
+| H6 | **Canal nuevo sin cursor ⇒ rastreo oldest-first sin ventana** — `loaded=true` siembra `cursor=0`, sin `RecordID` ni filtro temporal, 250 registros **más antiguos** por ciclo | `TDM.Collectors.Windows\IncrementalWindowsEventCollector.cs:84-90,127,187,191` | Upgrade que añade canal → cientos de ciclos antes de leer los eventos recientes (con cobertura "Parcial" declarada) |
+| H7 | **Fallos de enumeración reportados como "Disponible / Ninguno identificado"** — `catch` vacíos en escaneo de módulos/servicios + evento incondicional | `TDM.Collectors.Windows\ThirdPartyInterferenceCollector.cs:140-141,262,278,296` vs `DiagnosticCoverageAnalyzer.cs:306-311` | Sin admin: "0 módulos externos" y cobertura `Disponible` cuando no se pudo evaluar |
+| H8 | **Identidad en hallazgos** — `Id`/`Componente`/`Resumen` con usuario en claro (`Sanitize()` local sólo upper-casea) y SID en `Id`; claves de evidencia fuera de las tablas (`Equipo originador`, `Estación`, `Dominio detectado`, `Nombres internos Reverse Proxy`, `Asignación`…) | `UserSessionProfileCollector.cs:500-503,219-276`, `TsplusInternalConfigurationCollector.cs:380-387`, `SupportBundleSanitizer.cs:238-284` | El JSON/HTML seudonimiza `equipo` pero muestra host/dominio/cuenta reales en otras claves |
+| H9 | **`SaveLatestReportAsync` y settings**: rewrite de umbrales sanitizados con `catch { }` invisible | `SupportMonitoringSettings.cs:228-231` | El archivo en disco queda inválido sin que nadie lo sepa |
+| H10 | **ObservabilityStore `ReadAllUnsafeAsync` sin catch de IO** — tras append, la compactación aborta el ciclo completo (ajustes, ledger, notificaciones, heartbeat saltan) y el fichero no se compacta | `ObservabilityStore.cs:625-652` llamado desde `RecordAsync:172` | Pérdida de alertas por ciclo + crecimiento sin cota del fichero |
+
+---
+
+## MEDIUM (~22) — síntesis por área
+
+**Diagnóstico / causa raíz** (agente de correlación, evidencia en su informe):
+- `DiagnosticWorkflow.cs:25-49` — `Take(8)` **antes** del filtro `IMPACTO_DIRECTO_SIN_CAUSA_DEL_PARO`: con ≥8 entradas de impacto directo, `CausaRaizPrincipal = null` ("origen indeterminado") descartando causas reales calculadas en los puestos 9-12.
+- `VerifiedHistoryCalibrator.cs:45` + Ids compartidos (`ROOT-PROCESS-CRASH`, `ROOT-SCM-SERVICE-FAILURE`, `ROOT-DEPENDENCY-LOAD`): el ajuste ±15 de feedback "verificado" se atribuye a causas distintas → puede invertir `CausaRaizPrincipal`.
+- `Rules.Infrastructure.cs:452-498` — sólo la **última** falla de dependencia (`[^1]`) genera candidato; la dependencia que rompió la app puede no aparecer.
+- `RootCauseCorrelator.cs:94-143` vs `FunctionalImpactAnalyzer.cs:301-325` — el correlator afirma "detenido + impacto directo demostrado" para estados `*Pending`/manuales que el analizador de impacto excluye (contradicción en el mismo informe).
+- `DiagnosticPrecisionAnalyzer.cs:128,217-230` — la puntuación de precisión cuenta eventos **derivados por TDM** (`Fuente="TDM"`, p. ej. `TSPLUS_CRASH_LOOP_PATTERN`) como señales causales independientes → "ALTA/evidencia convergente" inflada.
+- `IncidentClusterAnalyzer.cs:~103` — clustering a codicia compara sólo contra el último evento del último grupo → una ráfaga A-B-A se parte en 3 incidentes (conteo/severidad agregada erróneos).
+
+**Collectors**:
+- `LightweightTsplusStateCollector.cs:212-235` — `probe.IsUnavailable` (AccessDenied/Error) colapsado a `"No presente"` → hecho falso "archivo ausente" (sus hermanos sí usan `Display`/`NO EVALUADO`).
+- `DiagnosticEngine.cs:187-191` — trim `MaxRawEvents=1500` **después** de persistir cursores por canal → eventos descartados con cobertura por canal aún "Disponible".
+- `WindowsEventCollector.cs:64-70,93-99` — 4625/4740/4771/4776 de Security → `Informativo`+`WINDOWS_EVENT` (el evento lo rescata `UserSessionProfileCollector`, pero **los hallazgos no se deduplican**: lockout de cuenta como Information).
+- `TsplusLogParser.cs:153-160` — cualquier línea que empiece por `"en "` se trata como frame de pila → mensajes legítimos en español se descartan/anexan.
+- `DependencyLoadEventCollector.cs:96` — `EventLogNotFoundException` sin marcador de cobertura (asimétrico con sus ramas hermanas).
+
+**Persistencia**: snapshot corrupto ⇒ ciclo sin transiciones (`LocalStateStore.cs:284-291` + `:57-59`, con canales no-durables sin fsync en `:68`); `catch (Exception)` gigante en `RecordAndEnrichAsync` acopla tendencias/histórico al fallo de un store (`StateReportIntegrator.cs:24-146`); errores semánticos de deserialización no cubiertos por `catch (JsonException)` (`IncidentLedger.cs:59` con `"id":null` ⇒ fallo repetido cada ciclo; `LocalStateStore.cs:248,264` con claves duplicadas).
+
+**Concurrencia/GUI**: heartbeat fuera de la barrera de excepciones con `catch` estrecho → puede parar el host (`TdmWorker.cs:348-371,739-742`); `Dispose` con `Wait(2s)` y dispose de gates aún en uso → `ObjectDisposedException` en cierre (`IntegratedMonitoringService.cs:518-527`); `LogService` check-then-act + `PersistAsync` fire-and-forget sin límite (`LogService.cs:56-76,102-124`); `LogsViewModel` refiltra O(N) y reconstruye 5 000 ítems por entrada **en el hilo UI** (`:146-210`) → congelación de la interfaz bajo ráfagas de log; `WindowsPushEventCollector.EnsureSubscribed` pone `_subscribed=true` antes de suscribirse → una excepción no contemplada desactiva el push **para siempre** (`:63-93`).
+
+**Seguridad/exports (MEDIUM)**: SID crudos en `hallazgos[].id`; baseline/history/observability persisten informe **sin sanear** (`StateSnapshotBuilder.cs:84`, `ObservabilityStore.cs:574-597`); pseudónimos `USR-xxxxxxxx` = SHA-256 sin sal (reidentificables por diccionario, `SupportBundleSanitizer.cs:363-373`); contraseña SMTP con DPAPI `LocalMachine` (`EmailNotificationSettings`).
+
+**LATENT (código muerto hoy)**: `TsplusStructuredLogSidecar` (`async void` de timer + semáforo con resultado descartado) — nunca instanciado; se vuelve CRITICAL si se cablea. `RdpEtwCollector` crea `EventListener` sin dispose alcanzable (neutralizado por `EnableRdpEtw=false` en todos los call sites actuales).
+
+---
+
+## Verificado y DESCARTADO (para no reabrir)
+
+- **XSS/inyección HTML en reportes**: no aplica — el único generador HTML usa `H()`=`WebUtility.HtmlEncode` en **todas** las interpolaciones dinámicas (`ReportExporter.cs:80`, verificado sink por sink); las URLs de `href` son constantes de compilación.
+- `Max()` sobre enums de severidad (ordinal correcto), división de score con guard `totalWeight<=0`, precedencia `is`/`&&`, recursión del grafo SCM (profundidad 4 + límite 320).
+- Mutaciones de `ObservableCollection` desde background: todas pasan por `Dispatcher.UIThread.Post`.
+- Excepciones de tareas no observadas: handlers globales en `TdmWorker.cs:754/762` y `App.axaml.cs:128/136`.
+- Reentrancia de ciclos: gates `WaitAsync(0)` en GUI, bucle secuencial en servicio.
+- Retención de `LocalStateStore` con desfase UTC/local: no borra antes (≤24 h de gracia), sin pérdida.
+- Dedup de transiciones con guardia de inversión; parser de logs con `TryParseExact` Invariant y resolución de ambigüedad.
+
+---
+
+## Plan de remediación propuesto (orden de ataque)
+
+1. **Fase 17 (C1+C2+C3+H5)** — cadena WMI/timeout: aplicar `options` en ambas ramas de `SafeWmi`, descartar/reemitir tareas colgadas en `TdmWorker` e `IntegratedMonitoringService`, avanzar temporizadores en timeout, reaper/`IsCompleted` para `CollectorExecutionBoundary`. *Objetivo: la monitorización nunca puede quedarse muerta.* **(✅ ejecutada — `9fb13a6`, gates 148/148 · 47/47 · 7/7 · publish 139013319)**
+2. **Fase 18 (C4+C5+H2+H3+H4)** — integridad de datos: `finally` global del `ProcessGate`, flag de lectura fallida en `HistoricalTelemetryStore` + lock interproceso, lock/compactación condicionada en `ResourceTrendAnalyzer`, write atómico de `latest-report.json`, temporizadores tras escritura exitosa.
+3. **Fase 19 (C6+H6)** — cursores: cursor TSplus acotado a lo entregado; canal nuevo sin cursor con ventana temporal desde el inicio.
+4. **Fase 20 (C7+H8)** — sanearización: `Id`/`Componente` en origen + `Id` en el sanitizador + claves de evidencia faltantes + SID en Ids de hallazgo.
+5. **Fase 21 (H1+diagnóstico MEDIUM)** — `TryParseExact` Invariant en `DiagnosticTimeWindow` (o fechas "O" en el origen), filtro de rol antes de `Take(8)`, exclusión de `Fuente="TDM"` en `IsCausalSignal`, Ids de candidato únicos.
+6. **MEDIUM/LOW** restantes por orden de costo.
+
+Cada fase: 3-5 tests behavior + gates completos (build 0/0 · Production · Parity · VERIFY · publish) + doble commit + anotación en las auditorías.
