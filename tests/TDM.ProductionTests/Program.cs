@@ -99,6 +99,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("WindowsEventRecoveryLookbackRestoresPersistedGap", WindowsEventRecoveryLookbackRestoresPersistedGap),
     ("WindowsEventRecoveryLookbackDisarmsAfterFirstCollect", WindowsEventRecoveryLookbackDisarmsAfterFirstCollect),
     ("TsplusCursorKeepsOffsetAfterAppend", TsplusCursorKeepsOffsetAfterAppend),
+    ("TsplusBacklogSurvivesRestartWithoutCursorLoss", TsplusBacklogSurvivesRestartWithoutCursorLoss),
+    ("WindowsEventNewChannelStartsWithRecentWindow", WindowsEventNewChannelStartsWithRecentWindow),
     ("WindowsEventGapRecoveryIsWiredInWorker", WindowsEventGapRecoveryIsWiredInWorker),
     ("WindowsEventBaseCoverageCountsMissingChannelAsPartial", WindowsEventBaseCoverageCountsMissingChannelAsPartial),
     ("ExportRendersBaseWindowsEventCoverage", ExportRendersBaseWindowsEventCoverage),
@@ -1852,6 +1854,94 @@ static async Task TsplusCursorKeepsOffsetAfterAppend()
         TryDelete(dir);
         TryDelete(stateRoot);
     }
+}
+
+static async Task TsplusBacklogSurvivesRestartWithoutCursorLoss()
+{
+    var dir = TempDir();
+    var stateRoot = TempDir();
+    var prior = Environment.GetEnvironmentVariable("TDM_STATE_ROOT");
+    try
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", stateRoot);
+        var install = Path.Combine(dir, "TSplus");
+        var logDir = Path.Combine(install, "Clients", "www", "cgi-bin");
+        Directory.CreateDirectory(logDir);
+        var logPath = Path.Combine(logDir, "hb.log");
+        // Tormenta de errores más grande que la entrega de un ciclo (tope por defecto 299):
+        // el remanente queda como backlog y el cursor debe seguir al inicio del chunk.
+        var lines = Enumerable.Range(0, 400).Select(i => $"ERROR connection refused storm-{i}").ToList();
+        lines.Add("ERROR disk full TSPLUS-C6-MARKER");
+        await File.WriteAllTextAsync(logPath, string.Join('\n', lines) + "\n");
+
+        var creation = new FileInfo(logPath).CreationTimeUtc.Ticks;
+        var emptyHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Array.Empty<byte>())).ToLowerInvariant();
+        var cursor = new TsplusCursorFixture(new Dictionary<string, TsplusFileCursorFixture>
+        {
+            [logPath] = new TsplusFileCursorFixture(0, creation, string.Empty, emptyHash)
+        }, DateTimeOffset.Now);
+        True(CollectorCursorStore.TrySave("tsplus-log-cursors", cursor, out var saveError), "No se guardó el cursor TSplus: " + saveError);
+
+        // Sesión 1: entrega acotada; el marcador queda pendiente y NO debe darse por leído.
+        var session1 = new IncrementalTsplusLogCollector();
+        session1.Prime(install);
+        var first = await session1.CollectAsync(new DiagnosticContext(Snapshot() with { TsplusRuta = install }, TimeSpan.FromHours(1)));
+        True(first.Eventos.Any(e => e.Mensaje.Contains("storm-", StringComparison.Ordinal)),
+            "La tormenta inicial no se entregó parcialmente: el tope de drenaje dejó de funcionar.");
+        False(first.Eventos.Any(e => e.Mensaje.Contains("TSPLUS-C6-MARKER", StringComparison.Ordinal)),
+            "El marcador debía quedar como backlog en la primera muestra.");
+        True(first.Eventos.Any(e => e.Tipo == "TSPLUS_INCREMENTAL_LOG_COVERAGE"
+                && e.Evidencia?.Any(i => i.Clave == "Cobertura" && i.Valor == "Parcial") == true),
+            "El backlog de la tormenta no se declaró como cobertura Parcial.");
+
+        // Reinicio: el cursor persistido debe seguir al INICIO del chunk (commit sólo al
+        // drenar). Con el commit prematuro previo avanzaba al fin del archivo y el remanente
+        // de la tormenta se perdía para siempre.
+        var session2 = new IncrementalTsplusLogCollector();
+        session2.Prime(install);
+        var secondA = await session2.CollectAsync(new DiagnosticContext(Snapshot() with { TsplusRuta = install }, TimeSpan.FromHours(1)));
+        var secondB = await session2.CollectAsync(new DiagnosticContext(Snapshot() with { TsplusRuta = install }, TimeSpan.FromHours(1)));
+
+        True(secondA.Eventos.Any(e => e.Mensaje.Contains("storm-", StringComparison.Ordinal)),
+            "C6: tras reiniciar el cursor avanzó sobre eventos aún en cola y la tormenta no se releyó.");
+        True(secondA.Eventos.Concat(secondB.Eventos).Any(e => e.Mensaje.Contains("TSPLUS-C6-MARKER", StringComparison.Ordinal)),
+            "C6: el remanente del backlog se perdió tras el reinicio (cursor avanzó sobre lo no entregado).");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("TDM_STATE_ROOT", prior);
+        TryDelete(dir);
+        TryDelete(stateRoot);
+    }
+}
+
+static Task WindowsEventNewChannelStartsWithRecentWindow()
+{
+    var filter = "*[System[(EventID=7000 or EventID=7001)]]";
+    var window = TimeSpan.FromMinutes(15);
+
+    var withCursor = IncrementalWindowsEventCollector.ComposeCycleFilter(filter, 42, window);
+    True(withCursor.Contains("EventRecordID > 42", StringComparison.Ordinal),
+        "Con cursor el XPath dejó de usar el bookmark oficial EventRecordID > cursor.");
+    False(withCursor.Contains("timediff", StringComparison.Ordinal),
+        "Con cursor persistido no debe aplicarse ventana temporal.");
+
+    var newChannel = IncrementalWindowsEventCollector.ComposeCycleFilter(filter, 0, window);
+    True(newChannel.Contains("TimeCreated[timediff(@SystemTime) <= 900000]", StringComparison.Ordinal),
+        "Un canal sin cursor no arrancó con la ventana temporal oficial de 15 min.");
+    True(newChannel.Contains("EventID=7000", StringComparison.Ordinal),
+        "La ventana inicial descartó el filtro propio del canal.");
+    False(newChannel.Contains("EventRecordID", StringComparison.Ordinal),
+        "Un canal sin cursor no debe fabricar un EventRecordID inexistente.");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del cableado H6 no ejecutable.");
+    var source = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "IncrementalWindowsEventCollector.cs"));
+    True(source.Contains("ComposeCycleFilter(channel.Filter, cursor, InitialChannelWindow)", StringComparison.Ordinal),
+        "El ciclo continuo no compone el XPath con la ventana inicial de canal sin cursor.");
+    False(source.Contains("replayAfterReset ? AppendRecentWindow", StringComparison.Ordinal),
+        "Se conservó el ensamblaje de XPath condicional previo al fix H6.");
+    return Task.CompletedTask;
 }
 
 static Task WindowsEventGapRecoveryIsWiredInWorker()

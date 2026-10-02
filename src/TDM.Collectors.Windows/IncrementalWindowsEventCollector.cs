@@ -7,7 +7,10 @@ using TDM.Models;
 namespace TDM.Collectors.Windows;
 
 /// <summary>
-/// Lee únicamente registros creados después del último RecordId observado.
+/// Lee únicamente registros creados después del último RecordId observado (bookmark oficial
+/// EventRecordID > cursor: https://learn.microsoft.com/en-us/windows/win32/wes/bookmarking-events).
+/// Un canal sin cursor persistido (recién añadido en un upgrade o con estado durable ilegible)
+/// arranca con una ventana temporal reciente en lugar de barrer la historia completa.
 /// Se activa sólo cuando existe una sesión de diagnóstico continuo.
 /// </summary>
 public sealed class IncrementalWindowsEventCollector : IReadOnlyCollector
@@ -23,6 +26,13 @@ public sealed class IncrementalWindowsEventCollector : IReadOnlyCollector
     private DateTimeOffset? _lastSuccessUtc;
     private bool _gapDeclared;
     private bool _firstCollectStarted;
+
+    // H6: ventana inicial de un canal sin cursor. Misma ventana de replay (15 min) y mismo
+    // subconjunto XPath oficial TimeCreated[timediff(@SystemTime) <= ms] documentado por
+    // Microsoft (https://learn.microsoft.com/en-us/windows/win32/wes/consuming-events):
+    // acota la primera lectura de un canal nuevo a lo reciente en lugar de partir desde el
+    // registro más antiguo (hasta 250/ciclo y los eventos recientes tardarían cientos de ciclos).
+    private static readonly TimeSpan InitialChannelWindow = TimeSpan.FromMinutes(15);
 
     private sealed record WindowsCursorState(
     Dictionary<string, long> Cursors,
@@ -184,8 +194,11 @@ public void Prime()
                     Capa: channel.Layer));
                 gapDeclaredNow = true;
             }
-            var baseFilter = replayAfterReset ? AppendRecentWindow(channel.Filter, TimeSpan.FromMinutes(15)) : channel.Filter;
-            var xpath = AppendCursor(baseFilter, cursor);
+            // H6: con cursor>0 el XPath es sólo el bookmark oficial EventRecordID > cursor; sin
+            // cursor (canal nuevo tras upgrade, replay tras discontinuidad o estado ilegible) se
+            // aplica la ventana temporal reciente — la misma que en replay — para no leer la
+            // historia completa del canal desde el registro más antiguo.
+            var xpath = ComposeCycleFilter(channel.Filter, cursor, InitialChannelWindow);
             try
             {
                 var query = new EventLogQuery(channel.Name, PathType.LogName, xpath) { ReverseDirection = false };
@@ -677,6 +690,18 @@ public void Prime()
             ? $"*[System[(EventRecordID > {cursor})]]"
             : $"*[System[(EventRecordID > {cursor}) and ({inner})]]";
     }
+
+    /// <summary>
+    /// XPath del ciclo para un canal (H6): con cursor (bookmark persistido) sólo
+    /// EventRecordID &gt; cursor; sin cursor (canal nuevo, replay o estado ilegible) ventana
+    /// temporal reciente con el subconjunto XPath oficial TimeCreated[timediff(@SystemTime)
+    /// &lt;= ms] de Microsoft (https://learn.microsoft.com/en-us/windows/win32/wes/consuming-events).
+    /// Puro y pineado por tests.
+    /// </summary>
+    public static string ComposeCycleFilter(string channelFilter, long cursor, TimeSpan recentWindow)
+        => cursor <= 0
+            ? AppendRecentWindow(channelFilter, recentWindow)
+            : AppendCursor(channelFilter, cursor);
 
     /// <summary>
     /// Texto de cobertura con contabilidad de pérdida: registros leídos y rango

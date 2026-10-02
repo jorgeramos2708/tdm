@@ -5,8 +5,14 @@ using TDM.Models;
 namespace TDM.Collectors.TSplus;
 
 /// <summary>
-    /// Lector incremental de logs TSplus. El cursor avanza únicamente por bytes realmente consumidos.
-    /// Si una ráfaga excede los presupuestos, el remanente queda como backlog para muestras posteriores.
+    /// Lector incremental de logs TSplus. El cursor avanza únicamente por bytes realmente consumidos
+    /// y sólo se compromete (commit) cuando todos los eventos del chunk salieron de la cola de
+    /// entrega: si TDM se reinicia con backlog, el chunk se relee en vez de saltárselo (replay
+    /// acotado a un chunk, duplicados posibles, cero pérdida). Si una ráfaga excede los
+    /// presupuestos, el remanente queda como backlog para muestras posteriores. Los logs TSplus
+    /// (hb.log, APSC.log, svcenterprise.log, AdminTool.log, C:\wsession\trace) son los logs de
+    /// troubleshooting oficiales del producto (https://docs.tsplus.net/tsplus/advanced-features-logs):
+    /// su contenido es la evidencia con la que se diagnostican los errores, por eso nunca se descarta.
     /// </summary>
     public sealed class IncrementalTsplusLogCollector : IReadOnlyCollector
     {
@@ -24,6 +30,10 @@ namespace TDM.Collectors.TSplus;
     private readonly Dictionary<string, string> _partialLines = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, long> _creationTicks = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Queue<DiagnosticEvent>> _pendingEvents = new(StringComparer.OrdinalIgnoreCase);
+    // C6: commit diferido del cursor. El avance de offset detectado en la lectura se guarda aquí
+    // y sólo se compromete en _offsets/_partialLines cuando la cola de eventos del chunk quedó
+    // vacía (todo entregado). Ver CommitStagedLocked / DrainPending.
+    private readonly Dictionary<string, StagedCommit> _staged = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<TsplusLogSource> _sources = [];
     private string? _cursorPersistenceWarning;
     private TsplusLogDiscoveryResult? _discovery;
@@ -37,6 +47,7 @@ namespace TDM.Collectors.TSplus;
     private long _maxNewBytesPerFile = DefaultMaxNewBytesPerFile;
     private long _maxNewBytesPerCycle = DefaultMaxNewBytesPerCycle;
 
+    private sealed record StagedCommit(long Offset, string PartialLine);
     private sealed record FileCursorState(long Offset, long CreationUtcTicks, string PartialLine, string FileHash);
     private sealed record TsplusCursorState(Dictionary<string, FileCursorState> Files, DateTimeOffset SavedAt);
 
@@ -48,6 +59,7 @@ namespace TDM.Collectors.TSplus;
             _partialLines.Clear();
             _creationTicks.Clear();
             _pendingEvents.Clear();
+            _staged.Clear();
             _discovery = TsplusLogDiscovery.DiscoverDetailed(installPath);
             _sources = _discovery.Sources;
             _lastDiscovery = DateTimeOffset.Now;
@@ -174,6 +186,7 @@ namespace TDM.Collectors.TSplus;
                     _creationTicks[candidate.Path] = creationTicks;
                     _partialLines.Remove(candidate.Path);
                     _pendingEvents.Remove(candidate.Path);
+                    _staged.Remove(candidate.Path);
                 }
             }
             else if (knownCreation == 0)
@@ -204,9 +217,15 @@ namespace TDM.Collectors.TSplus;
 
             lock (_sync)
             {
-                _offsets[candidate.Path] = previous + readResult.BytesConsumed;
-                if (string.IsNullOrEmpty(readResult.PartialLine)) _partialLines.Remove(candidate.Path);
-                else _partialLines[candidate.Path] = readResult.PartialLine;
+                // C6: NO se avanza _offsets aquí. El avance (previous + bytes consumidos) se guarda
+                // en staged y sólo se compromete en CommitStaged cuando la cola de eventos del chunk
+                // queda vacía (DrainPending entregó todo). Mientras queden eventos sin entregar, el
+                // offset persistido sigue apuntando al inicio del chunk: si TDM se reinicia, Prime
+                // relee el chunk completo (replay acotado a un chunk de ≤256 KiB; duplicados posibles,
+                // pérdida cero) en lugar de saltárselo como hacía el commit prematuro. El estado
+                // parcial previo (_partialLines) se conserva hasta el commit para que la relectura
+                // reproduzca exactamente la misma salida del primer intento (replay consistente).
+                _staged[candidate.Path] = new StagedCommit(previous + readResult.BytesConsumed, readResult.PartialLine);
                 if (readResult.Events.Count > 0)
                 {
                     if (!_pendingEvents.TryGetValue(candidate.Path, out var queue))
@@ -297,11 +316,26 @@ namespace TDM.Collectors.TSplus;
     {
         lock (_sync)
         {
-            if (!_pendingEvents.TryGetValue(path, out var queue)) return;
-            while (queue.Count > 0 && output.Count < _maxEvents - 1)
-                output.Add(queue.Dequeue());
-            if (queue.Count == 0) _pendingEvents.Remove(path);
+            if (_pendingEvents.TryGetValue(path, out var queue))
+            {
+                while (queue.Count > 0 && output.Count < _maxEvents - 1)
+                    output.Add(queue.Dequeue());
+                if (queue.Count > 0) return;
+                _pendingEvents.Remove(path);
+            }
+            // C6: la cola del chunk quedó vacía (todos sus eventos fueron entregados en esta
+            // muestra): sólo ahora se compromete el cursor. Si aún quedan eventos en cola,
+            // se sale sin commit para que PersistCursorState conserve el offset anterior.
+            CommitStagedLocked(path);
         }
+    }
+
+    private void CommitStagedLocked(string path)
+    {
+        if (!_staged.Remove(path, out var staged)) return;
+        _offsets[path] = staged.Offset;
+        if (string.IsNullOrEmpty(staged.PartialLine)) _partialLines.Remove(path);
+        else _partialLines[path] = staged.PartialLine;
     }
 
     private int PendingCount(string path)
