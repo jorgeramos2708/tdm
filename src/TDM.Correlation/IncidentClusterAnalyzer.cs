@@ -100,11 +100,27 @@ public static class IncidentClusterAnalyzer
             // ambas señales traen identidad conocida y distinta (servicio/usuario/host distintos
             // = incidentes distintos aunque coincidan en ventana). Sin identidad en alguna se
             // conserva la regla temporal para no fragmentar evidencia parcial.
-            if (groups.Count == 0 || signal.Timestamp!.Value - groups[^1][^1].Timestamp!.Value > ClusterGap ||
-                !SameDomain(groups[^1][^1], signal) || DistinctIdentity(groups[^1][^1], signal))
-                groups.Add([signal]);
+            // MEDIUM Fase 22: la señal se evalúa contra los incidentes EXISTENTES dentro de la
+            // ventana, no sólo contra el último grupo (Microsoft, "Alert correlation and incident
+            // merging": la alerta se añade a un incidente existente "within a particular time
+            // frame" — defender-xdr/alerts-incidents-correlation). Comparar sólo con el último
+            // grupo partía una ráfaga A-B-A en 3 incidentes con conteo/severidad agregados mal.
+            // Se recorre de atrás hacia delante y se une al grupo más reciente que encaje
+            // (hueco ≤5 min + mismo dominio + identidad compatible); si ninguno, grupo nuevo.
+            var target = -1;
+            for (var i = groups.Count - 1; i >= 0; i--)
+            {
+                if (signal.Timestamp!.Value - groups[i][^1].Timestamp!.Value > ClusterGap) continue;
+                if (SameDomain(groups[i][^1], signal) && !DistinctIdentity(groups[i][^1], signal))
+                {
+                    target = i;
+                    break;
+                }
+            }
+            if (target >= 0)
+                groups[target].Add(signal);
             else
-                groups[^1].Add(signal);
+                groups.Add([signal]);
         }
 
         return groups.Select(BuildCluster).ToList();

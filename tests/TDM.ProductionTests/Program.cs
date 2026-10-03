@@ -179,7 +179,10 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("TimeWindowParsesExactFormatsWithoutCulture", TimeWindowParsesExactFormatsWithoutCulture),
     ("TdmSourcedEventsAreNotCausalSignals", TdmSourcedEventsAreNotCausalSignals),
     ("SaturatedDirectImpactStillElectsCausalPrimary", SaturatedDirectImpactStillElectsCausalPrimary),
-    ("CrashAndDependencyCandidateIdsAreUnique", CrashAndDependencyCandidateIdsAreUnique)
+    ("CrashAndDependencyCandidateIdsAreUnique", CrashAndDependencyCandidateIdsAreUnique),
+    ("EachFailingDependencyGetsItsOwnCandidate", EachFailingDependencyGetsItsOwnCandidate),
+    ("PendingAndManualStopsDoNotClaimDirectImpact", PendingAndManualStopsDoNotClaimDirectImpact),
+    ("InterleavedBurstKeepsSharedIncidentTogether", InterleavedBurstKeepsSharedIncidentTogether)
 };
 
 var failed = 0;
@@ -4509,6 +4512,75 @@ static Task CrashAndDependencyCandidateIdsAreUnique()
     Equal(crashes[0].Id, adjusted[0].Id, "El candidato confirmado no encabezó el ranking.");
     Equal(85, adjusted[0].Puntaje, "El ajuste +15 no se aplicó al Id único confirmado.");
     Equal(72, adjusted[1].Puntaje, "El historial de otra aplicación alteró el puntaje de este candidato.");
+    return Task.CompletedTask;
+}
+
+static Task EachFailingDependencyGetsItsOwnCandidate()
+{
+    var now = DateTimeOffset.Now;
+    DiagnosticEvent Dep(string dll, DateTimeOffset at) => new(at, "SideBySide", "tsplus", DiagnosticLayer.Tsplus,
+        DiagnosticSeverity.Error, "DEPENDENCY_LOAD_FAILURE", $"No se pudo cargar {dll}",
+        Evidencia: [new EvidenceItem("Dependencia detectada", dll), new EvidenceItem("Clasificación de dependencia", "TSPLUS")],
+        Producto: TsplusProduct.RemoteAccess);
+
+    var candidates = RootCauseCorrelator.Analyze(Report(
+        [Dep("alpha.dll", now.AddMinutes(-6)), Dep("beta.dll", now.AddMinutes(-4))], now));
+    True(candidates.Any(c => c.Id.Equals("ROOT-DEPENDENCY-LOAD-ALPHADLL", StringComparison.OrdinalIgnoreCase)),
+        "La primera dependencia fallida no generó su propio candidato (sólo se candidataba la última).");
+    True(candidates.Any(c => c.Id.Equals("ROOT-DEPENDENCY-LOAD-BETADLL", StringComparison.OrdinalIgnoreCase)),
+        "La última dependencia fallida dejó de generar candidato.");
+    return Task.CompletedTask;
+}
+
+static Task PendingAndManualStopsDoNotClaimDirectImpact()
+{
+    var now = DateTimeOffset.Now;
+    DiagnosticEvent State(string service, string estado, string? inicio = null, string? presentacion = null)
+    {
+        List<EvidenceItem> ev =
+        [
+            new("Servicio", service),
+            new("Nombre visible", service),
+            new("Estado", estado)
+        ];
+        if (inicio is not null) ev.Add(new EvidenceItem("Inicio", inicio));
+        if (presentacion is not null) ev.Add(new EvidenceItem("Estado presentación", presentacion));
+        return new DiagnosticEvent(now.AddMinutes(-2), "Service Control Manager", "Remote Access",
+            DiagnosticLayer.Tsplus, DiagnosticSeverity.Critico, "SERVICE_STATE", $"Estado actual: {estado}",
+            Evidencia: ev, Producto: TsplusProduct.RemoteAccess);
+    }
+
+    var candidates = RootCauseCorrelator.Analyze(Report(
+        [
+            State("GatewayAgent", "StopPending"),
+            State("ManualHelper", "Stopped", inicio: "Manual", presentacion: "No requerido (inicio manual)"),
+            State("CoreWorker", "Stopped")
+        ], now));
+    True(candidates.Any(c => c.Id.Equals("ROOT-TSPLUS-SERVICE-STOPPED-COREWORKER", StringComparison.OrdinalIgnoreCase)),
+        "Un servicio detenido normal dejó de generar candidato de impacto directo.");
+    False(candidates.Any(c => c.Id.Equals("ROOT-TSPLUS-SERVICE-STOPPED-GATEWAYAGENT", StringComparison.OrdinalIgnoreCase)),
+        "Un estado StopPending (transición del SCM) afirmó impacto directo demostrado, contradiciendo al analizador de impacto.");
+    False(candidates.Any(c => c.Id.Equals("ROOT-TSPLUS-SERVICE-STOPPED-MANUALHELPER", StringComparison.OrdinalIgnoreCase)),
+        "Un servicio Manual 'No requerido' detenido afirmó impacto directo demostrado, contradiciendo al analizador de impacto.");
+    return Task.CompletedTask;
+}
+
+static Task InterleavedBurstKeepsSharedIncidentTogether()
+{
+    var now = DateTimeOffset.Now;
+    static DiagnosticEvent Agent(DateTimeOffset at) => new(at, "SCM", "TsplusAgent", DiagnosticLayer.Tsplus,
+        DiagnosticSeverity.Error, "SERVICE_STATE", "Estado actual: Stopped",
+        Evidencia: [new EvidenceItem("Servicio", "TsplusAgent"), new EvidenceItem("Estado", "Stopped")],
+        Producto: TsplusProduct.RemoteAccess);
+    var wmi = new DiagnosticEvent(now.AddMinutes(-4), "WMI", "WMI", DiagnosticLayer.Windows,
+        DiagnosticSeverity.Critico, "WMI_EVENT_INCREMENTAL", "0x80041032");
+
+    var clusters = IncidentClusterAnalyzer.Analyze(Report(
+        [Agent(now.AddMinutes(-5)), wmi, Agent(now.AddMinutes(-3))], now));
+    Equal(2, clusters.Count,
+        "La ráfaga A-B-A se partió en 3 incidentes al comparar sólo contra el último grupo.");
+    var agent = clusters.Single(c => c.Dominio == "TSPLUS_REMOTE_ACCESS");
+    Equal(2, agent.Senales, "Las señales del mismo servicio no quedaron en un solo incidente.");
     return Task.CompletedTask;
 }
 

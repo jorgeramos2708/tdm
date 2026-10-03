@@ -458,14 +458,39 @@ public static partial class RootCauseCorrelator
             .OrderBy(e => e.Timestamp)
             .ToList();
 
-        if (dependencyErrors.Count > 0)
+        if (dependencyErrors.Count == 0) return;
+
+        // MEDIUM Fase 22: sólo la última falla ([^1]) generaba candidato y la dependencia que
+        // realmente rompió la app podía no aparecer. Cada dependencia fallida es un hecho con
+        // identidad propia —el manifest describe cada dependentAssembly con su assemblyIdentity
+        // (Microsoft, "Assembly Manifests": windows/win32/sbscs/assembly-manifests)—, así que
+        // se candidata una por identidad de dependencia (máx. 3, las más recientes, como la
+        // regla SCM), eligiendo dentro de cada grupo el fallo con crash emparejado si existe.
+        var representatives = new List<DiagnosticEvent>();
+        foreach (var group in dependencyErrors.GroupBy(
+            dep => SafeDependencyId(EvidenceValue(dep, "Originador específico")
+                                    ?? EvidenceValue(dep, "Dependencia detectada")
+                                    ?? dep.Componente
+                                    ?? "DEPENDENCY"),
+            StringComparer.OrdinalIgnoreCase))
         {
-            var dep = dependencyErrors[^1];
+            DiagnosticEvent? withCrash = null;
+            foreach (var dep in group)
+            {
+                if (ClosestPairedCrash(dep, tsplusCrashEvents) is not null) withCrash = dep;
+            }
+            representatives.Add(withCrash ?? group.Last());
+        }
+
+        foreach (var dep in representatives
+            .OrderByDescending(e => e.Timestamp)
+            .Take(3)
+            .OrderBy(e => e.Timestamp))
+        {
             var dependencyName = EvidenceValue(dep, "Dependencia detectada") ?? dep.Componente;
             // U2: el crash emparejado debe ser del mismo producto (o sin producto asignado);
             // antes, la dependencia de A se validaba con el crash de B si coincidían en 3 min.
-            var pairedCrash = tsplusCrashEvents.LastOrDefault(c => IsClose(dep, c, TimeSpan.FromMinutes(3))
-                && (c.Producto == dep.Producto || c.Producto == TsplusProduct.Ninguno || dep.Producto == TsplusProduct.Ninguno));
+            var pairedCrash = ClosestPairedCrash(dep, tsplusCrashEvents);
             var score = pairedCrash is null ? 84 : 93;
             // X2: sin crash emparejado no hay doble fuente; Media (el veto P15/R1 impide que un
             // 84/Media solitario se declare causa principal).
@@ -498,4 +523,8 @@ public static partial class RootCauseCorrelator
         }
 
     }
+
+    private static DiagnosticEvent? ClosestPairedCrash(DiagnosticEvent dep, IReadOnlyList<DiagnosticEvent> tsplusCrashEvents)
+        => tsplusCrashEvents.LastOrDefault(c => IsClose(dep, c, TimeSpan.FromMinutes(3))
+            && (c.Producto == dep.Producto || c.Producto == TsplusProduct.Ninguno || dep.Producto == TsplusProduct.Ninguno));
 }

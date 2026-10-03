@@ -301,28 +301,42 @@ public static class FunctionalImpactAnalyzer
     private static readonly string[] TransientServiceStates =
         ["StartPending", "StopPending", "PausePending", "ContinuePending"];
 
+    /// <summary>
+    /// Estado de servicio que demuestra una interrupción operativa. Compartido con
+    /// RootCauseCorrelator: un único predicado impide que el mismo informe afirme
+    /// "impacto directo demostrado" en correlación mientras FunctionalImpactAnalyzer lo niega.
+    /// Los estados *Pending son transiciones del SCM, no interrupciones demostradas (Microsoft,
+    /// "Service State Transitions": el *Pending sigue a una orden y precede al estado final
+    /// — windows/win32/services/service-status-transitions); Running no es falla; y un servicio
+    /// Manual/Trigger "No requerido" detenido está en su estado normal (Microsoft, Win32_Service:
+    /// StartMode Manual sólo arranca cuando un proceso llama a StartService o un usuario inicia
+    /// sesión — windows/win32/cimwin32prov/win32-service).
+    /// </summary>
+    internal static bool DemonstratesServiceInterruption(DiagnosticEvent e)
+    {
+        var state = Evidence(e, "Estado") ?? string.Empty;
+        // P16: los estados *Pending son transitorios del SCM, no interrupciones demostradas.
+        if (TransientServiceStates.Contains(state, StringComparer.OrdinalIgnoreCase)) return false;
+        if (state.Equals("Running", StringComparison.OrdinalIgnoreCase)) return false;
+        // P1-03: filtrar servicios Manual/Trigger detenidos que no son fallas operativas.
+        // Usamos "Estado presentación" (si disponible) o "Inicio" para determinar si el servicio
+        // debería estar corriendo. Un servicio Manual/Trigger detenido no es una falla operativa.
+        var presentation = Evidence(e, "Estado presentación") ?? string.Empty;
+        var startMode = Evidence(e, "Inicio") ?? string.Empty;
+        var isManualOrTrigger = startMode.Equals("Manual", StringComparison.OrdinalIgnoreCase)
+                             || startMode.Equals("Trigger", StringComparison.OrdinalIgnoreCase);
+        var isNotRequired = presentation.Contains("No requerido", StringComparison.OrdinalIgnoreCase)
+                         || presentation.Contains("No required", StringComparison.OrdinalIgnoreCase);
+        return !(isManualOrTrigger && isNotRequired);
+    }
+
     private static void AddDirectServiceStateImpact(DiagnosticReport report, List<FunctionalImpactItem> items)
     {
         foreach (var state in report.Eventos
             .Where(e => e.Tipo.Equals("SERVICE_STATE", StringComparison.OrdinalIgnoreCase))
             .Where(e => e.Producto == TsplusProduct.RemoteAccess)
             .Where(e => e.Severidad is DiagnosticSeverity.Error or DiagnosticSeverity.Critico)
-            // P16: los estados *Pending son transitorios del SCM, no interrupciones demostradas.
-            .Where(e => !TransientServiceStates.Contains(Evidence(e, "Estado") ?? string.Empty, StringComparer.OrdinalIgnoreCase))
-            .Where(e => !string.Equals(Evidence(e, "Estado"), "Running", StringComparison.OrdinalIgnoreCase))
-            // P1-03: Filtrar servicios Manual/Trigger detenidos que no son fallas operativas.
-            // Usamos "Estado presentación" (si disponible) o "Inicio" para determinar si el servicio
-            // debería estar corriendo. Un servicio Manual/Trigger detenido no es una falla operativa.
-            .Where(e =>
-            {
-                var presentation = Evidence(e, "Estado presentación") ?? string.Empty;
-                var startMode = Evidence(e, "Inicio") ?? string.Empty;
-                var isManualOrTrigger = startMode.Equals("Manual", StringComparison.OrdinalIgnoreCase)
-                                     || startMode.Equals("Trigger", StringComparison.OrdinalIgnoreCase);
-                var isNotRequired = presentation.Contains("No requerido", StringComparison.OrdinalIgnoreCase)
-                                 || presentation.Contains("No required", StringComparison.OrdinalIgnoreCase);
-                return !(isManualOrTrigger && isNotRequired);
-            })
+            .Where(DemonstratesServiceInterruption)
             .GroupBy(e => Evidence(e, "Servicio") ?? e.Componente, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.OrderByDescending(e => e.Severidad).ThenByDescending(e => e.Timestamp).First()))
         {

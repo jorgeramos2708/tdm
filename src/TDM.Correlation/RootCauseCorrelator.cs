@@ -99,9 +99,14 @@ public static partial class RootCauseCorrelator
             .Where(e => DiagnosticTimeWindow.IsEventInside(report, e.Timestamp!.Value))
             .Where(e => e.Severidad is DiagnosticSeverity.Error or DiagnosticSeverity.Critico)
             .Where(e => e.Producto == TsplusProduct.RemoteAccess)
-            .Where(e => string.Equals(EvidenceValue(e, "Estado"), "Stopped", StringComparison.OrdinalIgnoreCase)
-                     || string.Equals(EvidenceValue(e, "Estado"), "StopPending", StringComparison.OrdinalIgnoreCase)
-                     || string.Equals(EvidenceValue(e, "Estado"), "StartPending", StringComparison.OrdinalIgnoreCase))
+            // MEDIUM Fase 22: mismo contrato que FunctionalImpactAnalyzer (predicado compartido).
+            // Antes el correlador aceptaba StopPending/StartPending y servicios Manual/Trigger
+            // "No requerido" que el analizador de impacto excluía en el mismo informe: afirmaba
+            // "impacto directo demostrado" para lo que el impacto negaba. Los *Pending son
+            // transiciones del SCM (MS service-status-transitions) y un Manual detenido está en
+            // su estado normal (MS Win32_Service.StartMode).
+            .Where(FunctionalImpactAnalyzer.DemonstratesServiceInterruption)
+            .Where(e => string.Equals(EvidenceValue(e, "Estado"), "Stopped", StringComparison.OrdinalIgnoreCase))
             .GroupBy(e => EvidenceValue(e, "Servicio") ?? e.Componente, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.OrderByDescending(e => e.Severidad).ThenByDescending(e => e.Timestamp).First())
             .ToList();
