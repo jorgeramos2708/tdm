@@ -192,7 +192,12 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("StateCompareToleratesDuplicateAndNullKeys", StateCompareToleratesDuplicateAndNullKeys),
     ("CorruptPreviousSnapshotIsDeclaredInStatus", CorruptPreviousSnapshotIsDeclaredInStatus),
     ("StateJournalPersistsEveryChannelDurably", StateJournalPersistsEveryChannelDurably),
-    ("HistoryStageFailureKeepsTransitionsAndTrends", HistoryStageFailureKeepsTransitionsAndTrends)
+    ("HistoryStageFailureKeepsTransitionsAndTrends", HistoryStageFailureKeepsTransitionsAndTrends),
+    ("HeartbeatWriteFailuresCannotStopTheHost", HeartbeatWriteFailuresCannotStopTheHost),
+    ("MonitoringDisposeSkipsResourcesWhileLoopsRun", MonitoringDisposeSkipsResourcesWhileLoopsRun),
+    ("LogServiceDisposeIsRaceFreeAndPersistenceIsBounded", LogServiceDisposeIsRaceFreeAndPersistenceIsBounded),
+    ("LogsViewModelBatchesBurstsOffTheEntryPath", LogsViewModelBatchesBurstsOffTheEntryPath),
+    ("WindowsPushSubscriptionRetriesUnexpectedFailures", WindowsPushSubscriptionRetriesUnexpectedFailures)
 };
 
 var failed = 0;
@@ -4883,6 +4888,145 @@ static async Task HistoryStageFailureKeepsTransitionsAndTrends()
             "El fallo del almacén acopló la etapa de tendencias de recursos.");
     }
     finally { TryDelete(root); }
+}
+
+static Task HeartbeatWriteFailuresCannotStopTheHost()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del heartbeat no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Service", "TdmWorker.cs"));
+
+    var start = text.IndexOf("private async Task WriteHeartbeatSafeAsync", StringComparison.Ordinal);
+    True(start >= 0, "No se encontró WriteHeartbeatSafeAsync en TdmWorker.cs.");
+    var slice = text.Substring(start, Math.Min(1400, text.Length - start));
+
+    True(slice.Contains("catch (Exception ex)", StringComparison.Ordinal),
+        "El heartbeat sigue filtrando excepciones: una excepción fuera de IO/permisos escaparía de ExecuteAsync y BackgroundServiceExceptionBehavior.StopHost detendría el host.");
+    False(slice.Contains("IOException or UnauthorizedAccessException", StringComparison.Ordinal),
+        "El catch estrecho del heartbeat volvió: no cubre OperationCanceledException ni fallos exóticos de E/S al cerrar.");
+    return Task.CompletedTask;
+}
+
+static Task MonitoringDisposeSkipsResourcesWhileLoopsRun()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del dispose de monitoreo no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "Services", "IntegratedMonitoringService.cs"));
+
+    var waitIdx = text.IndexOf("var loopsStopped = WaitForLoop(_loopTask) & WaitForLoop(_forensicLoopTask);", StringComparison.Ordinal);
+    var disposeIdx = text.IndexOf("_captureGate.Dispose();", StringComparison.Ordinal);
+    True(waitIdx >= 0, "Dispose ya no aguarda AMBOS bucles antes de decidir si dispone los gates.");
+    True(disposeIdx > waitIdx, "Los gates se disponen sin comprobar antes que los bucles terminaron (ObjectDisposedException en cierre).");
+    True(text.Contains("catch { return loop.IsCompleted; }", StringComparison.Ordinal),
+        "WaitForLoop no tolera tareas faulted/cancelled; un Wait que lanza abortaría Dispose.");
+    False(text.Contains("try { _loopTask?.Wait(TimeSpan.FromSeconds(2)); } catch { }", StringComparison.Ordinal),
+        "Volvió el Dispose que espera los bucles pero dispone los recursos de todas formas.");
+
+    // Smoke behavior: doble dispose sin InitializeAsync no debe lanzar.
+    var service = new TDM.Gui.Avalonia.Services.IntegratedMonitoringService();
+    service.Dispose();
+    service.Dispose();
+    return Task.CompletedTask;
+}
+
+static Task LogServiceDisposeIsRaceFreeAndPersistenceIsBounded()
+{
+    var root = TempDir();
+    try
+    {
+        var service = new TDM.Gui.Avalonia.Services.LogService(root);
+        var errors = 0;
+        var writers = new Task[3];
+        for (var w = 0; w < writers.Length; w++)
+        {
+            writers[w] = Task.Run(() =>
+            {
+                for (var i = 0; i < 2000; i++)
+                {
+                    try { service.Write(LogLevel.Information, "TDM", "F25", "burst " + i); }
+                    catch { Interlocked.Increment(ref errors); }
+                }
+            });
+        }
+        var disposer = Task.Run(() =>
+        {
+            Thread.Sleep(5);
+            try { service.Dispose(); }
+            catch { Interlocked.Increment(ref errors); }
+        });
+        var all = new Task[writers.Length + 1];
+        writers.CopyTo(all, 0);
+        all[writers.Length] = disposer;
+        Task.WaitAll(all);
+
+        // Escritura posterior a Dispose: debe ser no-op silencioso, nunca lanzar.
+        try { service.Write(LogLevel.Warning, "TDM", "F25", "post-dispose"); }
+        catch { Interlocked.Increment(ref errors); }
+
+        Equal(0, errors, "La escritura concurrente contra Dispose lanzó excepciones (check-then-act o recursos dispuestos).");
+
+        var logFiles = Directory.GetFiles(Path.Combine(root, "logs"), "tdm-gui-*.log");
+        True(logFiles.Length > 0 && new FileInfo(logFiles[0]).Length > 0,
+            "La persistencia acotada no llegó a escribir ningún archivo de log.");
+    }
+    finally { TryDelete(root); }
+
+    var repoRoot = FindRepoRoot();
+    NotNull(repoRoot, "No se localizó TDM.sln; gate del canal de LogService no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(repoRoot!, "src", "TDM.Gui.Avalonia", "Services", "LogService.cs"));
+    True(text.Contains("Channel.CreateBounded<LogEntry>", StringComparison.Ordinal),
+        "La persistencia de LogService dejó de usar un canal acotado con DropOldest.");
+    False(text.Contains("_ = PersistAsync", StringComparison.Ordinal),
+        "Volvió el fire-and-forget PersistAsync sin límite por entrada.");
+    True(text.Contains("_pending.Writer.TryWrite(entry)", StringComparison.Ordinal),
+        "La escritura ya no se encola en el canal acotado.");
+    False(text.Contains("_subject.Dispose()", StringComparison.Ordinal),
+        "El Subject se vuelve a disponer: un OnNext tardío lanzaría ObjectDisposedException.");
+    return Task.CompletedTask;
+}
+
+static Task LogsViewModelBatchesBurstsOffTheEntryPath()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del batching de LogsViewModel no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "ViewModels", "LogsViewModel.cs"));
+
+    True(text.Contains("Dispatcher.UIThread.Post(FlushPendingEntries, DispatcherPriority.Background)", StringComparison.Ordinal),
+        "Los flushes de logs ya no se postulan a Background priority en el dispatcher.");
+    True(text.Contains("MaxEntriesPerFlush", StringComparison.Ordinal),
+        "El drenaje de ráfagas dejó de ser por lotes con presupuesto por turno.");
+    True(text.Contains("_pendingEntries.Enqueue(entry)", StringComparison.Ordinal),
+        "La suscripción volvió a reconstruir la lista en el hilo UI por cada entrada.");
+    True(text.Contains("ScheduleFlush()", StringComparison.Ordinal),
+        "La coalescencia de ráfagas (un solo flush por ráfaga) desapareció.");
+    False(text.Contains("_allLogs.Insert(0, vm);", StringComparison.Ordinal),
+        "Volvió el Insert(0) + refiltro O(N) dentro del callback de cada entrada.");
+    return Task.CompletedTask;
+}
+
+static Task WindowsPushSubscriptionRetriesUnexpectedFailures()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del push collector no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsPushEventCollector.cs"));
+
+    var start = text.IndexOf("private static void EnsureSubscribed()", StringComparison.Ordinal);
+    var end = text.IndexOf("private static void OnEventRecordWritten", StringComparison.Ordinal);
+    True(start >= 0 && end > start, "No se encontró el bloque EnsureSubscribed/OnEventRecordWritten.");
+    var slice = text.Substring(start, end - start);
+
+    True(slice.Contains("catch (Exception ex)", StringComparison.Ordinal),
+        "EnsureSubscribed sigue sin capturar excepciones inesperadas: una de ellas dejaría push sin reintentar.");
+    True(slice.Contains("ResolvedChannels", StringComparison.Ordinal),
+        "Los canales con resultado definitivo no se deduplican para el reintento.");
+    False(slice.Contains("_subscribed = true;", StringComparison.Ordinal),
+        "El flag de suscripción volvió a fijarse ANTES de intentar los canales.");
+    True(slice.IndexOf("_subscribed = !unexpected;", StringComparison.Ordinal) >
+         slice.IndexOf("foreach (var channelName in PushChannels)", StringComparison.Ordinal),
+        "El flag de suscripción no se decide después de recorrer todos los canales.");
+    True(text.Contains("ResolvedChannels.Clear()", StringComparison.Ordinal),
+        "StopWatchers ya no limpia los canales resueltos; la re-suscripción saltaría todos los canales.");
+    return Task.CompletedTask;
 }
 
 static string? FindRepoRoot()

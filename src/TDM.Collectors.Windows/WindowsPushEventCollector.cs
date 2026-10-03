@@ -29,6 +29,9 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
     private static readonly List<EventLogWatcher> SharedWatchers = new();
     private static readonly List<EvidenceItem> SharedCoverage = new();
     private static bool _subscribed;
+    // MEDIUM F25: canales con resultado definitivo de suscripción (activa o fallo conocido);
+    // sólo los fallos inesperados se reintentan en la próxima recolección.
+    private static readonly HashSet<string> ResolvedChannels = new();
 
     public Task<CollectorResult> CollectAsync(DiagnosticContext context, CancellationToken cancellationToken = default)
     {
@@ -63,33 +66,76 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
     private static void EnsureSubscribed()
     {
         if (_subscribed) return;
-        _subscribed = true;
+
+        var unexpected = false;
 
         foreach (var channelName in PushChannels)
         {
+            // MEDIUM F25: los canales con resultado definitivo se saltan; se reintenta
+            // sólo el canal cuyo último intento falló de forma inesperada.
+            if (ResolvedChannels.Contains(channelName)) continue;
+
+            EventLogWatcher? watcher = null;
             try
             {
                 var query = new EventLogQuery(channelName, PathType.LogName, "*") { ReverseDirection = false };
-                var watcher = new EventLogWatcher(query);
+                watcher = new EventLogWatcher(query);
                 var channel = channelName;
                 watcher.EventRecordWritten += (s, e) => OnEventRecordWritten(e, channel);
                 watcher.Enabled = true;
                 SharedWatchers.Add(watcher);
-                SharedCoverage.Add(new EvidenceItem(channel, "Suscripción activa"));
+                watcher = null;
+                SetCoverage(channelName, "Suscripción activa");
+                ResolvedChannels.Add(channelName);
             }
             catch (EventLogNotFoundException)
             {
-                SharedCoverage.Add(new EvidenceItem(channelName, "Canal no disponible en este SO"));
+                DisposeWatcher(ref watcher);
+                SetCoverage(channelName, "Canal no disponible en este SO");
+                ResolvedChannels.Add(channelName);
             }
             catch (UnauthorizedAccessException ex)
             {
-                SharedCoverage.Add(new EvidenceItem(channelName, $"Sin permisos: {ex.Message}"));
+                DisposeWatcher(ref watcher);
+                SetCoverage(channelName, $"Sin permisos: {ex.Message}");
+                ResolvedChannels.Add(channelName);
             }
             catch (EventLogException ex)
             {
-                SharedCoverage.Add(new EvidenceItem(channelName, $"Error suscripción: {ex.Message}"));
+                DisposeWatcher(ref watcher);
+                SetCoverage(channelName, $"Error suscripción: {ex.Message}");
+                ResolvedChannels.Add(channelName);
+            }
+            catch (Exception ex)
+            {
+                // MEDIUM F25: fallo inesperado del ciclo de vida del watcher
+                // (msdn microsoft.com/en-us/dotnet/api/system.diagnostics.eventing.reader.eventlogwatcher):
+                // se marca el canal para reintento en la próxima recolección en lugar de
+                // dejarlo pendiente de una suscripción que nunca se hará.
+                DisposeWatcher(ref watcher);
+                SetCoverage(channelName, $"Error suscripción: {ex.GetType().Name}: {ex.Message}");
+                unexpected = true;
             }
         }
+
+        // MEDIUM F25: el flag sólo se fija DESPUÉS de intentar todos los canales. Antes
+        // estaba delante del foreach: una excepción inesperada abortaba el método con
+        // _subscribed=true y push desactivado para siempre.
+        _subscribed = !unexpected;
+    }
+
+    private static void DisposeWatcher(ref EventLogWatcher? watcher)
+    {
+        if (watcher is null) return;
+        try { watcher.Enabled = false; watcher.Dispose(); } catch { }
+        watcher = null;
+    }
+
+    private static void SetCoverage(string channelName, string value)
+    {
+        // SetCoverage idempotente: reemplaza la evidencia del canal en lugar de duplicarla.
+        SharedCoverage.RemoveAll(c => c.Clave == channelName);
+        SharedCoverage.Add(new EvidenceItem(channelName, value));
     }
 
     private static void OnEventRecordWritten(EventRecordWrittenEventArgs e, string channelName)
@@ -180,6 +226,7 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
             SharedWatchers.Clear();
             SharedBuffer.Clear();
             SharedCoverage.Clear();
+            ResolvedChannels.Clear();
             _subscribed = false;
         }
         foreach (var watcher in watchers)

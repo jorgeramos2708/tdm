@@ -95,11 +95,21 @@ public sealed record LogFilterOption(string Label, object? Value, IBrush Brush);
 /// </summary>
 public sealed partial class LogsViewModel : ObservableObject, IDisposable
 {
+    // MEDIUM F25: presupuesto de entradas aplicadas por turno del dispatcher. En lugar de
+    // refiltrar O(N) y reconstruir hasta 5 000 ítems POR CADA entrada en el hilo UI, las
+    // ráfagas se drenan en lotes y se reprograma el siguiente lote, devolviendo el control
+    // al dispatcher entre turno y turno (MS desktop/wpf/advanced/threading-model: mantener
+    // los work items pequeños y volver al dispatcher periódicamente).
+    private const int MaxEntriesPerFlush = 500;
+
     private readonly LogService _logService;
     private readonly CancellationTokenSource _cts = new();
     private readonly IDisposable _subscription;
     private readonly ObservableCollection<LogEntryViewModel> _allLogs = [];
     private readonly ObservableCollection<LogEntryViewModel> _filteredLogs = [];
+    private readonly Queue<LogEntry> _pendingEntries = new();
+    private readonly object _pendingLock = new();
+    private int _flushScheduled;
 
     [ObservableProperty] private LogFilterOption? _selectedLevelFilter;
     [ObservableProperty] private LogFilterOption? _selectedSourceSystemFilter;
@@ -142,16 +152,18 @@ public sealed partial class LogsViewModel : ObservableObject, IDisposable
         }
         UpdateFiltered();
 
-        // Suscribir a nuevos logs en tiempo real
+        // Suscribir a nuevos logs en tiempo real: la suscripción SÓLO encola y programa un
+        // único flush (coalescencia de ráfagas); el refiltro/reconstrucción ocurre en
+        // FlushPendingEntries, no por entrada (MS inotifycollectionchanged: cada Add levanta
+        // CollectionChanged y la vista vuelve a procesar la colección completa).
         _subscription = _logService.Entries
             .Subscribe(entry =>
             {
-                Dispatcher.UIThread.Post(() =>
+                lock (_pendingLock)
                 {
-                    var vm = new LogEntryViewModel(entry);
-                    _allLogs.Insert(0, vm);
-                    UpdateFiltered();
-                });
+                    _pendingEntries.Enqueue(entry);
+                }
+                ScheduleFlush();
             });
 
         // Observar cambios en filtros
@@ -207,6 +219,45 @@ public sealed partial class LogsViewModel : ObservableObject, IDisposable
 
         FilteredCount = _filteredLogs.Count;
         TotalCount = _allLogs.Count;
+    }
+
+    private void ScheduleFlush()
+    {
+        if (Interlocked.CompareExchange(ref _flushScheduled, 1, 0) != 0) return;
+        Dispatcher.UIThread.Post(FlushPendingEntries, DispatcherPriority.Background);
+    }
+
+    private void FlushPendingEntries()
+    {
+        Interlocked.Exchange(ref _flushScheduled, 0);
+
+        List<LogEntry>? batch = null;
+        lock (_pendingLock)
+        {
+            var count = Math.Min(_pendingEntries.Count, MaxEntriesPerFlush);
+            if (count > 0)
+            {
+                batch = new List<LogEntry>(count);
+                for (var i = 0; i < count; i++)
+                    batch.Add(_pendingEntries.Dequeue());
+            }
+        }
+
+        if (batch is null || batch.Count == 0) return;
+
+        // FIFO del lote con Insert(0): la entrada más reciente queda arriba,
+        // igual que hacía el Insert(0) por entrada anteriormente.
+        foreach (var entry in batch)
+            _allLogs.Insert(0, new LogEntryViewModel(entry));
+
+        UpdateFiltered();
+
+        bool more;
+        lock (_pendingLock)
+        {
+            more = _pendingEntries.Count > 0;
+        }
+        if (more) ScheduleFlush();
     }
 
     [RelayCommand]

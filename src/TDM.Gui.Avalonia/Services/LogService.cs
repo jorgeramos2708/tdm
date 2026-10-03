@@ -6,6 +6,7 @@ using System.IO;
 using System.Reactive.Subjects;
 using System.Text;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using TDM.Core;
 
@@ -19,22 +20,35 @@ public sealed class LogService : IDisposable
     private const int MaxBufferSize = 10000;
     private const int MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB por archivo
     private const int MaxFiles = 30; // Retención 30 días
+    // MEDIUM F25: cota de entradas pendientes de persistir; con una ráfaga de miles de
+    // registros, el productor nunca acumula más de esto en memoria (DropOldest descarta
+    // las más antiguas sin bloquear — MS core/extensions/channels).
+    private const int MaxPendingPersists = 1000;
 
     private readonly ConcurrentQueue<LogEntry> _buffer = new();
     private readonly Subject<LogEntry> _subject = new();
     private readonly string _logDirectory;
-    private readonly SemaphoreSlim _fileGate = new(1, 1);
     private readonly Timer _cleanupTimer;
     private readonly object _bufferLock = new();
+    private readonly Channel<LogEntry> _pending = Channel.CreateBounded<LogEntry>(
+        new BoundedChannelOptions(MaxPendingPersists)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+    private readonly Task _persistTask;
     private int _currentCount;
     private string? _currentLogFile;
     private DateTime _currentLogDate = DateTime.MinValue;
     private long _currentFileSize;
     private bool _disposed;
 
-    public LogService()
+    public LogService(string? rootPath = null)
     {
-        var root = TDM.Persistence.TdmDataPaths.ResolveWritableDefault();
+        var root = string.IsNullOrWhiteSpace(rootPath)
+            ? TDM.Persistence.TdmDataPaths.ResolveWritableDefault()
+            : rootPath;
         _logDirectory = Path.Combine(root, "logs");
         Directory.CreateDirectory(_logDirectory);
 
@@ -43,6 +57,9 @@ public sealed class LogService : IDisposable
 
         // Rotar archivo inicial
         RotateLogFile();
+
+        // MEDIUM F25: UN consumidor serializa la E/S en lugar de una tarea por entrada.
+        _persistTask = Task.Run(PersistLoopAsync);
     }
 
     /// <summary>
@@ -55,11 +72,14 @@ public sealed class LogService : IDisposable
     /// </summary>
     public void Write(LogEntry entry)
     {
-        if (_disposed) return;
-
-        // Añadir al buffer circular
+        // MEDIUM F25: el flag de dispose se revisa DENTRO del lock (check-then-act) y la
+        // persistencia se encola en el canal acotado: TryWrite nunca bloquea ni lanza y,
+        // con DropOldest, el productor no puede acumular tareas sin límite.
         lock (_bufferLock)
         {
+            if (_disposed) return;
+
+            // Añadir al buffer circular
             _buffer.Enqueue(entry);
             _currentCount++;
             if (_currentCount > MaxBufferSize)
@@ -67,13 +87,13 @@ public sealed class LogService : IDisposable
                 _buffer.TryDequeue(out _);
                 _currentCount--;
             }
+
+            _pending.Writer.TryWrite(entry);
         }
 
-        // Notificar suscriptores
+        // Notificar suscriptores fuera del lock (no se invoca código ajeno con el lock tomado);
+        // el sujeto ya no se dispone, así que un OnNext concurrente con OnCompleted es inocuo.
         _subject.OnNext(entry);
-
-        // Persistir a archivo
-        _ = PersistAsync(entry);
     }
 
     /// <summary>
@@ -96,31 +116,32 @@ public sealed class LogService : IDisposable
         }
     }
 
-/// <summary>
-    /// Persiste la entrada a archivo rotativo diario.
+    /// <summary>
+    /// Consumidor único del canal de persistencia: drena las entradas encoladas y las
+    /// escribe al archivo rotativo. Un fallo de E/S de una entrada no interrumpe el bucle.
     /// </summary>
-    private async Task PersistAsync(LogEntry entry)
+    private async Task PersistLoopAsync()
     {
-        await _fileGate.WaitAsync();
-        try
+        await foreach (var entry in _pending.Reader.ReadAllAsync().ConfigureAwait(false))
         {
-            RotateLogFile();
+            try { AppendEntry(entry); }
+            catch
+            {
+                // Best-effort: no dejar que falle el logging rompa la app
+            }
+        }
+    }
 
-            var line = FormatLogLine(entry);
-            var bytes = Encoding.UTF8.GetBytes(line + Environment.NewLine);
+    private void AppendEntry(LogEntry entry)
+    {
+        RotateLogFile();
 
-            await using var stream = new FileStream(_currentLogFile!, FileMode.Append, FileAccess.Write, FileShare.Read, 4096, FileOptions.Asynchronous);
-            await stream.WriteAsync(bytes);
-            _currentFileSize += bytes.Length;
-        }
-        catch
-        {
-            // Best-effort: no dejar que falle el logging rompa la app
-        }
-        finally
-        {
-            _fileGate.Release();
-        }
+        var line = FormatLogLine(entry);
+        var bytes = Encoding.UTF8.GetBytes(line + Environment.NewLine);
+
+        using var stream = new FileStream(_currentLogFile!, FileMode.Append, FileAccess.Write, FileShare.Read, 4096);
+        stream.Write(bytes, 0, bytes.Length);
+        _currentFileSize += bytes.Length;
     }
 
     private void RotateLogFile()
@@ -189,11 +210,18 @@ public sealed class LogService : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        // MEDIUM F25: dispose a prueba de carreras — el flag se marca y OnCompleted se emite
+        // bajo el MISMO lock que serializa el check de Write; el sujeto ya no se dispone
+        // (OnNext tardío inocuo) y el canal se completa para que el consumidor drene y pare
+        // sin que ningún productor encuentre un recurso dispuesto.
+        lock (_bufferLock)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _subject.OnCompleted();
+        }
+        _pending.Writer.TryComplete();
+        try { _persistTask.Wait(TimeSpan.FromSeconds(2)); } catch { }
         _cleanupTimer?.Dispose();
-        _subject.OnCompleted();
-        _subject.Dispose();
-        _fileGate.Dispose();
     }
 }

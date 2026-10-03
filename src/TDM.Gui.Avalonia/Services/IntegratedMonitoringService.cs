@@ -555,11 +555,27 @@ public sealed class IntegratedMonitoringService : IDisposable
         if (_disposed) return;
         _disposed = true;
         _cts.Cancel();
-        try { _loopTask?.Wait(TimeSpan.FromSeconds(2)); } catch { }
-        try { _forensicLoopTask?.Wait(TimeSpan.FromSeconds(2)); } catch { }
-        _captureGate.Dispose();
-        _forensicGate.Dispose();
-        _cts.Dispose();
+        // MEDIUM F25: Dispose de SemaphoreSlim/CancellationTokenSource "deja el objeto en un
+        // estado inutilizable" y no es thread-safe con otros miembros (MS semaphoreslim.dispose
+        // y cancellationtokensource.dispose). El Wait(2s) anterior podía expirar y aun así
+        // disponer gates/CTS con los bucles todavía dentro de WaitAsync → ObjectDisposedException
+        // en el cierre. Sólo se dispone cuando AMBOS bucles terminaron.
+        var loopsStopped = WaitForLoop(_loopTask) & WaitForLoop(_forensicLoopTask);
+        if (loopsStopped)
+        {
+            _captureGate.Dispose();
+            _forensicGate.Dispose();
+            _cts.Dispose();
+        }
+        // Si un bucle no terminó en el presupuesto, los recursos se conservan: los bucles
+        // observan la cancelación y el GC libera los objetos gestionados al finalizarlos.
+    }
+
+    private static bool WaitForLoop(Task? loop)
+    {
+        if (loop is null) return true;
+        try { return loop.Wait(TimeSpan.FromSeconds(2)); }
+        catch { return loop.IsCompleted; } // faulted/cancelled: terminó, sí se dispone
     }
 
     private void ThrowIfDisposed()

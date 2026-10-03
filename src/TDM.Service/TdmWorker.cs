@@ -732,6 +732,12 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
 
     private async Task WriteHeartbeatSafeAsync(ServiceHeartbeatStore store, string status, TimeSpan interval, string? error, CancellationToken ct)
     {
+        // MEDIUM F25: el latido es best-effort y en el ciclo se escribe FUERA de la barrera
+        // de excepciones (después del finally). El catch estrecho sólo cubría IO/permisos:
+        // cualquier otra excepción (p. ej. OperationCanceledException al cerrar o un fallo
+        // exótico de E/S) escapaba de ExecuteAsync y, por BackgroundServiceExceptionBehavior.StopHost,
+        // el host entero se detenía (learn.microsoft.com/en-us/dotnet/api/
+        // microsoft.extensions.hosting.backgroundserviceexceptionbehavior).
         try
         {
             await store.WriteAsync(new TdmServiceHeartbeat(
@@ -744,7 +750,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
                 _deferredSamples,
                 error), ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex)
         {
             _logger.LogError(ex, "No fue posible escribir heartbeat de TDM.Service");
         }
