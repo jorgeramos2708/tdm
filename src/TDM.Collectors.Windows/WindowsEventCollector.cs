@@ -61,13 +61,7 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
                         catch { message = "Descripción no disponible."; }
 
                         var layer = ClassifyLayer(provider);
-                        var severity = ev.Level switch
-                        {
-                            1 => DiagnosticSeverity.Critico,
-                            2 => DiagnosticSeverity.Error,
-                            3 => DiagnosticSeverity.Advertencia,
-                            _ => DiagnosticSeverity.Informativo
-                        };
+                        var severity = ResolveSeverity(log, ev.Id, ev.Level);
                         var timestamp = ev.TimeCreated is null
                             ? (DateTimeOffset?)null
                             : new DateTimeOffset(ev.TimeCreated.Value);
@@ -109,10 +103,16 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
                             timestamp, fuente, provider, layer, severity,
                             eventTypeFinal, message, ev.Id.ToString(), Evidencia: evidence));
 
-                        findings.Add(new DiagnosticFinding(
-                            $"EVT-{log}-{ev.RecordId}", provider, severity,
-                            $"Evento relevante detectado: ID {ev.Id}", message,
-                            evidence, ConfidenceLevel.Media, Capa: layer));
+                        // Fase 23: los cuatro IDs de auditoría Security los rescata además
+                        // UserSessionProfileCollector (evento tipado + USER_AUTH_AUDIT_COVERAGE);
+                        // el hallazgo EVT-Security-* genérico los duplicaba.
+                        if (!HasDedicatedSecurityEvidence(log, ev.Id))
+                        {
+                            findings.Add(new DiagnosticFinding(
+                                $"EVT-{log}-{ev.RecordId}", provider, severity,
+                                $"Evento relevante detectado: ID {ev.Id}", message,
+                                evidence, ConfidenceLevel.Media, Capa: layer));
+                        }
                         relevant++;
                         remainingEvents--;
 
@@ -206,6 +206,27 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
             // P17: fallos de arranque SCM coherentes con IsCausalSignal y el canal incremental.
             || id is 41 or 51 or 55 or 1000 or 1001 or 1026 or 7000 or 7001 or 7009 or 7011 or 7023 or 7024 or 7031 or 7034
             || (log.Equals("Security", StringComparison.OrdinalIgnoreCase) && id is 4625 or 4740 or 4771 or 4776);
+    }
+
+    // Fase 23: UserSessionProfileCollector emite estos mismos IDs con producto, usuario y
+    // cobertura USER_AUTH_AUDIT_COVERAGE; el hallazgo genérico EVT-Security-* los duplicaba.
+    public static bool HasDedicatedSecurityEvidence(string log, int id)
+        => log.Equals("Security", StringComparison.OrdinalIgnoreCase) && id is 4625 or 4740 or 4771 or 4776;
+
+    // MS event-4740 publica el lockout de cuenta con Level=0 y recomendación de alerta:
+    // la auditoría de seguridad no puede presentarse como mero Informativo.
+    public static DiagnosticSeverity ResolveSeverity(string log, int id, int? level)
+    {
+        var severity = level switch
+        {
+            1 => DiagnosticSeverity.Critico,
+            2 => DiagnosticSeverity.Error,
+            3 => DiagnosticSeverity.Advertencia,
+            _ => DiagnosticSeverity.Informativo
+        };
+        if (severity == DiagnosticSeverity.Informativo && HasDedicatedSecurityEvidence(log, id))
+            return DiagnosticSeverity.Advertencia;
+        return severity;
     }
 
     private static DiagnosticLayer ClassifyLayer(string provider)

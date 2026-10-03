@@ -182,7 +182,12 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("CrashAndDependencyCandidateIdsAreUnique", CrashAndDependencyCandidateIdsAreUnique),
     ("EachFailingDependencyGetsItsOwnCandidate", EachFailingDependencyGetsItsOwnCandidate),
     ("PendingAndManualStopsDoNotClaimDirectImpact", PendingAndManualStopsDoNotClaimDirectImpact),
-    ("InterleavedBurstKeepsSharedIncidentTogether", InterleavedBurstKeepsSharedIncidentTogether)
+    ("InterleavedBurstKeepsSharedIncidentTogether", InterleavedBurstKeepsSharedIncidentTogether),
+    ("MissingEventLogDeclaresCoverageGap", MissingEventLogDeclaresCoverageGap),
+    ("ModuleFileProbeDoesNotClaimAbsenceOnAccessError", ModuleFileProbeDoesNotClaimAbsenceOnAccessError),
+    ("SpanishSentencesAreNotStackFrames", SpanishSentencesAreNotStackFrames),
+    ("SecurityAuditEventsEscalateWithoutDuplicateFindings", SecurityAuditEventsEscalateWithoutDuplicateFindings),
+    ("VolumeTrimKeepsChannelCoverageHonest", VolumeTrimKeepsChannelCoverageHonest)
 };
 
 var failed = 0;
@@ -4584,6 +4589,139 @@ static Task InterleavedBurstKeepsSharedIncidentTogether()
     return Task.CompletedTask;
 }
 
+static async Task MissingEventLogDeclaresCoverageGap()
+{
+    var result = await new DependencyLoadEventCollector("__TDM_NO_SUCH_LOG__")
+        .CollectAsync(Context(TimeSpan.FromHours(1)));
+    var missing = result.Hallazgos.FirstOrDefault(f => f.Id == "DEPENDENCY-EVENTLOG-MISSING");
+    NotNull(missing, "Un canal de eventos inexistente no declaró DEPENDENCY-EVENTLOG-MISSING.");
+    True(missing!.Evidencia.Any(x => x.Clave == "Log" && x.Valor == "__TDM_NO_SUCH_LOG__"),
+        "El hallazgo del canal inexistente no identifica el canal consultado.");
+    True(missing.Evidencia.Any(x => x.Clave == "Cobertura" && x.Valor == "No disponible"),
+        "El canal inexistente no dejó la cobertura marcada como no disponible.");
+    False(result.Hallazgos.Any(f => f.Id is "DEPENDENCY-EVENTLOG-ACCESS" or "DEPENDENCY-EVENTLOG-READ"),
+        "Un canal inexistente emitió hallazgos de acceso/lectura que no corresponden.");
+    False(result.Eventos.Any(), "El canal inexistente emitió eventos de dependencia.");
+    return;
+}
+
+static Task ModuleFileProbeDoesNotClaimAbsenceOnAccessError()
+{
+    var denied = LightweightTsplusStateCollector.DescribeModuleFileProbe(ProbeResult<bool>.AccessDenied("denied"));
+    Equal("NO EVALUADO · acceso denegado", denied.Estado,
+        "Un fallo de acceso siguió presentándose como ausencia de archivo.");
+    Equal("NO EVALUADO · acceso denegado", denied.Resumen,
+        "El resumen de un fallo de acceso no refleja la evaluación NO EVALUADO.");
+    var ioError = LightweightTsplusStateCollector.DescribeModuleFileProbe(ProbeResult<bool>.Error("io"));
+    Equal("NO EVALUADO · error de E/S", ioError.Estado,
+        "Un error de E/S siguió presentándose como ausencia de archivo.");
+    var absent = LightweightTsplusStateCollector.DescribeModuleFileProbe(ProbeResult<bool>.Absent());
+    Equal("No presente", absent.Estado, "Un archivo realmente ausente dejó de declararse No presente.");
+    Equal("no presente", absent.Resumen, "El resumen de un archivo ausente cambió.");
+    var present = LightweightTsplusStateCollector.DescribeModuleFileProbe(ProbeResult<bool>.Available(true));
+    Equal("Presente", present.Estado, "Un archivo presente dejó de declararse Presente.");
+    Equal("presente", present.Resumen, "El resumen de un archivo presente cambió.");
+    return Task.CompletedTask;
+}
+
+static Task SpanishSentencesAreNotStackFrames()
+{
+    var context = Context(TimeSpan.FromHours(1));
+    var sentence = TsplusLogParser.ParseLine("Remote Access", "x.log",
+        "en la ventana se produjo access denied", 1, context);
+    NotNull(sentence, "Una frase en español que empieza por «en » se descartó como traza de pila.");
+    Equal(DiagnosticSeverity.Error, sentence!.Severidad,
+        "La frase en español perdió su severidad al dejar de tratarse como frame.");
+    False(TsplusLogParser.IsContinuationLine("en la ventana se produjo access denied"),
+        "Una frase en español se anexó como continuación de la traza anterior.");
+    True(TsplusLogParser.IsContinuationLine("   at Module.Type.Method()"),
+        "La traza real dejó de reconocerse como continuación.");
+    True(TsplusLogParser.IsContinuationLine("   en TDM.Core.Motor.Ejecutar() en C:\\x.cs:línea 4"),
+        "Un frame de pila real en español dejó de reconocerse como continuación.");
+    var frame = TsplusLogParser.ParseLine("Remote Access", "x.log",
+        "en TDM.Core.Motor.Ejecutar() en C:\\x.cs:línea 4", 2, context);
+    True(frame is null, "Un frame de pila real en español se convirtió en evento.");
+    return Task.CompletedTask;
+}
+
+static Task SecurityAuditEventsEscalateWithoutDuplicateFindings()
+{
+    Equal(DiagnosticSeverity.Advertencia, WindowsEventCollector.ResolveSeverity("Security", 4740, 0),
+        "El lockout de cuenta (event-4740, Level=0) siguió presentándose como Informativo.");
+    Equal(DiagnosticSeverity.Advertencia, WindowsEventCollector.ResolveSeverity("Security", 4625, 3),
+        "Un 4625 de auditoría dejó de ser Advertencia.");
+    Equal(DiagnosticSeverity.Critico, WindowsEventCollector.ResolveSeverity("System", 41, 1),
+        "Un crítico del canal System cambió de severidad.");
+    Equal(DiagnosticSeverity.Error, WindowsEventCollector.ResolveSeverity("Application", 1000, 2),
+        "Un error de Application cambió de severidad.");
+    True(WindowsEventCollector.HasDedicatedSecurityEvidence("Security", 4625),
+        "El 4625 dejó de reconocerse como señal con collector dedicado.");
+    True(WindowsEventCollector.HasDedicatedSecurityEvidence("Security", 4740),
+        "El 4740 dejó de reconocerse como señal con collector dedicado.");
+    True(WindowsEventCollector.HasDedicatedSecurityEvidence("Security", 4771),
+        "El 4771 dejó de reconocerse como señal con collector dedicado.");
+    True(WindowsEventCollector.HasDedicatedSecurityEvidence("Security", 4776),
+        "El 4776 dejó de reconocerse como señal con collector dedicado.");
+    False(WindowsEventCollector.HasDedicatedSecurityEvidence("Security", 4624),
+        "El 4624 se trató como señal con collector dedicado.");
+    False(WindowsEventCollector.HasDedicatedSecurityEvidence("System", 4740),
+        "Un 4740 fuera de Security se trató como señal con collector dedicado.");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de hallazgos Security no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsEventCollector.cs"));
+    True(text.Contains("if (!HasDedicatedSecurityEvidence(log, ev.Id))", StringComparison.Ordinal),
+        "El collector base vuelve a emitir hallazgos EVT-Security-* duplicados para los IDs con collector dedicado.");
+    return Task.CompletedTask;
+}
+
+static async Task VolumeTrimKeepsChannelCoverageHonest()
+{
+    var now = DateTimeOffset.Now;
+    var coverage = new DiagnosticEvent(now.AddMinutes(-1), "TDM", "Cobertura de eventos Windows",
+        DiagnosticLayer.Windows, DiagnosticSeverity.Informativo, "WINDOWS_EVENT_COVERAGE",
+        "La lectura base de eventos Windows se completó dentro de los límites configurados.",
+        Evidencia:
+        [
+            new EvidenceItem("System", "Disponible; relevantes=1; examinados=1"),
+            new EvidenceItem("Application", "Disponible; relevantes=0; examinados=0")
+        ]);
+
+    var payload = new List<DiagnosticEvent> { coverage };
+    for (var i = 0; i < 40; i++)
+    {
+        payload.Add(new DiagnosticEvent(now.AddHours(-2), "Service Control Manager", "Servicio", DiagnosticLayer.Windows,
+            DiagnosticSeverity.Informativo, "WINDOWS_EVENT", "evento antiguo del canal System", (10_000 + i).ToString(),
+            Evidencia: [new EvidenceItem("Log", "System"), new EvidenceItem("RecordId", (50_000 + i).ToString())]));
+    }
+    for (var i = 0; i < 1_600; i++)
+    {
+        payload.Add(new DiagnosticEvent(now, "Test", "Relleno", DiagnosticLayer.Windows,
+            DiagnosticSeverity.Informativo, "WINDOWS_EVENT", $"relleno {i}", (20_000 + i).ToString(),
+            Evidencia: [new EvidenceItem("Log", "Other"), new EvidenceItem("RecordId", (90_000 + i).ToString())]));
+    }
+
+    var report = await new DiagnosticEngine([new BatchCollector(payload)], TimeSpan.FromSeconds(2), 1_500)
+        .RunAsync(Context(TimeSpan.FromHours(1)));
+
+    True(report.Hallazgos.Any(f => f.Id == "TDM-EVENT-VOLUME-LIMIT"),
+        "El recorte por volumen no declaró TDM-EVENT-VOLUME-LIMIT.");
+    var cov = report.Eventos.FirstOrDefault(e => e.Tipo == "WINDOWS_EVENT_COVERAGE");
+    NotNull(cov, "El evento de cobertura cayó durante el recorte pese a estar pineado.");
+    Equal(DiagnosticSeverity.Advertencia, cov!.Severidad,
+        "La cobertura de canales truncados siguió declarándose Informativo.");
+    var evidencia = cov.Evidencia!;
+    True(evidencia.Any(x => x.Clave == "System"
+        && x.Valor.StartsWith("Parcial; truncado por límite de volumen", StringComparison.Ordinal)),
+        "La cobertura System siguió afirmando lectura completa tras descartar sus eventos.");
+    True(evidencia.Any(x => x.Clave == "Application" && x.Valor.StartsWith("Disponible", StringComparison.Ordinal)),
+        "La cobertura Application se degradó sin que se descartaran sus eventos.");
+    True(report.Eventos.Count <= 1_600, "El recorte por volumen no limitó el volumen de eventos.");
+    True(report.Eventos.Count(e => e.Evidencia?.Any(x => x.Clave == "Log" && x.Valor == "Other") == true) > 0,
+        "El contexto reciente de otros canales desapareció junto con el recorte.");
+    return;
+}
+
 static string? FindRepoRoot()
 {
     var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -4618,4 +4756,11 @@ sealed class FixedCollector(DiagnosticEvent value) : IReadOnlyCollector
     public string Nombre => "ProductionTestCollector";
     public Task<CollectorResult> CollectAsync(DiagnosticContext context, CancellationToken cancellationToken = default)
         => Task.FromResult(new CollectorResult([], [value]));
+}
+
+sealed class BatchCollector(IReadOnlyList<DiagnosticEvent> values) : IReadOnlyCollector
+{
+    public string Nombre => "ProductionBatchCollector";
+    public Task<CollectorResult> CollectAsync(DiagnosticContext context, CancellationToken cancellationToken = default)
+        => Task.FromResult(new CollectorResult([], values.ToList()));
 }

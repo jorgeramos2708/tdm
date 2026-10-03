@@ -6,9 +6,9 @@ namespace TDM.Collectors.Windows;
 
 /// <summary>
 /// Recolecta evidencia de dependencias/librerías que Windows no pudo cargar.
-/// SOLO LECTURA: únicamente consulta el registro Application.
+/// SOLO LECTURA: únicamente consulta el canal de eventos indicado (Application por defecto).
 /// </summary>
-public sealed class DependencyLoadEventCollector : IReadOnlyCollector
+public sealed class DependencyLoadEventCollector(string logName = "Application") : IReadOnlyCollector
 {
     public string Nombre => "Dependencias / DLL / SideBySide";
 
@@ -28,7 +28,7 @@ public sealed class DependencyLoadEventCollector : IReadOnlyCollector
 
         try
         {
-            var query = new EventLogQuery("Application", PathType.LogName, xpath) { ReverseDirection = true };
+            var query = new EventLogQuery(logName, PathType.LogName, xpath) { ReverseDirection = true };
             using var reader = new EventLogReader(query);
             var inspected = 0;
 
@@ -51,7 +51,7 @@ public sealed class DependencyLoadEventCollector : IReadOnlyCollector
 
                     var evidence = new List<EvidenceItem>
                     {
-                        new("Log", "Application"),
+                        new("Log", logName),
                         new("Provider", provider),
                         new("Event ID", record.Id.ToString()),
                         new("Relacionado explícitamente con TSplus", touchesTsplus ? "Sí" : "No")
@@ -93,16 +93,29 @@ public sealed class DependencyLoadEventCollector : IReadOnlyCollector
                 }
             }
         }
-        catch (EventLogNotFoundException) { }
+        catch (EventLogNotFoundException)
+        {
+            // Fase 23: asimétrico con sus ramas hermanas — un canal no registrado no es
+            // "sin eventos", es cobertura no disponible (MS wes/windows-event-log).
+            findings.Add(new DiagnosticFinding(
+                "DEPENDENCY-EVENTLOG-MISSING",
+                $"{logName} Event Log",
+                DiagnosticSeverity.Advertencia,
+                "El canal de eventos consultado no está registrado en este equipo.",
+                $"Windows no expone el canal «{logName}» (canal no registrado o eliminado); el collector de dependencias no puede leerlo.",
+                [new EvidenceItem("Log", logName), new EvidenceItem("Cobertura", "No disponible")],
+                ConfidenceLevel.Alta,
+                Capa: DiagnosticLayer.Windows));
+        }
         catch (UnauthorizedAccessException ex)
         {
             findings.Add(new DiagnosticFinding(
                 "DEPENDENCY-EVENTLOG-ACCESS",
-                "Application Event Log",
+                $"{logName} Event Log",
                 DiagnosticSeverity.Advertencia,
                 "No fue posible consultar eventos de carga de dependencias.",
                 ex.Message,
-                [new EvidenceItem("Log", "Application")],
+                [new EvidenceItem("Log", logName)],
                 ConfidenceLevel.Media,
                 Capa: DiagnosticLayer.Windows));
         }
@@ -112,11 +125,11 @@ public sealed class DependencyLoadEventCollector : IReadOnlyCollector
             // cobertura queda parcial en vez de perderse como COLLECTOR-ERROR.
             findings.Add(new DiagnosticFinding(
                 "DEPENDENCY-EVENTLOG-READ",
-                "Application Event Log",
+                $"{logName} Event Log",
                 DiagnosticSeverity.Advertencia,
                 "La lectura de eventos de carga de dependencias quedó parcial.",
                 ex.Message,
-                [new EvidenceItem("Log", "Application"), new EvidenceItem("Cobertura", "Parcial")],
+                [new EvidenceItem("Log", logName), new EvidenceItem("Cobertura", "Parcial")],
                 ConfidenceLevel.Media,
                 Capa: DiagnosticLayer.Windows));
         }

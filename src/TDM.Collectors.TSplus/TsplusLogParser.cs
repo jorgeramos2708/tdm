@@ -153,10 +153,30 @@ public static partial class TsplusLogParser
     private static bool LooksLikeStackTrace(string line)
     {
         var t = line.TrimStart();
-        return t.StartsWith("at ", StringComparison.OrdinalIgnoreCase)
-            || t.StartsWith("en ", StringComparison.OrdinalIgnoreCase)
-            || t.StartsWith("--- End of", StringComparison.OrdinalIgnoreCase)
-            || StackFrameRegex().IsMatch(t);
+        return t.StartsWith("--- End of", StringComparison.OrdinalIgnoreCase)
+            || StackFrameRegex().IsMatch(t)
+            || HasInvocationShape(t);
+    }
+
+    // Fase 23: MS Exception.ToString siempre muestra `Tipo.Método(args)`; el prefijo
+    // "at "/"en " sólo cuenta como traza de pila cuando lo que sigue tiene forma de
+    // invocación, para que una frase en español ("en la ventana hubo acceso denegado")
+    // no se descarta/anexa como frame.
+    private static bool HasInvocationShape(string line)
+    {
+        var start = line.StartsWith("at ", StringComparison.OrdinalIgnoreCase) ? 3
+            : line.StartsWith("en ", StringComparison.OrdinalIgnoreCase) ? 3
+            : -1;
+        if (start < 0) return false;
+        var open = line.IndexOf('(', start);
+        if (open <= start) return false;
+        var before = line[..open].TrimEnd();
+        if (before.Length == 0) return false;
+        var lastSegment = before[(before.LastIndexOf(' ') + 1)..];
+        return lastSegment.Contains('.')
+            || lastSegment.Contains('`')
+            || lastSegment.Contains('<')
+            || lastSegment.Contains('>');
     }
 
 

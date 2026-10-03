@@ -186,9 +186,43 @@ public sealed class DiagnosticEngine
         var rawEventCount = events.Count;
         if (events.Count > _policy.MaxRawEvents)
         {
-            var causal = events.Where(e => e.Severidad != DiagnosticSeverity.Informativo).OrderByDescending(OrderingTime).Take((int)(_policy.MaxRawEvents * 0.8));
-            var contextEvents = events.Where(e => e.Severidad == DiagnosticSeverity.Informativo).OrderByDescending(OrderingTime).Take(_policy.MaxRawEvents - (int)(_policy.MaxRawEvents * 0.8));
-            events = causal.Concat(contextEvents).OrderBy(OrderingTime).ToList();
+            // Fase 23: los cursores de los collectors se persistieron antes de este trim
+            // (MS wes/bookmarking-events), así que los eventos descartados no se releen y la
+            // cobertura por canal no puede seguir afirmando lectura completa. Los eventos
+            // *_COVERAGE se pinean fuera del recorte y sus canales afectados bajan a Parcial.
+            var coverageRefs = new HashSet<DiagnosticEvent>(ReferenceEqualityComparer.Instance);
+            var payload = new List<DiagnosticEvent>();
+            foreach (var e in events)
+            {
+                if (e.Tipo.EndsWith("_COVERAGE", StringComparison.Ordinal)) coverageRefs.Add(e);
+                else payload.Add(e);
+            }
+
+            var causal = payload.Where(e => e.Severidad != DiagnosticSeverity.Informativo).OrderByDescending(OrderingTime).Take((int)(_policy.MaxRawEvents * 0.8)).ToList();
+            var contextEvents = payload.Where(e => e.Severidad == DiagnosticSeverity.Informativo).OrderByDescending(OrderingTime).Take(_policy.MaxRawEvents - (int)(_policy.MaxRawEvents * 0.8)).ToList();
+            var kept = causal.Concat(contextEvents).OrderBy(OrderingTime).ToList();
+            var keptRefs = new HashSet<DiagnosticEvent>(kept, ReferenceEqualityComparer.Instance);
+
+            var droppedChannels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var e in payload)
+            {
+                if (keptRefs.Contains(e)) continue;
+                var evidencia = e.Evidencia;
+                if (evidencia is null) continue;
+                foreach (var item in evidencia)
+                {
+                    if (item.Clave is "Log" or "Canal" or "Channel" && !string.IsNullOrWhiteSpace(item.Valor))
+                        droppedChannels.Add(item.Valor);
+                }
+            }
+
+            var rebuilt = new List<DiagnosticEvent>(events.Count);
+            foreach (var e in events)
+            {
+                if (coverageRefs.Contains(e)) rebuilt.Add(DowngradeTruncatedCoverage(e, droppedChannels));
+                else if (keptRefs.Contains(e)) rebuilt.Add(e);
+            }
+            events = rebuilt.OrderBy(OrderingTime).ToList();
             findings.Add(new DiagnosticFinding(
                 "TDM-EVENT-VOLUME-LIMIT",
                 "Motor de diagnóstico",
@@ -268,6 +302,45 @@ public sealed class DiagnosticEngine
             PresupuestoAgotado = budgetExhausted,
             CollectorsOmitidosPorPresupuesto = collectorsOmittedByBudget,
             PresupuestoTotalMs = overallBudget.TotalMilliseconds
+        };
+    }
+
+    // Fase 23: tras descartar eventos por el límite de volumen, la cobertura por canal del
+    // canal afectado baja de "Disponible" a "Parcial" y se declara Advertencia; la vista
+    // global "Cobertura" no puede seguir afirmando lectura completa por el mismo motivo.
+    private static DiagnosticEvent DowngradeTruncatedCoverage(DiagnosticEvent coverage, HashSet<string> droppedChannels)
+    {
+        var evidencia = coverage.Evidencia;
+        if (droppedChannels.Count == 0 || evidencia is null || evidencia.Count == 0) return coverage;
+        var changed = false;
+        var updated = new List<EvidenceItem>(evidencia.Count);
+        foreach (var item in evidencia)
+        {
+            if (droppedChannels.Contains(item.Clave)
+                && item.Valor.StartsWith("Disponible", StringComparison.OrdinalIgnoreCase))
+            {
+                updated.Add(new EvidenceItem(item.Clave, "Parcial; truncado por límite de volumen (TDM-EVENT-VOLUME-LIMIT)"));
+                changed = true;
+            }
+            else
+            {
+                updated.Add(item);
+            }
+        }
+        if (!changed) return coverage;
+
+        for (var i = 0; i < updated.Count; i++)
+        {
+            var item = updated[i];
+            if (item.Clave.Equals("Cobertura", StringComparison.OrdinalIgnoreCase)
+                && item.Valor.StartsWith("Disponible", StringComparison.OrdinalIgnoreCase))
+                updated[i] = new EvidenceItem(item.Clave, "Parcial; truncado por límite de volumen (TDM-EVENT-VOLUME-LIMIT)");
+        }
+
+        return coverage with
+        {
+            Severidad = DiagnosticSeverity.Advertencia,
+            Evidencia = updated
         };
     }
 

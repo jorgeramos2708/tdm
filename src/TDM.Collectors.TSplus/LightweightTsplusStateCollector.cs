@@ -209,15 +209,15 @@ public sealed class LightweightTsplusStateCollector : IReadOnlyCollector
     {
         try
         {
-            var existsProbe = FileSystemProbe.File(path);
-            var exists = existsProbe.IsAvailable;
+            var probe = FileSystemProbe.File(path);
+            var (estado, resumen) = DescribeModuleFileProbe(probe);
             var evidence = new List<EvidenceItem>
             {
                 new("Módulo", module),
                 new("Archivo", path),
-                new("Estado", exists ? "Presente" : "No presente")
+                new("Estado", estado)
             };
-            if (exists)
+            if (probe.IsAvailable)
             {
                 var fi = new FileInfo(path);
                 evidence.Add(new EvidenceItem("Tamaño", fi.Length.ToString()));
@@ -226,12 +226,24 @@ public sealed class LightweightTsplusStateCollector : IReadOnlyCollector
             events.Add(new DiagnosticEvent(
                 DateTimeOffset.Now, "TDM", $"{module} / {name}", DiagnosticLayer.Tsplus,
                 DiagnosticSeverity.Informativo, "TSPLUS_MODULE_CRITICAL_FILE_STATE",
-                $"{name}: {(exists ? "presente" : "no presente")}; sólo metadatos.",
+                $"{name}: {resumen}; sólo metadatos.",
                 Archivo: path, Evidencia: evidence, Producto: TsplusProduct.RemoteAccess));
         }
         catch
         {
             // El monitor continuo no escala un error de metadatos a una falla funcional.
         }
+    }
+
+    // Fase 23: File.Exists (MS) devuelve false sin lanzar cuando faltan permisos, así que un
+    // fallo de acceso/E/S no puede presentarse como "No presente"; se hereda el lenguaje
+    // NO EVALUADO de sus hermanos vía FileSystemProbe.Display.
+    public static (string Estado, string Resumen) DescribeModuleFileProbe(ProbeResult<bool> probe)
+    {
+        var estado = FileSystemProbe.Display(probe);
+        var resumen = estado.StartsWith("NO EVALUADO", StringComparison.Ordinal)
+            ? estado
+            : estado.ToLowerInvariant();
+        return (estado, resumen);
     }
 }
