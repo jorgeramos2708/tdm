@@ -1,7 +1,5 @@
 using System.Net;
 using System.Net.Sockets;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.RegularExpressions;
 using TDM.Models;
 
@@ -78,6 +76,21 @@ public static class SupportBundleSanitizer
         @"\bS-1-(?:\d+-){2,}\d+\b",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    // C7: identidad "suelta" sin etiqueta tras los formatos de componente que el correlador
+    // construye con el usuario al final (p. ej. "Windows NLA / credenciales / jsmith"). Un
+    // token suelto genérico no diferencia una identidad de una palabra común, así que la
+    // detección queda anclada a esos prefijos conocidos; en origen el usuario ya viaja
+    // pseudonimizado con TdmPseudonym (mismo algoritmo → idempotente aquí).
+    private static readonly Regex LooseComponentIdentityRegex = new(
+        @"(?<prefix>(?:Windows NLA / credenciales|Windows / validación de credenciales|Windows / cuenta bloqueada|Kerberos / preautenticación|Autenticación Windows|Windows User Profile)\s/\s)(?<value>[A-Za-z0-9][A-Za-z0-9._-]{0,47})$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    // C7: colas de identidad cruda de los Ids de causa/hallazgo conocidos. Los Ids ya
+    // pseudonimizados (USR-…/SID-… de 8 hex) no se re-hashean (idempotencia del prefijo).
+    private static readonly Regex LegacyIdentityIdRegex = new(
+        @"(?<prefix>ROOT-WINDOWS-NLA-CREDENTIALS-|ROOT-WINDOWS-CREDENTIAL-VALIDATION-|ROOT-WINDOWS-ACCOUNT-LOCKOUT-|ROOT-WINDOWS-KERBEROS-PREAUTH-|ROOT-WINDOWS-REMOTE-LOGON-|USER-REMOTE-LOGON-FAILURE-|USER-PROFILE-(?:BAK|PATH-MISSING|PATH-NOT-EVALUATED|HIVE-NOT-EVALUATED|TEMP)-|TSPLUS-PUBLISHED-APP-USER-[A-Za-z0-9]{1,32}-)(?<value>[A-Za-z0-9][A-Za-z0-9-]{0,47})$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
 
     public static DiagnosticReport Sanitize(DiagnosticReport report)
     {
@@ -146,6 +159,7 @@ public static class SupportBundleSanitizer
 
     private static DiagnosticFinding SanitizeFinding(DiagnosticFinding f) => f with
     {
+        Id = SanitizeId(f.Id),
         Componente = SanitizeText(f.Componente) ?? f.Componente,
         Resumen = SanitizeText(f.Resumen) ?? f.Resumen,
         Detalle = SanitizeText(f.Detalle) ?? f.Detalle,
@@ -165,12 +179,30 @@ public static class SupportBundleSanitizer
 
     private static RootCauseCandidate SanitizeCause(RootCauseCandidate c) => c with
     {
+        Id = SanitizeId(c.Id),
         Componente = SanitizeText(c.Componente) ?? c.Componente,
         Resumen = SanitizeText(c.Resumen) ?? c.Resumen,
         Explicacion = SanitizeText(c.Explicacion) ?? c.Explicacion,
         Evidencia = c.Evidencia.Select(SanitizeEvidence).ToList(),
         SolucionSugerida = SanitizeText(c.SolucionSugerida)
     };
+
+    // C7: el Id también se limpia en export. SanitizeText cubre SID, dominio\usuario, correo,
+    // ruta e IP incrustados; LegacyIdentityIdRegex pseudonimiza las colas de usuario crudo de
+    // los Ids de causa/hallazgo conocidos con el mismo algoritmo de origen (idempotente).
+    private static string SanitizeId(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return id;
+        var output = SanitizeText(id) ?? id;
+        return LegacyIdentityIdRegex.Replace(output, LegacyIdentityIdEvaluator);
+    }
+
+    private static string LegacyIdentityIdEvaluator(Match match)
+    {
+        var prefix = match.Groups["prefix"].Value;
+        var kind = prefix.StartsWith("USER-PROFILE", StringComparison.Ordinal) ? "SID" : "USR";
+        return $"{prefix}{TdmPseudonym.Create(kind, match.Groups["value"].Value)}";
+    }
 
     private static GuidedResolutionResult SanitizeGuidedResolution(GuidedResolutionResult result) => result with
     {
@@ -242,6 +274,7 @@ public static class SupportBundleSanitizer
         if (IsDomainKey(item.Clave)) return new EvidenceItem(item.Clave, Pseudonym("DOM", item.Valor));
         if (IsClientIdentityKey(item.Clave)) return new EvidenceItem(item.Clave, Pseudonym("HOST", item.Valor));
         if (IsIpKey(item.Clave)) return new EvidenceItem(item.Clave, Pseudonym("IP", item.Valor));
+        if (IsHostListKey(item.Clave)) return new EvidenceItem(item.Clave, SanitizeHostList(item.Valor));
         if (item.Clave.Contains("Archivo", StringComparison.OrdinalIgnoreCase) || item.Clave.Contains("Ruta", StringComparison.OrdinalIgnoreCase))
             return new EvidenceItem(item.Clave, SanitizePath(item.Valor) ?? string.Empty);
         return new EvidenceItem(item.Clave, SanitizeText(item.Valor) ?? string.Empty);
@@ -264,6 +297,7 @@ public static class SupportBundleSanitizer
     {
         var k = NormalizeKey(key);
         return k is "usuario" or "user" or "cuenta" or "nombre de usuario" or "nombre completo" or "usuario afectado"
+               or "asignación" or "asignacion"
                || k.Contains("targetuser", StringComparison.OrdinalIgnoreCase)
                || k.Contains("account name", StringComparison.OrdinalIgnoreCase)
                || k.Contains("usuarios asignados", StringComparison.OrdinalIgnoreCase)
@@ -275,13 +309,30 @@ public static class SupportBundleSanitizer
     private static bool IsDomainKey(string key)
     {
         var k = NormalizeKey(key);
-        return k is "dominio" or "domain" or "targetdomainname" or "account domain";
+        return k is "dominio" or "domain" or "targetdomainname" or "account domain" or "dominio detectado";
     }
 
     private static bool IsClientIdentityKey(string key)
     {
         var k = NormalizeKey(key);
-        return k is "cliente" or "client" or "nombre de cliente" or "client name" or "equipo cliente" or "client device";
+        return k is "cliente" or "client" or "nombre de cliente" or "client name" or "equipo cliente" or "client device"
+               or "equipo originador" or "equipo actual" or "originador observado" or "estación" or "estacion";
+    }
+
+    // H8: "Nombres internos Reverse Proxy" es una lista de hosts ("GW01 | GW02") o una
+    // sentinela de cobertura de TDM; no encaja en las tablas de clave única.
+    private static bool IsHostListKey(string key)
+        => NormalizeKey(key).Contains("nombres internos", StringComparison.Ordinal);
+
+    private static string SanitizeHostList(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return value ?? string.Empty;
+        return string.Join(" | ", value.Split(" | ", StringSplitOptions.None).Select(token =>
+            token.Contains("NO EVALUADO", StringComparison.OrdinalIgnoreCase)
+            || token.Contains("Ninguno", StringComparison.OrdinalIgnoreCase)
+            || token.Equals("N/D", StringComparison.OrdinalIgnoreCase)
+                ? token
+                : TdmPseudonym.Create("HOST", token)));
     }
 
     private static bool IsIpKey(string key)
@@ -324,6 +375,7 @@ public static class SupportBundleSanitizer
         output = EmailRegex.Replace(output, m => Pseudonym("MAIL", m.Value));
         output = Ipv4Regex.Replace(output, m => Pseudonym("IP", m.Value));
         output = Ipv6CandidateRegex.Replace(output, Ipv6Evaluator);
+        output = LooseComponentIdentityRegex.Replace(output, m => $"{m.Groups["prefix"].Value}{Pseudonym("USR", m.Groups["value"].Value)}");
         return output;
     }
 
@@ -361,14 +413,6 @@ public static class SupportBundleSanitizer
     }
 
     private static string Pseudonym(string prefix, string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value) || value.Equals("N/D", StringComparison.OrdinalIgnoreCase)) return value ?? "N/D";
-        if (value.StartsWith(prefix + "-", StringComparison.Ordinal))
-        {
-            var tail = value[(prefix.Length + 1)..];
-            if (tail.Length == 8 && tail.All(Uri.IsHexDigit)) return value;
-        }
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value.Trim().ToUpperInvariant()));
-        return $"{prefix}-{Convert.ToHexString(hash)[..8]}";
-    }
+        // Mismo algoritmo que en origen (TdmPseudonym): idempotente entre capas.
+        => TdmPseudonym.Create(prefix, value);
 }

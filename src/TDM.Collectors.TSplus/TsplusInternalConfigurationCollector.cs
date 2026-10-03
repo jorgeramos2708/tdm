@@ -379,7 +379,9 @@ public sealed partial class TsplusInternalConfigurationCollector : IReadOnlyColl
             if (!LooksLocalAssignment(assignment)) continue;
             if (CanResolveAccount(assignment)) continue;
             findings.Add(new DiagnosticFinding(
-                $"TSPLUS-PUBLISHED-APP-USER-{Sanitize(section.Name)}-{Sanitize(assignment)}",
+                // C7: la asignación es una cuenta Windows (docs.tsplus.net/tsplus/assigning-applications-to-users-or-groups)
+                // y no viaja en claro dentro del Id del hallazgo.
+                $"TSPLUS-PUBLISHED-APP-USER-{Sanitize(section.Name)}-{TdmPseudonym.Create("USR", assignment)}",
                 string.IsNullOrWhiteSpace(appName) ? section.Name : appName,
                 DiagnosticSeverity.Advertencia,
                 "Una asignación local de aplicación TSplus no corresponde a una cuenta Windows resoluble actualmente.",

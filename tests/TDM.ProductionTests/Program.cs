@@ -95,6 +95,9 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("EvidenceDetailsFallBackToIngestedAt", EvidenceDetailsFallBackToIngestedAt),
     ("SanitizeCoversPreviouslyRawSections", SanitizeCoversPreviouslyRawSections),
     ("ExportJsonMasksPrimaryCauseAndClusterIdentity", ExportJsonMasksPrimaryCauseAndClusterIdentity),
+    ("ExportSanitizesIdentityBearingIdsAndComponents", ExportSanitizesIdentityBearingIdsAndComponents),
+    ("EvidenceKeysOutsideTablesArePseudonymized", EvidenceKeysOutsideTablesArePseudonymized),
+    ("SourcePseudonymizesIdentityIdsAndComponents", SourcePseudonymizesIdentityIdsAndComponents),
     ("SecurityLogMissingStatusIsNotAvailable", SecurityLogMissingStatusIsNotAvailable),
     ("WindowsEventRecoveryLookbackRestoresPersistedGap", WindowsEventRecoveryLookbackRestoresPersistedGap),
     ("WindowsEventRecoveryLookbackDisarmsAfterFirstCollect", WindowsEventRecoveryLookbackDisarmsAfterFirstCollect),
@@ -2524,6 +2527,162 @@ static async Task ExportJsonMasksPrimaryCauseAndClusterIdentity()
     finally { TryDelete(dir); }
 }
 
+static Task ExportSanitizesIdentityBearingIdsAndComponents()
+{
+    var now = DateTimeOffset.Now;
+    var jsmith = TdmPseudonym.Create("USR", "jsmith");
+    var alice = TdmPseudonym.Create("USR", "alice");
+    var legacyCause = new RootCauseCandidate(1, "ROOT-WINDOWS-NLA-CREDENTIALS-jsmith",
+        "Windows NLA / credenciales / jsmith", DiagnosticLayer.Seguridad, 96, ConfidenceLevel.Alta,
+        "Windows rechazó credenciales NLA del mismo usuario antes del síntoma RDP/TSplus.",
+        "La evidencia de Security identifica un rechazo previo a la creación de sesión.",
+        [new EvidenceItem("Usuario", "jsmith")], HoraIncidente: now, OrigenClasificado: "WINDOWS");
+    var profileFinding = new DiagnosticFinding(
+        "USER-PROFILE-BAK-S-1-5-21-111122223333-1001-1001-500",
+        "Windows User Profile", DiagnosticSeverity.Advertencia,
+        "Se detectó una entrada .bak de perfil de usuario en ProfileList.",
+        "Una entrada .bak puede ser evidencia de un problema previo de carga del perfil.",
+        [new EvidenceItem("SID", "S-1-5-21-111122223333-1001-1001-500")],
+        ConfidenceLevel.Media, Capa: DiagnosticLayer.Windows);
+    var logonFinding = new DiagnosticFinding(
+        "USER-REMOTE-LOGON-FAILURE-JSMITH", "Windows RemoteInteractive Logon", DiagnosticSeverity.Advertencia,
+        $"Se detectaron 3 fallos de inicio de sesión RemoteInteractive para '{jsmith}' en la ventana.",
+        "La autenticación Windows falló antes de completar la sesión.",
+        [new EvidenceItem("Usuario", "JSMITH")], ConfidenceLevel.Media, Capa: DiagnosticLayer.Windows);
+    var currentCauseId = $"ROOT-WINDOWS-REMOTE-LOGON-{alice}";
+    var currentCause = new RootCauseCandidate(2, currentCauseId,
+        $"Autenticación Windows / {alice}", DiagnosticLayer.Windows, 95, ConfidenceLevel.Alta,
+        "Windows rechazó el inicio de sesión RemoteInteractive del mismo usuario antes del síntoma RDP/TSplus.",
+        "El evento Security 4625 precede al síntoma correlacionado y corresponde al mismo usuario.",
+        [new EvidenceItem("Usuario", "alice")], HoraIncidente: now, OrigenClasificado: "WINDOWS");
+    var report = Report([], now, [profileFinding, logonFinding]) with
+    {
+        CausasRaiz = [legacyCause, currentCause],
+        CausaRaizPrincipal = legacyCause
+    };
+
+    var once = SupportBundleSanitizer.Sanitize(report);
+    var twice = SupportBundleSanitizer.Sanitize(once);
+    Equal(JsonSerializer.Serialize(once), JsonSerializer.Serialize(twice),
+        "La sanearización de Ids/Componentes no es idempotente.");
+    var json = JsonSerializer.Serialize(once);
+    False(json.Contains("jsmith", StringComparison.OrdinalIgnoreCase),
+        "El Id/Componente de causa con usuario en claro sobrevivió al sanitizador.");
+    False(json.Contains("S-1-5-21-111122223333", StringComparison.Ordinal),
+        "El SID crudo sobrevivió dentro del Id del hallazgo de perfil.");
+    False(json.Contains("JSMITH", StringComparison.Ordinal),
+        "El Id del hallazgo de logon conservó el usuario en claro.");
+    True(once.CausasRaiz[0].Id.StartsWith("ROOT-WINDOWS-NLA-CREDENTIALS-USR-", StringComparison.Ordinal),
+        "El Id de causa legado no se pseudonimizó con prefijo USR.");
+    Equal($"Windows NLA / credenciales / {jsmith}", once.CausasRaiz[0].Componente,
+        "El componente de causa con identidad suelta no se pseudonimizó.");
+    True(once.Hallazgos[0].Id.StartsWith("USER-PROFILE-BAK-SID-", StringComparison.Ordinal),
+        "El SID dentro del Id del hallazgo de perfil no se pseudonimizó.");
+    True(once.Hallazgos[1].Id.StartsWith("USER-REMOTE-LOGON-FAILURE-USR-", StringComparison.Ordinal),
+        "El usuario dentro del Id del hallazgo de logon no se pseudonimizó.");
+    True(once.Hallazgos[1].Resumen.Contains(jsmith, StringComparison.Ordinal),
+        "El pseudónimo del usuario en el Resumen se alteró al sanitizar.");
+    Equal(currentCauseId, once.CausasRaiz[1].Id, "Un Id ya pseudonimizado cambió al sanitizar.");
+    return Task.CompletedTask;
+}
+
+static Task EvidenceKeysOutsideTablesArePseudonymized()
+{
+    var now = DateTimeOffset.Now;
+    var leaks = new DiagnosticFinding("H8-KEYS-TEST", "Configuración", DiagnosticSeverity.Advertencia,
+        "Asignaciones con evidencia de identidad sin clave tabulada.", "Detalle de prueba.",
+        [
+            new EvidenceItem("Equipo originador", "PC-JSMITH"),
+            new EvidenceItem("Estación", "JSMITH-WS01"),
+            new EvidenceItem("Dominio detectado", "CONTOSO"),
+            new EvidenceItem("Asignación", "jsmith"),
+            new EvidenceItem("Equipo actual", "SRV-CORP"),
+            new EvidenceItem("Nombres internos Reverse Proxy", "GW01 | GW02"),
+            new EvidenceItem("Originador observado", "10.20.30.40")
+        ], ConfidenceLevel.Media, Capa: DiagnosticLayer.Tsplus);
+    var sentinel = new DiagnosticFinding("H8-SENTINEL-TEST", "Configuración", DiagnosticSeverity.Advertencia,
+        "Sentinelas de cobertura.", "Detalle de prueba.",
+        [
+            new EvidenceItem("Nombres internos Reverse Proxy", "Ninguno derivado"),
+            new EvidenceItem("Nombres internos Reverse Proxy", "NO EVALUADO")
+        ], ConfidenceLevel.Media, Capa: DiagnosticLayer.Tsplus);
+    var report = Report([], now, [leaks, sentinel]);
+
+    var once = SupportBundleSanitizer.Sanitize(report);
+    var evidence = once.Hallazgos[0].Evidencia;
+    var originador = evidence.First(x => x.Clave == "Equipo originador").Valor;
+    True(originador.StartsWith("HOST-", StringComparison.Ordinal) && !originador.Contains("JSMITH", StringComparison.Ordinal),
+        "Equipo originador no se pseudonimizó como host.");
+    var estacion = evidence.First(x => x.Clave == "Estación").Valor;
+    True(estacion.StartsWith("HOST-", StringComparison.Ordinal) && !estacion.Contains("JSMITH", StringComparison.Ordinal),
+        "Estación no se pseudonimizó como host.");
+    var dominio = evidence.First(x => x.Clave == "Dominio detectado").Valor;
+    True(dominio.StartsWith("DOM-", StringComparison.Ordinal) && !dominio.Contains("CONTOSO", StringComparison.Ordinal),
+        "Dominio detectado no se pseudonimizó como dominio.");
+    var asignacion = evidence.First(x => x.Clave == "Asignación").Valor;
+    True(asignacion.StartsWith("USR-", StringComparison.Ordinal) && !asignacion.Contains("jsmith", StringComparison.OrdinalIgnoreCase),
+        "Asignación no se pseudonimizó como cuenta.");
+    var equipoActual = evidence.First(x => x.Clave == "Equipo actual").Valor;
+    True(equipoActual.StartsWith("HOST-", StringComparison.Ordinal) && !equipoActual.Contains("SRV-CORP", StringComparison.Ordinal),
+        "Equipo actual no se pseudonimizó como host.");
+    var originadorObservado = evidence.First(x => x.Clave == "Originador observado").Valor;
+    False(originadorObservado.Contains("10.20.30.40", StringComparison.Ordinal),
+        "Originador observado conservó la IP en claro.");
+    var hostList = evidence.First(x => x.Clave == "Nombres internos Reverse Proxy").Valor;
+    True(hostList.Split(" | ").Length == 2 && hostList.Split(" | ").All(t => t.StartsWith("HOST-", StringComparison.Ordinal)),
+        "La lista de hosts internos del Reverse Proxy no se pseudonimizó por token.");
+    False(hostList.Contains("GW01", StringComparison.Ordinal) || hostList.Contains("GW02", StringComparison.Ordinal),
+        "La lista de hosts internos del Reverse Proxy conservó hosts en claro.");
+    Equal("Ninguno derivado", once.Hallazgos[1].Evidencia[0].Valor,
+        "La sentinela 'Ninguno derivado' se convirtió en pseudónimo.");
+    Equal("NO EVALUADO", once.Hallazgos[1].Evidencia[1].Valor,
+        "La sentinela 'NO EVALUADO' se convirtió en pseudónimo.");
+    Equal(JsonSerializer.Serialize(once), JsonSerializer.Serialize(SupportBundleSanitizer.Sanitize(once)),
+        "La sanearización de claves de evidencia no es idempotente.");
+    return Task.CompletedTask;
+}
+
+static Task SourcePseudonymizesIdentityIdsAndComponents()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de sanearización de identidad en origen no ejecutable.");
+    var correlator = File.ReadAllText(Path.Combine(root!, "src", "TDM.Correlation", "RootCauseCorrelator.Rules.IdentitySecurity.cs"));
+    False(correlator.Contains("ROOT-WINDOWS-REMOTE-LOGON-{user}", StringComparison.Ordinal),
+        "El correlador sigue incrustando el usuario en claro dentro del Id de causa.");
+    True(correlator.Contains("TdmPseudonym.Create(\"USR\", user)", StringComparison.Ordinal),
+        "El correlador no pseudonimiza el usuario con TdmPseudonym.");
+    True(correlator.Contains("Windows NLA / credenciales / {userId}", StringComparison.Ordinal),
+        "El componente de causa NLA no usa el usuario pseudonimizado.");
+    var profiles = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Rdp", "UserSessionProfileCollector.cs"));
+    False(profiles.Contains("private static string Sanitize(string value)", StringComparison.Ordinal),
+        "El collector de perfiles conserva el sanitizador local que dejaba SIDs/nombres legibles en los Ids.");
+    True(profiles.Contains("TdmPseudonym.Create(\"SID\", profile.Sid)", StringComparison.Ordinal),
+        "Los Ids USER-PROFILE-* no pseudonimizan el SID con TdmPseudonym.");
+    True(profiles.Contains("TdmPseudonym.Create(\"USR\", user)", StringComparison.Ordinal),
+        "El hallazgo USER-REMOTE-LOGON-FAILURE no pseudonimiza el usuario.");
+    var tsplus = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.TSplus", "TsplusInternalConfigurationCollector.cs"));
+    True(tsplus.Contains("TSPLUS-PUBLISHED-APP-USER-{Sanitize(section.Name)}-{TdmPseudonym.Create(\"USR\", assignment)}", StringComparison.Ordinal),
+        "La asignación de AppControl.ini sigue incrustándose en claro dentro del Id.");
+    var sanitizer = File.ReadAllText(Path.Combine(root!, "src", "TDM.Reporting", "SupportBundleSanitizer.cs"));
+    True(sanitizer.Contains("Id = SanitizeId(f.Id)", StringComparison.Ordinal),
+        "SanitizeFinding no sanitiza el Id.");
+    True(sanitizer.Contains("Id = SanitizeId(c.Id)", StringComparison.Ordinal),
+        "SanitizeCause no sanitiza el Id.");
+    True(sanitizer.Contains("LooseComponentIdentityRegex", StringComparison.Ordinal),
+        "SanitizeText no detecta identidad suelta tras los formatos de componente conocidos.");
+
+    var alice = TdmPseudonym.Create("USR", "alice");
+    Equal(12, alice.Length, "El pseudónimo debe ser PREFIJO + 8 hex (12 caracteres).");
+    True(alice.StartsWith("USR-", StringComparison.Ordinal) && !alice.Contains("alice", StringComparison.OrdinalIgnoreCase),
+        "El pseudónimo conserva el usuario en claro.");
+    Equal(alice, TdmPseudonym.Create("USR", " alice "), "El pseudónimo no es estable ante espacios.");
+    Equal(alice, TdmPseudonym.Create("USR", alice), "El pseudónimo no es idempotente.");
+    Equal("N/D", TdmPseudonym.Create("USR", "N/D"), "La sentinela N/D debe conservarse.");
+    True(!alice.Equals(TdmPseudonym.Create("USR", "bob"), StringComparison.Ordinal),
+        "Usuarios distintos colisionaron en el mismo pseudónimo.");
+    return Task.CompletedTask;
+}
+
 static Task ServiceRecentTransitionsWiredBeforeCorrelation()
 {
     var root = FindRepoRoot();
@@ -3451,16 +3610,24 @@ static Task RemoteLogonFailuresCoverEachCorrelatedUser()
     };
 
     var candidates = RootCauseCorrelator.Analyze(Report(events, now));
-    True(candidates.Any(c => c.Id == "ROOT-WINDOWS-REMOTE-LOGON-alice"),
+    var alice = TdmPseudonym.Create("USR", "alice");
+    var bob = TdmPseudonym.Create("USR", "bob");
+    var carol = TdmPseudonym.Create("USR", "carol");
+    var dave = TdmPseudonym.Create("USR", "dave");
+    True(candidates.Any(c => c.Id == $"ROOT-WINDOWS-REMOTE-LOGON-{alice}"),
         "El primer usuario correlacionado no generó candidato.");
-    True(candidates.Any(c => c.Id == "ROOT-WINDOWS-REMOTE-LOGON-bob"),
+    True(candidates.Any(c => c.Id == $"ROOT-WINDOWS-REMOTE-LOGON-{bob}"),
         "El segundo usuario correlacionado no generó candidato (el ciclo se detuvo en el primero).");
-    True(candidates.Any(c => c.Id == "ROOT-WINDOWS-REMOTE-LOGON-carol"),
+    True(candidates.Any(c => c.Id == $"ROOT-WINDOWS-REMOTE-LOGON-{carol}"),
         "El tercer usuario correlacionado no generó candidato (el ciclo se detuvo en el primero).");
-    False(candidates.Any(c => c.Id == "ROOT-WINDOWS-REMOTE-LOGON-dave"),
+    False(candidates.Any(c => c.Id == $"ROOT-WINDOWS-REMOTE-LOGON-{dave}"),
         "Un failure sin síntoma correlacionado generó candidato de ruido.");
-    Equal(1, candidates.Count(c => c.Id == "ROOT-WINDOWS-REMOTE-LOGON-alice"),
+    Equal(1, candidates.Count(c => c.Id == $"ROOT-WINDOWS-REMOTE-LOGON-{alice}"),
         "El mismo usuario generó candidatos duplicados.");
+    False(candidates.Any(c => c.Id.Contains("alice", StringComparison.OrdinalIgnoreCase)),
+        "El Id de causa conservó el usuario en claro (C7).");
+    True(candidates.Any(c => c.Componente == $"Autenticación Windows / {alice}"),
+        "El componente de causa no pseudonimizó el usuario (C7).");
     return Task.CompletedTask;
 }
 

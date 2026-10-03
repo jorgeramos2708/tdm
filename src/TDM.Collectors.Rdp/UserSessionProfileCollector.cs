@@ -216,7 +216,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
         if (profile.IsBak)
         {
             findings.Add(new DiagnosticFinding(
-                $"USER-PROFILE-BAK-{Sanitize(profile.Sid)}",
+                $"USER-PROFILE-BAK-{TdmPseudonym.Create("SID", profile.Sid)}",
                 "Windows User Profile",
                 DiagnosticSeverity.Advertencia,
                 "Se detectó una entrada .bak de perfil de usuario en ProfileList.",
@@ -232,7 +232,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
         if (pathProbe.IsAbsent && !string.IsNullOrWhiteSpace(profile.Path))
         {
             findings.Add(new DiagnosticFinding(
-                $"USER-PROFILE-PATH-MISSING-{Sanitize(profile.Sid)}",
+                $"USER-PROFILE-PATH-MISSING-{TdmPseudonym.Create("SID", profile.Sid)}",
                 "Windows User Profile",
                 DiagnosticSeverity.Advertencia,
                 "Un perfil registrado apunta a una carpeta que no existe.",
@@ -248,7 +248,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
         if (pathProbe.IsUnavailable)
         {
             findings.Add(new DiagnosticFinding(
-                $"USER-PROFILE-PATH-NOT-EVALUATED-{Sanitize(profile.Sid)}",
+                $"USER-PROFILE-PATH-NOT-EVALUATED-{TdmPseudonym.Create("SID", profile.Sid)}",
                 "Windows User Profile",
                 DiagnosticSeverity.Advertencia,
                 "No fue posible comprobar la carpeta registrada del perfil.",
@@ -260,7 +260,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
         else if (pathProbe.IsAvailable && ntUserProbe.IsUnavailable)
         {
             findings.Add(new DiagnosticFinding(
-                $"USER-PROFILE-HIVE-NOT-EVALUATED-{Sanitize(profile.Sid)}",
+                $"USER-PROFILE-HIVE-NOT-EVALUATED-{TdmPseudonym.Create("SID", profile.Sid)}",
                 "Windows User Profile",
                 DiagnosticSeverity.Advertencia,
                 "No fue posible comprobar NTUSER.DAT del perfil.",
@@ -273,7 +273,7 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
         if (temporary)
         {
             findings.Add(new DiagnosticFinding(
-                $"USER-PROFILE-TEMP-{Sanitize(profile.Sid)}",
+                $"USER-PROFILE-TEMP-{TdmPseudonym.Create("SID", profile.Sid)}",
                 "Windows User Profile",
                 DiagnosticSeverity.Advertencia,
                 "TDM detectó indicios de un perfil temporal o de recuperación.",
@@ -496,11 +496,15 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
                 account.AccountExpires.HasValue && account.AccountExpires.Value <= DateTimeOffset.Now ? "Cuenta expirada" :
                 "Cuenta local sin bloqueo observado";
             var latest = group.OrderByDescending(e => e.Timestamp).First();
+            // H8/C7: Id, Componente y Resumen no llevan el usuario en claro; la evidencia
+            // "Usuario" sigue cruda y el sanitizador de export la cubre por clave (4625 expone
+            // TargetUserName: learn.microsoft.com/en-us/windows/security/threat-protection/auditing/event-4625).
+            var userId = TdmPseudonym.Create("USR", user);
             findings.Add(new DiagnosticFinding(
-                $"USER-REMOTE-LOGON-FAILURE-{Sanitize(user)}",
-                string.IsNullOrWhiteSpace(user) || user == "N/D" ? "Windows RemoteInteractive Logon" : user,
+                $"USER-REMOTE-LOGON-FAILURE-{userId}",
+                string.IsNullOrWhiteSpace(user) || user == "N/D" ? "Windows RemoteInteractive Logon" : userId,
                 DiagnosticSeverity.Advertencia,
-                $"Se detectaron {group.Count()} fallos de inicio de sesión RemoteInteractive para '{user}' en la ventana.",
+                $"Se detectaron {group.Count()} fallos de inicio de sesión RemoteInteractive para '{userId}' en la ventana.",
                 "La autenticación Windows falló antes de completar la sesión. Si el síntoma de TSplus corresponde al mismo usuario y hora, esta evidencia debe investigarse antes de la carga del perfil o de la aplicación publicada.",
                 [
                     new EvidenceItem("Usuario", user),
@@ -1229,8 +1233,6 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
         };
         return Math.Min(hardMax, Math.Max(baseLimit, baseLimit * factor));
     }
-
-    private static string Sanitize(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).Take(28).ToArray());
 
     private sealed record LocalUserInfo(
         string Name,

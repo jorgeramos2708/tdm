@@ -24,9 +24,13 @@ public static partial class RootCauseCorrelator
                 .FirstOrDefault(e => EventIdentity(e) is string candidate && SameIdentity(candidate, user));
             if (related is null) continue;
             var nla = failure.Tipo == "USER_NLA_PASSWORD_FAILURE";
+            // C7: el usuario no viaja en claro en Id/Componente (4625 expone TargetUserName/
+            // WorkstationName como campos de identidad: learn.microsoft.com/en-us/windows/security/threat-protection/auditing/event-4625);
+            // se pseudonimiza con TdmPseudonym — mismo algoritmo que el sanitizador de export.
+            var userId = TdmPseudonym.Create("USR", user);
             drafts.Add(new CandidateDraft(
-                nla ? $"ROOT-WINDOWS-NLA-CREDENTIALS-{user}" : $"ROOT-WINDOWS-CREDENTIAL-VALIDATION-{user}",
-                nla ? $"Windows NLA / credenciales / {user}" : $"Windows / validación de credenciales / {user}",
+                nla ? $"ROOT-WINDOWS-NLA-CREDENTIALS-{userId}" : $"ROOT-WINDOWS-CREDENTIAL-VALIDATION-{userId}",
+                nla ? $"Windows NLA / credenciales / {userId}" : $"Windows / validación de credenciales / {userId}",
                 DiagnosticLayer.Seguridad,
                 nla ? 96 : 88,
                 nla ? ConfidenceLevel.Alta : ConfidenceLevel.Media,
@@ -66,9 +70,10 @@ public static partial class RootCauseCorrelator
                 .FirstOrDefault(e => EventIdentity(e) is string candidate && SameIdentity(candidate, user));
             if (related is null) continue;
             var lockout = failure.Tipo == "ACCOUNT_LOCKOUT";
+            var userId = TdmPseudonym.Create("USR", user);
             drafts.Add(new CandidateDraft(
-                lockout ? $"ROOT-WINDOWS-ACCOUNT-LOCKOUT-{user}" : $"ROOT-WINDOWS-KERBEROS-PREAUTH-{user}",
-                lockout ? $"Windows / cuenta bloqueada / {user}" : $"Kerberos / preautenticación / {user}",
+                lockout ? $"ROOT-WINDOWS-ACCOUNT-LOCKOUT-{userId}" : $"ROOT-WINDOWS-KERBEROS-PREAUTH-{userId}",
+                lockout ? $"Windows / cuenta bloqueada / {userId}" : $"Kerberos / preautenticación / {userId}",
                 DiagnosticLayer.Seguridad,
                 lockout ? 98 : 89,
                 lockout ? ConfidenceLevel.Alta : ConfidenceLevel.Media,
@@ -112,9 +117,10 @@ public static partial class RootCauseCorrelator
                 .FirstOrDefault(e => EventIdentity(e) is string candidate && SameIdentity(candidate, user));
             if (related is null) continue;
             if (!emittedLogonUsers.Add(user)) continue;
+            var userId = TdmPseudonym.Create("USR", user);
             drafts.Add(new CandidateDraft(
-                $"ROOT-WINDOWS-REMOTE-LOGON-{user}",
-                $"Autenticación Windows / {user}",
+                $"ROOT-WINDOWS-REMOTE-LOGON-{userId}",
+                $"Autenticación Windows / {userId}",
                 DiagnosticLayer.Windows,
                 95,
                 ConfidenceLevel.Alta,
@@ -165,7 +171,7 @@ public static partial class RootCauseCorrelator
             var matched = profilePair.Value.identityMatched;
             drafts.Add(new CandidateDraft(
                 "ROOT-WINDOWS-USER-PROFILE",
-                string.IsNullOrWhiteSpace(profilePair.Value.user) ? "Windows User Profile Service" : $"Windows User Profile / {profilePair.Value.user}",
+                string.IsNullOrWhiteSpace(profilePair.Value.user) ? "Windows User Profile Service" : $"Windows User Profile / {TdmPseudonym.Create("USR", profilePair.Value.user)}",
                 DiagnosticLayer.Windows,
                 matched ? 96 : 88,
                 matched ? ConfidenceLevel.Alta : ConfidenceLevel.Media,
