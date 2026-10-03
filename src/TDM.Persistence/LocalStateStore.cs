@@ -49,7 +49,7 @@ public sealed class LocalStateStore
         var normalizedChannel = NormalizeChannel(channel);
         var latestSnapshotPath = GetLatestSnapshotPath(normalizedChannel);
         await using var gate = await AcquireStoreLockAsync(ct);
-        var previous = await ReadSnapshotAsync(latestSnapshotPath, ct);
+        var (previous, previousCorrupt) = await ReadSnapshotCoreAsync(latestSnapshotPath, ct);
         var baseline = await ReadSnapshotAsync(BaselinePath, ct);
 
         // Un cambio de esquema de persistencia no es un cambio operativo del servidor.
@@ -65,15 +65,22 @@ public sealed class LocalStateStore
         var historyPath = Path.Combine(RootPath, "history", $"state{channelSuffix}-{snapshot.CapturedAt:yyyy-MM-dd}.jsonl");
         var transitionsPath = Path.Combine(RootPath, "history", $"transitions{channelSuffix}-{snapshot.CapturedAt:yyyy-MM-dd}.jsonl");
 
-        var durable = normalizedChannel == "diagnostic";
-        await AppendJsonLineAsync(historyPath, snapshot, durable, ct);
+        // F24: el fsync va en TODOS los canales, no sólo en "diagnostic". Antes la
+        // durabilidad iba atada al canal: los canales no diagnósticos se escribían con un
+        // simple FlushAsync y un corte de alimentación podía truncar latest-<canal>.json;
+        // el siguiente ciclo lo leía corrupto, perdía sus transiciones y ni siquiera
+        // telemetrizaba la corrupción previa. FileStream.Flush(flushToDisk: true) fuerza
+        // FlushFileBuffers (descarga la caché hasta el disco) y FileOptions.WriteThrough
+        // hace lo propio en la propia escritura; el formato pretty sigue atado al canal.
+        var pretty = normalizedChannel == "diagnostic";
+        await AppendJsonLineAsync(historyPath, snapshot, durable: true, ct);
         foreach (var transition in transitions)
-            await AppendJsonLineAsync(transitionsPath, transition, durable, ct);
+            await AppendJsonLineAsync(transitionsPath, transition, durable: true, ct);
 
         var persisted = previous is not null && previous.SchemaVersion == snapshot.SchemaVersion
             ? CarryForwardMissing(previous, snapshot)
             : snapshot;
-        await WriteAtomicAsync(latestSnapshotPath, persisted, pretty: durable, durable: durable, ct: ct);
+        await WriteAtomicAsync(latestSnapshotPath, persisted, pretty: pretty, durable: true, ct: ct);
         CleanupRetentionIfDue();
 
         return new RecordResult(
@@ -84,7 +91,8 @@ public sealed class LocalStateStore
             historyPath,
             transitionsPath,
             latestSnapshotPath,
-            baseline is null ? null : BaselinePath);
+            baseline is null ? null : BaselinePath,
+            previousCorrupt);
     }
 
     public async Task<IReadOnlyList<StateTransition>> ReadRecentTransitionsAsync(
@@ -236,18 +244,29 @@ public sealed class LocalStateStore
 
     public static PersistentStateSnapshot CarryForwardMissing(PersistentStateSnapshot previous, PersistentStateSnapshot current)
     {
-        var currentKeys = current.Observations.Select(o => o.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var carried = previous.Observations.Where(o => !currentKeys.Contains(o.Key)).ToList();
+        // F24: claves nulas/vacías (JSON legible pero sin identidad) no deben tumbar la
+        // persistencia: se ignoran en ambos lados, igual que en CompareTransitions/Baseline.
+        var currentKeys = current.Observations
+            .Where(o => !string.IsNullOrWhiteSpace(o.Key))
+            .Select(o => o.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var carried = previous.Observations
+            .Where(o => !string.IsNullOrWhiteSpace(o.Key) && !currentKeys.Contains(o.Key)).ToList();
         return carried.Count == 0 ? current : current with { Observations = [.. current.Observations, .. carried] };
     }
 
     public static IReadOnlyList<StateTransition> CompareTransitions(PersistentStateSnapshot previous, PersistentStateSnapshot current)
     {
         if (previous.SchemaVersion != current.SchemaVersion) return Array.Empty<StateTransition>();
-        var oldMap = previous.Observations.Where(o => o.TrackTransition)
-            .ToDictionary(o => o.Key, StringComparer.OrdinalIgnoreCase);
+        // F24: ToDictionary lanza ArgumentException con claves duplicadas y
+        // ArgumentNullException con claves nulas (Enumerable.ToDictionary;
+        // Dictionary<TKey,TValue> no admite claves null); ninguna es un JsonException,
+        // así que una observación repetida tumbaría la persistencia de cada ciclo.
+        var oldMap = previous.Observations
+            .Where(o => o.TrackTransition && !string.IsNullOrWhiteSpace(o.Key))
+            .GroupBy(o => o.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
         var output = new List<StateTransition>();
-        foreach (var item in current.Observations.Where(o => o.TrackTransition))
+        foreach (var item in current.Observations.Where(o => o.TrackTransition && !string.IsNullOrWhiteSpace(o.Key)))
         {
             if (!oldMap.TryGetValue(item.Key, out var old)) continue; // RC18.4 evita falsos "eliminados" si un collector quedó sin cobertura.
             if (string.Equals(old.Value, item.Value, StringComparison.Ordinal)) continue;
@@ -260,10 +279,13 @@ public sealed class LocalStateStore
     public static IReadOnlyList<BaselineDifference> CompareBaseline(PersistentStateSnapshot baseline, PersistentStateSnapshot current)
     {
         if (baseline.SchemaVersion != current.SchemaVersion) return Array.Empty<BaselineDifference>();
-        var oldMap = baseline.Observations.Where(o => o.BaselineEligible)
-            .ToDictionary(o => o.Key, StringComparer.OrdinalIgnoreCase);
+        // F24: misma regla que CompareTransitions — duplicados/nulos no deben tumbar el ciclo.
+        var oldMap = baseline.Observations
+            .Where(o => o.BaselineEligible && !string.IsNullOrWhiteSpace(o.Key))
+            .GroupBy(o => o.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
         var output = new List<BaselineDifference>();
-        foreach (var item in current.Observations.Where(o => o.BaselineEligible))
+        foreach (var item in current.Observations.Where(o => o.BaselineEligible && !string.IsNullOrWhiteSpace(o.Key)))
         {
             if (!oldMap.TryGetValue(item.Key, out var old)) continue; // Ausencia de evidencia no se interpreta automáticamente como drift.
             if (string.Equals(old.Value, item.Value, StringComparison.Ordinal)) continue;
@@ -273,13 +295,20 @@ public sealed class LocalStateStore
     }
 
     private async Task<PersistentStateSnapshot?> ReadSnapshotAsync(string path, CancellationToken ct)
+        => (await ReadSnapshotCoreAsync(path, ct)).Snapshot;
+
+    // F24: además de tolerar el archivo corrupto (ya telemetrizado), se distingue si la
+    // lectura falló por corrupción para que el ciclo siguiente pueda declararla en su
+    // informe (RecordResult.PreviousSnapshotCorrupt) en lugar de perder sus transiciones
+    // en silencio.
+    private async Task<(PersistentStateSnapshot? Snapshot, bool Corrupt)> ReadSnapshotCoreAsync(string path, CancellationToken ct)
     {
-        if (!File.Exists(path)) return null;
+        if (!File.Exists(path)) return (null, false);
         try
         {
             await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
                 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            return await JsonSerializer.DeserializeAsync<PersistentStateSnapshot>(stream, _json, ct);
+            return (await JsonSerializer.DeserializeAsync<PersistentStateSnapshot>(stream, _json, ct), false);
         }
         catch (JsonException)
         {
@@ -288,7 +317,7 @@ public sealed class LocalStateStore
             Interlocked.Increment(ref _corruptSnapshotReads);
             _lastCorruptSnapshotPath = path;
             System.Diagnostics.Trace.TraceWarning($"[TDM] Snapshot de estado corrupto ignorado: {path}");
-            return null;
+            return (null, true);
         }
     }
 

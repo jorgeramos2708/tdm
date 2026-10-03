@@ -56,7 +56,13 @@ public sealed class IncidentLedger
             try
             {
                 var item = JsonSerializer.Deserialize<ManagedIncident>(line, _json);
-                if (item is not null && (!operationalOnly || IsOperationalManagedIncident(item))) items[item.Id] = item;
+                // F24: JsonException sólo cubre JSON inválido o incompatible con el tipo
+                // (documentación de System.Text.Json.JsonException); un "id":null
+                // deserializa sin error, pero items[item.Id] lanza ArgumentNullException
+                // (Dictionary<TKey,TValue> no admite claves null), que escapa a este catch
+                // y deja ReconcileAsync fallando en cada ciclo. La línea se salta.
+                if (item is null || string.IsNullOrWhiteSpace(item.Id)) continue;
+                if (!operationalOnly || IsOperationalManagedIncident(item)) items[item.Id] = item;
             }
             catch (JsonException) { }
         }

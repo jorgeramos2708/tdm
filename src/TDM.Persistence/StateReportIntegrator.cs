@@ -21,13 +21,31 @@ public static class StateReportIntegrator
         var events = report.Eventos.ToList();
         var findings = report.Hallazgos.ToList();
         var anchor = DiagnosticReportWindow.EffectivePeriodEnd(report);
+        // F24: antes un único try/catch envolvía persistencia + tendencias + histórico; el
+        // fallo de un store (o del baseline compartido) borraba por completo las
+        // transiciones del ciclo y las series de tendencias. Cada etapa se aísla con su
+        // propio manejador y los fallos se declaran al final en UNAVAILABLE.
+        var failures = new List<string>();
+        PersistentStateSnapshot? snapshot = null;
+        RecordResult? result = null;
+
+        // Etapa 1: persistencia de la muestra actual (+ baseline compartido, si aplica).
         try
         {
-            var store = new LocalStateStore(rootPath);
-            var snapshot = preRecordedResult?.Snapshot ?? StateSnapshotBuilder.Build(report, toolVersion);
-            var result = preRecordedResult ?? await store.RecordAsync(snapshot, channel, ct);
+            if (preRecordedResult is not null)
+            {
+                result = preRecordedResult;
+                snapshot = preRecordedResult.Snapshot;
+            }
+            else
+            {
+                snapshot = StateSnapshotBuilder.Build(report, toolVersion);
+                result = await new LocalStateStore(rootPath).RecordAsync(snapshot, channel, ct);
+            }
 
-            if (!string.IsNullOrWhiteSpace(baselineRootPath))
+            // El resultado se asigna ANTES del baseline compartido: si este falla, las
+            // transiciones ya están calculadas y persistidas y se conservan para el informe.
+            if (result is not null && snapshot is not null && !string.IsNullOrWhiteSpace(baselineRootPath))
             {
                 var baselineStore = new LocalStateStore(baselineRootPath);
                 if (!Path.GetFullPath(baselineStore.RootPath).Equals(Path.GetFullPath(result.RootPath), StringComparison.OrdinalIgnoreCase))
@@ -43,33 +61,48 @@ public static class StateReportIntegrator
                     }
                 }
             }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"[TDM] Persistencia del historial local fallida: {ex.Message}");
+            failures.Add($"persistencia: {ex.Message}");
+        }
 
-            var trends = await ResourceTrendAnalyzer.UpdateAndAnalyzeAsync(snapshot, result.RootPath, ct);
-            events.AddRange(trends.Events);
-            findings.AddRange(trends.Findings.Where(f => !findings.Any(existing => existing.Id.Equals(f.Id, StringComparison.OrdinalIgnoreCase))));
+        // Etapa 2: tendencias de recursos. Aislada del almacén: una escritura fallida del
+        // journal no debe borrar la serie de tendencias de este ciclo.
+        if (snapshot is not null)
+        {
+            try
+            {
+                var trends = await ResourceTrendAnalyzer.UpdateAndAnalyzeAsync(snapshot, HistoryRoot(result, rootPath), ct);
+                events.AddRange(trends.Events);
+                findings.AddRange(trends.Findings.Where(f => !findings.Any(existing => existing.Id.Equals(f.Id, StringComparison.OrdinalIgnoreCase))));
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"[TDM] Tendencias de recursos no actualizadas: {ex.Message}");
+                failures.Add($"tendencias: {ex.Message}");
+            }
+        }
 
-            var historical = await new HistoricalTelemetryStore(result.RootPath).UpdateAndAnalyzeAsync(snapshot, ct);
-            events.AddRange(historical.Events);
-            findings.AddRange(historical.Findings.Where(f => !findings.Any(existing => existing.Id.Equals(f.Id, StringComparison.OrdinalIgnoreCase))));
+        // Etapa 3: telemetría histórica horaria, con la misma independencia.
+        if (snapshot is not null)
+        {
+            try
+            {
+                var historical = await new HistoricalTelemetryStore(HistoryRoot(result, rootPath)).UpdateAndAnalyzeAsync(snapshot, ct);
+                events.AddRange(historical.Events);
+                findings.AddRange(historical.Findings.Where(f => !findings.Any(existing => existing.Id.Equals(f.Id, StringComparison.OrdinalIgnoreCase))));
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"[TDM] Telemetría histórica no actualizada: {ex.Message}");
+                failures.Add($"histórico: {ex.Message}");
+            }
+        }
 
-            events.Add(new DiagnosticEvent(
-                anchor,
-                "TDM",
-                "Historial local TDM",
-                DiagnosticLayer.Desconocida,
-                DiagnosticSeverity.Informativo,
-                "TDM_LOCAL_HISTORY_STATUS",
-                "TDM guardó una muestra compacta de estado en su almacén local; no se modificó Windows ni TSplus.",
-                Evidencia:
-                [
-                    new EvidenceItem("Almacén", result.RootPath),
-                    new EvidenceItem("Formato", "JSON/JSONL; sin motor de base de datos"),
-                    new EvidenceItem("Canal", channel),
-                    new EvidenceItem("Transiciones detectadas", result.Transitions.Count.ToString()),
-                    new EvidenceItem("Baseline sano", result.BaselinePath is null ? "No configurado" : "Disponible"),
-                    new EvidenceItem("Diferencias contra baseline", result.BaselineDifferences.Count.ToString())
-                ]));
-
+        if (result is not null)
+        {
             foreach (var transition in result.Transitions.Take(100))
             {
             if (events.Any(e => SamePhysicalTransition(events, e, transition)))
@@ -132,7 +165,40 @@ public static class StateReportIntegrator
                 }
             }
         }
-        catch (Exception ex)
+
+        // Emisión exclusiva (§2/P8): sin fallos → STATUS; con fallos → UNAVAILABLE con el
+        // detalle unido. ReportExporter y DiagnosticCoverageAnalyzer leen el ÚLTIMO
+        // STATUS/UNAVAILABLE y un STATUS posterior se interpreta como "Disponible", así
+        // que ambos nunca deben coexistir en el mismo informe.
+        if (failures.Count == 0 && result is not null)
+        {
+            var statusEvidence = new List<EvidenceItem>
+            {
+                new("Almacén", result.RootPath),
+                new("Formato", "JSON/JSONL; sin motor de base de datos"),
+                new("Canal", channel),
+                new("Transiciones detectadas", result.Transitions.Count.ToString()),
+                new("Baseline sano", result.BaselinePath is null ? "No configurado" : "Disponible"),
+                new("Diferencias contra baseline", result.BaselineDifferences.Count.ToString())
+            };
+            if (result.PreviousSnapshotCorrupt)
+            {
+                // F24: el latest.json anterior estaba corrupto; sin esta declaración el
+                // informe presentaba "Transiciones detectadas: 0" como un ciclo sano.
+                statusEvidence.Add(new EvidenceItem("Snapshot anterior",
+                    "Corrupto; las transiciones de este ciclo no se calcularon contra él"));
+            }
+            events.Add(new DiagnosticEvent(
+                anchor,
+                "TDM",
+                "Historial local TDM",
+                DiagnosticLayer.Desconocida,
+                DiagnosticSeverity.Informativo,
+                "TDM_LOCAL_HISTORY_STATUS",
+                "TDM guardó una muestra compacta de estado en su almacén local; no se modificó Windows ni TSplus.",
+                Evidencia: statusEvidence));
+        }
+        else
         {
             events.Add(new DiagnosticEvent(
                 anchor,
@@ -142,7 +208,9 @@ public static class StateReportIntegrator
                 DiagnosticSeverity.Advertencia,
                 "TDM_LOCAL_HISTORY_UNAVAILABLE",
                 "No fue posible actualizar el historial local propio de TDM. El diagnóstico de Windows/TSplus continúa siendo válido con la evidencia recopilada.",
-                Evidencia: [new EvidenceItem("Detalle", ex.Message)]));
+                Evidencia: [new EvidenceItem("Detalle", failures.Count == 0
+                    ? "La persistencia del ciclo no produjo resultado."
+                    : string.Join("; ", failures))]));
         }
 
         return report with
@@ -540,6 +608,14 @@ public static class StateReportIntegrator
         }
         return false;
     }
+
+    // F24: si la persistencia del ciclo falló no hay RootPath en el resultado; las etapas
+    // de tendencias/histórico se apoyan en la raíz configurada para seguir aportando su
+    // evidencia en lugar de saltarse con el fallo del almacén.
+    private static string HistoryRoot(RecordResult? result, string? rootPath)
+        => result?.RootPath ?? (string.IsNullOrWhiteSpace(rootPath)
+            ? LocalStateStore.DefaultRootPath
+            : Path.GetFullPath(rootPath));
 
     private static DiagnosticLayer ParseLayer(string value)
         => Enum.TryParse<DiagnosticLayer>(value, true, out var layer) ? layer : DiagnosticLayer.Desconocida;

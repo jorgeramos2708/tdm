@@ -67,4 +67,8 @@ public sealed record RecordResult(
     string HistoryPath,
     string TransitionsPath,
     string LatestSnapshotPath,
-    string? BaselinePath);
+    string? BaselinePath,
+    // F24: true si el latest.json anterior estaba corrupto al registrar este ciclo; en
+    // ese caso las transiciones del ciclo no se pudieron calcular contra él y debe
+    // declararse en el informe en lugar de perderlas en silencio.
+    bool PreviousSnapshotCorrupt = false);

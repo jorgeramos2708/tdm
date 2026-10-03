@@ -187,7 +187,12 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("ModuleFileProbeDoesNotClaimAbsenceOnAccessError", ModuleFileProbeDoesNotClaimAbsenceOnAccessError),
     ("SpanishSentencesAreNotStackFrames", SpanishSentencesAreNotStackFrames),
     ("SecurityAuditEventsEscalateWithoutDuplicateFindings", SecurityAuditEventsEscalateWithoutDuplicateFindings),
-    ("VolumeTrimKeepsChannelCoverageHonest", VolumeTrimKeepsChannelCoverageHonest)
+    ("VolumeTrimKeepsChannelCoverageHonest", VolumeTrimKeepsChannelCoverageHonest),
+    ("LedgerSkipsIncidentsWithoutId", LedgerSkipsIncidentsWithoutId),
+    ("StateCompareToleratesDuplicateAndNullKeys", StateCompareToleratesDuplicateAndNullKeys),
+    ("CorruptPreviousSnapshotIsDeclaredInStatus", CorruptPreviousSnapshotIsDeclaredInStatus),
+    ("StateJournalPersistsEveryChannelDurably", StateJournalPersistsEveryChannelDurably),
+    ("HistoryStageFailureKeepsTransitionsAndTrends", HistoryStageFailureKeepsTransitionsAndTrends)
 };
 
 var failed = 0;
@@ -4720,6 +4725,164 @@ static async Task VolumeTrimKeepsChannelCoverageHonest()
     True(report.Eventos.Count(e => e.Evidencia?.Any(x => x.Clave == "Log" && x.Valor == "Other") == true) > 0,
         "El contexto reciente de otros canales desapareció junto con el recorte.");
     return;
+}
+
+static async Task LedgerSkipsIncidentsWithoutId()
+{
+    var root = TempDir();
+    try
+    {
+        var at = DateTimeOffset.Now;
+        var ledger = new IncidentLedger(root);
+        var valid = new ManagedIncident("INC-TEST", at, at, null, null, ManagedIncidentState.Persistent,
+            "Error", "Remote Access", "APPLICATION_CRASH", "crash de prueba", null, null, 2);
+        var withNullId = valid with { Id = null! };
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        Directory.CreateDirectory(Path.GetDirectoryName(ledger.Path)!);
+        await File.WriteAllLinesAsync(ledger.Path, new[]
+        {
+            JsonSerializer.Serialize(valid, options),
+            JsonSerializer.Serialize(withNullId, options)
+        });
+
+        var items = await ledger.ReadRawAsync();
+        Equal(1, items.Count,
+            "Una línea con \"id\":null debe saltarse: JsonException sólo cubre JSON inválido/incompatible y items[item.Id] lanzaba ArgumentNullException fuera del catch, dejando ReconcileAsync fallando cada ciclo.");
+        Equal("INC-TEST", items[0].Id, "El incidente válido no sobrevivió junto a la línea con Id nulo.");
+    }
+    finally { TryDelete(root); }
+}
+
+static Task StateCompareToleratesDuplicateAndNullKeys()
+{
+    var now = DateTimeOffset.Now;
+    static PersistentObservation Obs(string key, string value, bool track, bool baseline)
+        => new(key, "SERVICE_STATE", "Spooler", "Windows", "Ninguno", "Informativo", value, track, baseline);
+
+    var previous = new PersistentStateSnapshot(1, "test", now, "TEST", "Windows", "11", "22631", "x64", false, null,
+    [
+        Obs("SERVICE_STATE:dup", "Running", true, true),
+        Obs("SERVICE_STATE:dup", "Stopped", true, true),
+        Obs(null!, "ignored-previous", true, true)
+    ]);
+    var current = new PersistentStateSnapshot(1, "test", now.AddSeconds(5), "TEST", "Windows", "11", "22631", "x64", false, null,
+    [
+        Obs("SERVICE_STATE:dup", "Stopped", true, true),
+        Obs(null!, "ignored-current", true, true)
+    ]);
+
+    var transitions = LocalStateStore.CompareTransitions(previous, current);
+    Equal(1, transitions.Count,
+        "Una clave duplicada en el snapshot previo debía deduplicarse (primera aparición) en lugar de lanzar ArgumentException desde ToDictionary.");
+    Equal("Running", transitions[0].PreviousValue,
+        "La deduplicación no conservó la primera observación de la clave repetida.");
+
+    var differences = LocalStateStore.CompareBaseline(previous, current);
+    Equal(1, differences.Count,
+        "Una clave duplicada/baseline con nulos debía deduplicarse en CompareBaseline en lugar de tumbar el ciclo.");
+    Equal("Running", differences[0].PreviousValue,
+        "La deduplicación de baseline no conservó la primera observación de la clave repetida.");
+
+    var carried = LocalStateStore.CarryForwardMissing(previous, current);
+    False(carried.Observations.Any(o => o.Value == "ignored-previous"),
+        "La observación previa sin clave no debe arrastrarse al snapshot persistido.");
+    True(carried.Observations.Any(o => o.Value == "ignored-current"),
+        "El carry-forward dejó de conservar las observaciones actuales válidas.");
+    return Task.CompletedTask;
+}
+
+static async Task CorruptPreviousSnapshotIsDeclaredInStatus()
+{
+    var now = DateTimeOffset.Now;
+    var flagRoot = TempDir();
+    var statusRoot = TempDir();
+    try
+    {
+        var store = new LocalStateStore(flagRoot);
+        File.WriteAllText(store.LatestSnapshotPath, "{\"schemaVersion\": ");
+        var recorded = await store.RecordAsync(StateSnapshotBuilder.Build(
+            Report([ServiceStateEvent(now, "Running")], now), "1.0.0"));
+        True(recorded.PreviousSnapshotCorrupt,
+            "El resultado del ciclo no declaró que el latest.json anterior estaba corrupto.");
+
+        var statusStore = new LocalStateStore(statusRoot);
+        File.WriteAllText(statusStore.LatestSnapshotPath, "{\"schemaVersion\": ");
+        var corruptCycle = await StateReportIntegrator.RecordAndEnrichAsync(
+            Report([ServiceStateEvent(now, "Running")], now), "1.0.0", CancellationToken.None, rootPath: statusRoot);
+        var status = corruptCycle.Eventos.LastOrDefault(e => e.Tipo == "TDM_LOCAL_HISTORY_STATUS");
+        NotNull(status, "El ciclo con snapshot anterior corrupto dejó de emitir STATUS.");
+        True(status!.Evidencia?.Any(e => e.Clave == "Snapshot anterior") == true,
+            "El STATUS no declaró la corrupción del snapshot anterior (el informe presentaba 0 transiciones como un ciclo sano).");
+        True(status.Evidencia!.Any(e => e.Clave == "Snapshot anterior"
+                && e.Valor.Contains("Corrupto", StringComparison.Ordinal)),
+            "La evidencia del snapshot anterior corrupto perdió su detalle.");
+
+        var healthyCycle = await StateReportIntegrator.RecordAndEnrichAsync(
+            Report([ServiceStateEvent(now.AddSeconds(5), "Stopped")], now.AddSeconds(5)), "1.0.0",
+            CancellationToken.None, rootPath: statusRoot);
+        var healthyStatus = healthyCycle.Eventos.LastOrDefault(e => e.Tipo == "TDM_LOCAL_HISTORY_STATUS");
+        NotNull(healthyStatus, "El ciclo sano dejó de emitir STATUS.");
+        False(healthyStatus!.Evidencia?.Any(e => e.Clave == "Snapshot anterior") == true,
+            "Un ciclo sano declaró corrupto un snapshot anterior que era válido.");
+    }
+    finally
+    {
+        TryDelete(flagRoot);
+        TryDelete(statusRoot);
+    }
+}
+
+static Task StateJournalPersistsEveryChannelDurably()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de fsync del journal no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Persistence", "LocalStateStore.cs"));
+    False(text.Contains("var durable = normalizedChannel == \"diagnostic\";", StringComparison.Ordinal),
+        "El fsync volvió a atarse al canal: los canales no diagnósticos quedan sin descarga a disco (FileOptions.WriteThrough).");
+    True(text.Contains("await AppendJsonLineAsync(historyPath, snapshot, durable: true, ct);", StringComparison.Ordinal),
+        "El historial del canal ya no se escribe con fsync obligatorio.");
+    True(text.Contains("await AppendJsonLineAsync(transitionsPath, transition, durable: true, ct);", StringComparison.Ordinal),
+        "Las transiciones ya no se escriben con fsync obligatorio.");
+    True(text.Contains("await WriteAtomicAsync(latestSnapshotPath, persisted, pretty: pretty, durable: true, ct: ct);", StringComparison.Ordinal),
+        "El latest.json ya no se escribe con WriteThrough + Flush(flushToDisk: true) en todos los canales.");
+    return Task.CompletedTask;
+}
+
+static async Task HistoryStageFailureKeepsTransitionsAndTrends()
+{
+    var root = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var store = new LocalStateStore(root);
+        await store.RecordAsync(StateSnapshotBuilder.Build(
+            Report([ServiceStateEvent(now, "Running")], now), "1.0.0"), "service-monitor");
+
+        // Un archivo (no un directorio) como raíz del baseline compartido: el ctor de
+        // LocalStateStore lanza dentro de la etapa de persistencia, después de grabar.
+        var baselineFile = Path.Combine(root, "not-a-directory.json");
+        File.WriteAllText(baselineFile, "{}");
+
+        var report = Report(
+        [
+            ServiceStateEvent(now.AddSeconds(5), "Stopped"),
+            new DiagnosticEvent(now.AddSeconds(5), "TDM", "Recursos", DiagnosticLayer.Windows,
+                DiagnosticSeverity.Informativo, "SYSTEM_RESOURCE_STATE", "Recursos",
+                Evidencia: [new EvidenceItem(ResourceMetricKeys.CpuPercent, "42.5")])
+        ], now.AddSeconds(5));
+        report = await StateReportIntegrator.RecordAndEnrichAsync(report, "1.0.0", CancellationToken.None,
+            channel: "service-monitor", rootPath: root, baselineRootPath: baselineFile);
+
+        True(report.Eventos.Any(e => e.Tipo == "TDM_LOCAL_HISTORY_UNAVAILABLE"),
+            "El fallo de la etapa de persistencia no se declaró como UNAVAILABLE.");
+        False(report.Eventos.Any(e => e.Tipo == "TDM_LOCAL_HISTORY_STATUS"),
+            "Conviven STATUS y UNAVAILABLE en el mismo informe (el STATUS se interpretaría como 'Disponible').");
+        True(report.Eventos.Any(e => e.Tipo == "TDM_STATE_TRANSITION"),
+            "El fallo del baseline compartido borró las transiciones ya calculadas del ciclo.");
+        True(report.Eventos.Any(e => e.Tipo == "TDM_RESOURCE_TREND"),
+            "El fallo del almacén acopló la etapa de tendencias de recursos.");
+    }
+    finally { TryDelete(root); }
 }
 
 static string? FindRepoRoot()
