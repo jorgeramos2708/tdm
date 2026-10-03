@@ -23,14 +23,18 @@ public static class DiagnosticWorkflow
         ArgumentNullException.ThrowIfNull(report);
         report = EnrichOperationalState(report);
         var calibrated = DiagnosticPrecisionAnalyzer.Calibrate(report, RootCauseCorrelator.Analyze(report));
+        // P0-aprendizaje: el historial verificado por el técnico ajusta puntajes con
+        // guardarraíles (tope ±15, veto de evidencia primaria independiente). Se aplica sobre la
+        // lista completa ANTES del recorte para que el ranking ajustado decida qué entra al top-8.
+        // Sin historial el ranking usa solo evidencia actual: null no cambia ningún comportamiento previo.
+        if (verifiedHitRates is { Count: > 0 })
+            calibrated = VerifiedHistoryCalibrator.ApplyVerifiedHistory(calibrated, verifiedHitRates).ToList();
         // P14: recorte final post-calibración (la pre-selección amplia de 12 ya ocurrió en el correlador).
         var causes = calibrated.Take(8).ToList();
-        // P0-aprendizaje: el historial verificado por el técnico ajusta puntajes con
-        // guardarraíles (tope ±15, veto de evidencia primaria independiente). Sin historial
-        // el ranking usa solo evidencia actual: null no cambia ningún comportamiento previo.
-        if (verifiedHitRates is { Count: > 0 })
-            causes = VerifiedHistoryCalibrator.ApplyVerifiedHistory(causes, verifiedHitRates).ToList();
-        var causalCandidates = causes.Where(c => !c.RolCausal.Equals("IMPACTO_DIRECTO_SIN_CAUSA_DEL_PARO", StringComparison.OrdinalIgnoreCase)).ToList();
+        // MEDIUM: el filtro de rol se aplica sobre la lista completa (antes del Take(8)); con ≥8
+        // impactos directos saturando el top-8, el pool causal quedaba vacío y CausaRaizPrincipal
+        // era null aunque existieran causas reales calculadas en los puestos 9-12.
+        var causalCandidates = calibrated.Where(c => !c.RolCausal.Equals("IMPACTO_DIRECTO_SIN_CAUSA_DEL_PARO", StringComparison.OrdinalIgnoreCase)).ToList();
         RootCauseCandidate? primary = null;
         if (causalCandidates.Count == 1)
         {
@@ -45,6 +49,12 @@ public static class DiagnosticWorkflow
             // aunque saque 5 puntos, queda como hipótesis competitiva, no como causa principal.
             if (IsPrimaryEligible(causalCandidates[0]))
                 primary = causalCandidates[0];
+        }
+        if (primary is not null && causes.All(c => !ReferenceEquals(c, primary)))
+        {
+            // La causa ganadora quedó fuera del recorte de 8 por saturación de impacto directo;
+            // se incorpora a la presentación para que CausaRaizPrincipal esté siempre en CausasRaiz.
+            causes.Add(primary);
         }
         report = report with { CausasRaiz = causes, CausaRaizPrincipal = primary };
         // B#19: los patrones de falla se calculan sobre la lista completa de candidatos

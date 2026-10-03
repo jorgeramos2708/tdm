@@ -276,7 +276,7 @@ public static partial class RootCauseCorrelator
                 evidence.Add(new("Separación SCM → crash", (crashTs - failure.Timestamp!.Value).ToString()));
 
             drafts.Add(new CandidateDraft(
-                "ROOT-SCM-SERVICE-FAILURE",
+                $"ROOT-SCM-SERVICE-FAILURE-{SafeDependencyId(product.ToString())}",
                 $"Service Control Manager / {ProductName(product)}",
                 DiagnosticLayer.Windows,
                 score,
@@ -431,7 +431,7 @@ public static partial class RootCauseCorrelator
             evidence.AddRange(causal.Evidence);
 
             drafts.Add(new CandidateDraft(
-                "ROOT-PROCESS-CRASH",
+                $"ROOT-PROCESS-CRASH-{SafeDependencyId(appName)}",
                 appName,
                 DiagnosticLayer.Tsplus,
                 score,
@@ -474,7 +474,7 @@ public static partial class RootCauseCorrelator
             var dependencySpecific = EvidenceValue(dep, "Originador específico") ?? dependencyName;
             var dependencyLayer = dependencyOrigin == "TSPLUS" ? DiagnosticLayer.Tsplus : DiagnosticLayer.Windows;
             drafts.Add(new CandidateDraft(
-                "ROOT-DEPENDENCY-LOAD",
+                $"ROOT-DEPENDENCY-LOAD-{SafeDependencyId(dependencySpecific)}",
                 dependencySpecific,
                 dependencyLayer,
                 score,

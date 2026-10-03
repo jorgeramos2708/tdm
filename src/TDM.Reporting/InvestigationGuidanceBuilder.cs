@@ -171,7 +171,7 @@ public static class InvestigationGuidanceBuilder
 
     private static void AppendMissingEvidence(StringBuilder sb, DiagnosticReport report, RootCauseCandidate? c)
     {
-        if (c?.Id == "ROOT-PROCESS-CRASH")
+        if (c?.Id.StartsWith("ROOT-PROCESS-CRASH", StringComparison.OrdinalIgnoreCase) == true)
         {
             string EV(string key) => c.Evidencia.FirstOrDefault(e => e.Clave.Equals(key, StringComparison.OrdinalIgnoreCase))?.Valor ?? "N/D";
             var scm = EV("Service Control Manager 7031 cercano");

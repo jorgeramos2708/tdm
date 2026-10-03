@@ -175,7 +175,11 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("IncidentLedgerGateSurvivesInterprocessLockFailure", IncidentLedgerGateSurvivesInterprocessLockFailure),
     ("HistoricalReadFailurePreservesRetentionHistory", HistoricalReadFailurePreservesRetentionHistory),
     ("ResourceWindowReadFailureSkipsCompaction", ResourceWindowReadFailureSkipsCompaction),
-    ("LatestReportSaveKeepsPreviousOnFailedWrite", LatestReportSaveKeepsPreviousOnFailedWrite)
+    ("LatestReportSaveKeepsPreviousOnFailedWrite", LatestReportSaveKeepsPreviousOnFailedWrite),
+    ("TimeWindowParsesExactFormatsWithoutCulture", TimeWindowParsesExactFormatsWithoutCulture),
+    ("TdmSourcedEventsAreNotCausalSignals", TdmSourcedEventsAreNotCausalSignals),
+    ("SaturatedDirectImpactStillElectsCausalPrimary", SaturatedDirectImpactStillElectsCausalPrimary),
+    ("CrashAndDependencyCandidateIdsAreUnique", CrashAndDependencyCandidateIdsAreUnique)
 };
 
 var failed = 0;
@@ -544,7 +548,7 @@ static Task CrashIgnoresUnrelatedWindowsDistractors()
         DiagnosticSeverity.Advertencia, "THIRD_PARTY_SECURITY_INTERFERENCE_SIGNAL", "EDR activity on unrelated.exe");
 
 var cause = RootCauseCorrelator.Analyze(Report([security, disk, schannel, crash], now))
-          .FirstOrDefault(x => x.Id == "ROOT-PROCESS-CRASH");
+          .FirstOrDefault(x => x.Id.StartsWith("ROOT-PROCESS-CRASH", StringComparison.OrdinalIgnoreCase));
     NotNull(cause, "No se generó candidato del crash confirmado.");
     var strong = cause!.Evidencia.FirstOrDefault(x => x.Clave == "Antecedentes Windows fuertes")?.Valor;
     Equal("0", strong ?? "", "Se promovió evidencia Windows no relacionada como antecedente fuerte del crash.");
@@ -4399,6 +4403,113 @@ static async Task LatestReportSaveKeepsPreviousOnFailedWrite()
         NotNull(final, "El informe no se pudo guardar tras recuperarse de la cancelación.");
     }
     finally { TryDelete(root); }
+}
+
+static Task TimeWindowParsesExactFormatsWithoutCulture()
+{
+    var start = new DateTimeOffset(2025, 5, 3, 0, 0, 0, TimeSpan.Zero);
+    var end = new DateTimeOffset(2025, 5, 4, 23, 59, 59, TimeSpan.Zero);
+
+    DiagnosticFinding WithFecha(string valor) => new("FECHA", "TSplus", DiagnosticSeverity.Error, "fecha", "",
+        [new EvidenceItem("Fecha", valor)], ConfidenceLevel.Media, Capa: DiagnosticLayer.Tsplus);
+
+    // Con cultura invariante (mes/día) "05/03" se leía como 3 de mayo y entraba en la ventana;
+    // el formato exacto dd/MM/yyyy lo resuelve como 5 de marzo, fuera de la ventana.
+    False(DiagnosticTimeWindow.IsFindingInside(WithFecha("05/03/2025 10:00:00"), start, end),
+        "Una fecha dd/MM/yyyy HH:mm:ss se interpretó con la cultura del sistema.");
+    // Los días ≥13 no parseaban con TryParse sin cultura y el hallazgo se conservaba para siempre.
+    False(DiagnosticTimeWindow.IsFindingInside(WithFecha("25/12/2025 10:00:00"), start, end),
+        "Una fecha declarada anterior a la ventana sobrevivió por fallo de parse.");
+    // Round-trip "O" de los productores de Fecha/Último registro se resuelve por forma ISO 8601.
+    True(DiagnosticTimeWindow.IsFindingInside(
+        WithFecha(new DateTimeOffset(2025, 5, 3, 10, 0, 0, TimeSpan.Zero).ToString("O")), start, end),
+        "Una fecha round-trip O dentro de la ventana fue descartada.");
+    // El contrato de hallazgo de estado actual sin clave temporal se conserva.
+    True(DiagnosticTimeWindow.IsFindingInside(
+        new DiagnosticFinding("ESTADO", "TSplus", DiagnosticSeverity.Error, "estado", "",
+            [new EvidenceItem("Estado", "Stopped")], ConfidenceLevel.Media, Capa: DiagnosticLayer.Tsplus), start, end),
+        "Un hallazgo de estado actual sin timestamp se descartó.");
+    return Task.CompletedTask;
+}
+
+static Task TdmSourcedEventsAreNotCausalSignals()
+{
+    var now = DateTimeOffset.Now;
+    var derived = new DiagnosticEvent(now, "TDM", "Web Portal Service", DiagnosticLayer.Tsplus,
+        DiagnosticSeverity.Critico, "APPLICATION_CRASH", "crash sintetizado por TDM",
+        Producto: TsplusProduct.RemoteAccess);
+    False(DiagnosticPrecisionAnalyzer.IsCausalSignal(derived),
+        "Un evento con Fuente=TDM contó como señal causal independiente.");
+    var observed = new DiagnosticEvent(now, "Application Error", "TSplus", DiagnosticLayer.Tsplus,
+        DiagnosticSeverity.Critico, "APPLICATION_CRASH", "crash observado por Windows",
+        Producto: TsplusProduct.RemoteAccess);
+    True(DiagnosticPrecisionAnalyzer.IsCausalSignal(observed),
+        "Un evento de fuente externa dejó de contar como señal causal.");
+    return Task.CompletedTask;
+}
+
+static Task SaturatedDirectImpactStillElectsCausalPrimary()
+{
+    var now = DateTimeOffset.Now;
+    var events = new List<DiagnosticEvent>();
+    for (var i = 1; i <= 9; i++)
+    {
+        events.Add(new DiagnosticEvent(now.AddMinutes(-i), "TDM", $"Service{i}", DiagnosticLayer.Tsplus,
+            DiagnosticSeverity.Critico, "SERVICE_STATE", "Estado actual: Stopped",
+            Evidencia: [
+                new EvidenceItem("Servicio", $"Service{i}"),
+                new EvidenceItem("Nombre visible", $"Service {i}"),
+                new EvidenceItem("Estado", "Stopped")
+            ], Producto: TsplusProduct.RemoteAccess));
+    }
+    // Causa real con doble fuente: fallo SCM accionable + crash del mismo producto 1 min después.
+    events.Add(new DiagnosticEvent(now.AddMinutes(-3), "Service Control Manager", "tsplus seguimiento",
+        DiagnosticLayer.Windows, DiagnosticSeverity.Error, "SERVICE_START_FAILURE",
+        "El servicio no se pudo iniciar: failed to start", Codigo: "7000",
+        Producto: TsplusProduct.RemoteAccess));
+    events.Add(new DiagnosticEvent(now.AddMinutes(-2), "Application Error", "tsplus.exe", DiagnosticLayer.Tsplus,
+        DiagnosticSeverity.Error, "APPLICATION_CRASH", "tsplus.exe crashed",
+        Evidencia: [new EvidenceItem("Aplicación", "tsplus.exe")], Producto: TsplusProduct.RemoteAccess));
+
+    var analyzed = DiagnosticWorkflow.Analyze(Report(events, now));
+    var direct = analyzed.CausasRaiz
+        .Count(c => c.RolCausal.Equals("IMPACTO_DIRECTO_SIN_CAUSA_DEL_PARO", StringComparison.OrdinalIgnoreCase));
+    True(direct >= 8, "La saturación de impacto directo no se reprodujo en el recorte de 8.");
+    var scm = analyzed.CausasRaiz
+        .FirstOrDefault(c => c.Id.StartsWith("ROOT-SCM-SERVICE-FAILURE", StringComparison.OrdinalIgnoreCase));
+    NotNull(scm, "La causa real de los puestos 9-12 quedó fuera de CausasRaiz.");
+    NotNull(analyzed.CausaRaizPrincipal,
+        "Con ≥8 impactos directos la única causa real del pool completo fue descartada.");
+    True(analyzed.CausaRaizPrincipal?.Id.StartsWith("ROOT-SCM-SERVICE-FAILURE", StringComparison.OrdinalIgnoreCase) == true,
+        "La causa principal no fue el candidato causal del pool completo.");
+    return Task.CompletedTask;
+}
+
+static Task CrashAndDependencyCandidateIdsAreUnique()
+{
+    var now = DateTimeOffset.Now;
+    DiagnosticEvent Crash(string app, DateTimeOffset ts) => new(ts, "Application Error", app, DiagnosticLayer.Tsplus,
+        DiagnosticSeverity.Error, "APPLICATION_CRASH", $"{app} crashed",
+        Evidencia: [new EvidenceItem("Aplicación", app)], Producto: TsplusProduct.RemoteAccess);
+
+    var candidates = RootCauseCorrelator.Analyze(Report(
+        [Crash("alpha.exe", now.AddMinutes(-2)), Crash("beta.exe", now.AddMinutes(-1))], now));
+    var crashes = candidates
+        .Where(c => c.Id.StartsWith("ROOT-PROCESS-CRASH", StringComparison.OrdinalIgnoreCase))
+        .ToList();
+    Equal(2, crashes.Count, "No se generó un candidato de crash por aplicación.");
+    False(string.Equals(crashes[0].Id, crashes[1].Id, StringComparison.OrdinalIgnoreCase),
+        "Dos aplicaciones distintas compartieron el mismo Id de candidato.");
+    True(crashes.All(c => c.Id != "ROOT-PROCESS-CRASH"), "Se siguió emitiendo el Id genérico compartido.");
+
+    // El historial verificado ajusta sólo al candidato cuyo Id único coincide con el feedback.
+    var a = VerifiedCandidate(crashes[0].Id, 70, independent: false);
+    var b = VerifiedCandidate(crashes[1].Id, 72, independent: false);
+    var adjusted = VerifiedHistoryCalibrator.ApplyVerifiedHistory([a, b], Rates((crashes[0].Id, 5, 0)));
+    Equal(crashes[0].Id, adjusted[0].Id, "El candidato confirmado no encabezó el ranking.");
+    Equal(85, adjusted[0].Puntaje, "El ajuste +15 no se aplicó al Id único confirmado.");
+    Equal(72, adjusted[1].Puntaje, "El historial de otra aplicación alteró el puntaje de este candidato.");
+    return Task.CompletedTask;
 }
 
 static string? FindRepoRoot()

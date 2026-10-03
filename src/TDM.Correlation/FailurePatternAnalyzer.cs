@@ -11,7 +11,7 @@ public static class FailurePatternAnalyzer
     public static IReadOnlyList<FailurePattern> Analyze(DiagnosticReport report)
     {
         var incidents = report.CausasRaiz
-            .Where(c => c.Id == "ROOT-PROCESS-CRASH" && c.HoraIncidente.HasValue)
+            .Where(c => c.Id.StartsWith("ROOT-PROCESS-CRASH", StringComparison.OrdinalIgnoreCase) && c.HoraIncidente.HasValue)
             .ToList();
 
         var groups = incidents

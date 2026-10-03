@@ -48,7 +48,7 @@ public static class DiagnosticNarrativeBuilder
             sb.AppendLine($"Incidente más reciente: {mostRecent.HoraIncidente!.Value.ToLocalTime():dd/MM/yyyy HH:mm:ss} | {ProductName(mostRecent.Producto)} | {mostRecent.Componente} | origen={mostRecent.OrigenClasificado}");
         if (bestSupported is not null)
             sb.AppendLine($"Incidente/candidato mejor sustentado: {(bestSupported.HoraIncidente.HasValue ? bestSupported.HoraIncidente.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss") : "sin hora de incidente")} | {bestSupported.Componente} | {bestSupported.Confianza} | ranking interno {bestSupported.Puntaje}/100");
-        if (mostRecent is not null && bestSupported is not null && !ReferenceEquals(mostRecent, bestSupported) && mostRecent.Id == "ROOT-PROCESS-CRASH")
+        if (mostRecent is not null && bestSupported is not null && !ReferenceEquals(mostRecent, bestSupported) && mostRecent.Id.StartsWith("ROOT-PROCESS-CRASH", StringComparison.OrdinalIgnoreCase))
             sb.AppendLine("Nota: el incidente más reciente y el candidato mejor sustentado son distintos; TDM los mantiene separados para evitar que evidencia histórica oculte el problema actual.");
         sb.AppendLine();
 
@@ -120,7 +120,7 @@ public static class DiagnosticNarrativeBuilder
             sb.AppendLine($"DÓNDE EMPEZAR A CORREGIR: {StartHere(c)}");
             sb.AppendLine($"QUÉ NO MODIFICAR PRIMERO: {DoNotModify(c)}");
             sb.AppendLine($"Conclusión observada: {c.Resumen}");
-            if (c.Id == "ROOT-PROCESS-CRASH")
+            if (c.Id.StartsWith("ROOT-PROCESS-CRASH", StringComparison.OrdinalIgnoreCase))
             {
                 string EV(string key) => c.Evidencia.FirstOrDefault(e => e.Clave.Equals(key, StringComparison.OrdinalIgnoreCase))?.Valor ?? "N/D";
                 var exceptionType = EV("Tipo de excepción");
@@ -172,7 +172,7 @@ public static class DiagnosticNarrativeBuilder
         sb.AppendLine();
 
         var crashIncidentsAll = report.CausasRaiz
-            .Where(c => c.Id == "ROOT-PROCESS-CRASH" && c.HoraIncidente.HasValue)
+            .Where(c => c.Id.StartsWith("ROOT-PROCESS-CRASH", StringComparison.OrdinalIgnoreCase) && c.HoraIncidente.HasValue)
             .OrderByDescending(c => c.HoraIncidente)
             .ToList();
         var crashIncidents = crashIncidentsAll.Take(8).ToList();
@@ -394,7 +394,7 @@ public static class DiagnosticNarrativeBuilder
         var primary = report.CausaRaizPrincipal;
         if (primary is null) { sb.AppendLine("No hay una cadena causal suficientemente sustentada."); return; }
 
-        if (primary.Id == "ROOT-PROCESS-CRASH")
+        if (primary.Id.StartsWith("ROOT-PROCESS-CRASH", StringComparison.OrdinalIgnoreCase))
         {
             string EV(string key) => primary.Evidencia.FirstOrDefault(e => e.Clave.Equals(key, StringComparison.OrdinalIgnoreCase))?.Valor ?? "N/D";
             var app = EV("Aplicación");
@@ -435,7 +435,7 @@ public static class DiagnosticNarrativeBuilder
             sb.AppendLine("  Remote Access → Application Publishing Service/APSC → publicación/control de sesiones.");
             return;
         }
-        if (primary.Id == "ROOT-DEPENDENCY-LOAD")
+        if (primary.Id.StartsWith("ROOT-DEPENDENCY-LOAD", StringComparison.OrdinalIgnoreCase))
         {
             sb.AppendLine("  Proceso TSplus → carga de dependencia/DLL/assembly → subsistema de Windows → fallo de carga → crash o funcionalidad no disponible.");
             return;
@@ -471,7 +471,7 @@ public static class DiagnosticNarrativeBuilder
             : "  - Dependencias/DLL: no se detectó una falla explícita de carga relacionada con TSplus en la ventana.");
 
         var primary = report.CausaRaizPrincipal;
-        if (primary?.Id == "ROOT-PROCESS-CRASH")
+        if (primary?.Id.StartsWith("ROOT-PROCESS-CRASH", StringComparison.OrdinalIgnoreCase) == true)
         {
             string EV(string key) => primary.Evidencia.FirstOrDefault(e => e.Clave.Equals(key, StringComparison.OrdinalIgnoreCase))?.Valor ?? "N/D";
             var semantic = EV("Componente semántico");
@@ -522,7 +522,7 @@ public static class DiagnosticNarrativeBuilder
     private static void AppendSharedDependencyAssessment(StringBuilder sb, DiagnosticReport report)
     {
         var incidents = report.CausasRaiz
-            .Where(c => c.Id == "ROOT-PROCESS-CRASH" && c.HoraIncidente.HasValue && c.Producto != TsplusProduct.Ninguno)
+            .Where(c => c.Id.StartsWith("ROOT-PROCESS-CRASH", StringComparison.OrdinalIgnoreCase) && c.HoraIncidente.HasValue && c.Producto != TsplusProduct.Ninguno)
             .OrderBy(c => c.HoraIncidente)
             .ToList();
         if (incidents.Select(c => c.Producto).Distinct().Count() < 2)

@@ -46,7 +46,7 @@ public static class DiagnosticPrecisionAnalyzer
                 }
             }
 
-            if (candidate.Id == "ROOT-PROCESS-CRASH" && confidence == ConfidenceLevel.Confirmada && !independent)
+            if (candidate.Id.StartsWith("ROOT-PROCESS-CRASH", StringComparison.OrdinalIgnoreCase) && confidence == ConfidenceLevel.Confirmada && !independent)
             {
                 confidence = ConfidenceLevel.Alta;
                 score -= 4;
@@ -205,6 +205,11 @@ public static class DiagnosticPrecisionAnalyzer
 
     public static bool IsCausalSignal(DiagnosticEvent e)
     {
+        // MEDIUM: un evento con Fuente="TDM" lo sintetizó TDM a partir de otras evidencias; el
+        // source name identifica al software que registró el evento (MS: wes/windows-event-log y
+        // eventlog/event-sources), así que una fuente propia no puede sumar convergencia
+        // independiente aunque su tipo figure en la lista explícita de señales.
+        if (string.Equals(e.Fuente, "TDM", StringComparison.OrdinalIgnoreCase)) return false;
         // Una señal sin hora propia puede conservarse como evidencia, pero no debe
         // aumentar el puntaje de causalidad temporal ni simular una secuencia histórica.
         if (!e.Timestamp.HasValue) return false;
@@ -311,7 +316,7 @@ public static class DiagnosticPrecisionAnalyzer
             return false;
         }
 
-        if (candidate.Id == "ROOT-DEPENDENCY-LOAD")
+        if (candidate.Id.StartsWith("ROOT-DEPENDENCY-LOAD", StringComparison.OrdinalIgnoreCase))
             return EvidenceValue(candidate, "Crash TSplus cercano").Equals("Sí", StringComparison.OrdinalIgnoreCase);
 
         return false;
