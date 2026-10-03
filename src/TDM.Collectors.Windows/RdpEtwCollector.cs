@@ -13,7 +13,7 @@ namespace TDM.Collectors.Windows;
 /// Uses EventSource/EventListener for real-time RDP session monitoring.
 /// Only activates when explicitly enabled via DiagnosticContext.Options.
 /// </summary>
-public sealed class RdpEtwCollector : IReadOnlyCollector
+public sealed class RdpEtwCollector : IReadOnlyCollector, IDisposable
 {
     public string Nombre => "RDP ETW Transitions (sub-segundo)";
 
@@ -57,6 +57,10 @@ public sealed class RdpEtwCollector : IReadOnlyCollector
 
         try
         {
+            // Liberar la sesión ETW anterior antes de recrearla: sin esto, cada run filtra
+            // con un listener huérfano y el dispose previo nunca era alcanzable.
+            _listener?.Dispose();
+            _cts?.Dispose();
             _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _listener = new RdpEtwListener(_events, _findings, _sync);
             // Enable events for known RDP ETW providers
@@ -94,9 +98,15 @@ public sealed class RdpEtwCollector : IReadOnlyCollector
         try
         {
             _cts?.Cancel();
+            _cts?.Dispose();
             _listener?.Dispose();
         }
         catch { }
+        finally
+        {
+            _cts = null;
+            _listener = null;
+        }
     }
 
     private static bool IsRunningAsAdmin()

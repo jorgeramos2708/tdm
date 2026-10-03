@@ -90,7 +90,25 @@ public async Task<DiagnosticReport> RunAsync(string period, CancellationToken ct
     var engine = new DiagnosticEngine(collectors, DiagnosticExecutionPolicy.ForLookback(lookback), _circuitBreaker);
 
     _logService.Write(LogLevel.Information, "DIAGNOSTIC", "Engine", "Ejecutando motor de diagnóstico");
-    var report = await engine.RunAsync(context, ct).ConfigureAwait(false);
+    DiagnosticReport report;
+    try
+    {
+        report = await engine.RunAsync(context, ct).ConfigureAwait(false);
+    }
+    finally
+    {
+        // Los collectors IDisposable de esta ejecución (p. ej. RdpEtwCollector con su
+        // EventListener) se crean por run en CreateFull(): dispónelos aquí, excluyendo los
+        // incrementales compartidos entre ejecuciones. Sólo esta catálogo contiene
+        // RdpEtwCollector, por lo que el alcance del dispose es la GUI.
+        foreach (var collector in collectors)
+        {
+            if (collector is IDisposable disposable
+                && !ReferenceEquals(collector, _windowsIncremental)
+                && !ReferenceEquals(collector, _tsplusIncremental))
+                disposable.Dispose();
+        }
+    }
     _logService.Write(LogLevel.Information, "DIAGNOSTIC", "Engine", $"Diagnóstico completado: {report.Hallazgos.Count} hallazgos, {report.Eventos.Count} eventos");
 
     if (continuous && _continuousBaseline is not null)

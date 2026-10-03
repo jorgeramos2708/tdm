@@ -8,7 +8,7 @@ namespace TDM.Persistence;
 /// <summary>
 /// Snapshot agregado para los dashboards nativos de TDM.
 /// No contiene contraseñas, direcciones IP, rutas de perfiles ni mensajes crudos.
-/// Sí conserva el asunto operativo (cuenta, servicio o proceso) en <see cref="Subject"/>
+/// Sí conserva el asunto operativo (cuenta pseudonimizada, servicio o proceso) en <see cref="Subject"/>
 /// para que el operador identifique qué revisar en los detalles del dashboard.
 /// Se construye exclusivamente a partir de evidencia que TDM ya recopiló.
 /// </summary>
@@ -569,7 +569,9 @@ public sealed class ObservabilityStore
 
     /// <summary>
     /// El asunto del incidente (cuenta, servicio o proceso) se conserva para que el operador
-    /// sepa qué revisar; siguen enmascarados IP, correo y rutas de perfil.
+    /// sepa qué revisar; la cuenta se pseudonimiza con TdmPseudonym (sal por instalación) y
+    /// siguen enmascarados IP, correo y rutas de perfil. Cada muestra persiste este Subject,
+    /// por lo que dominio\usuario en claro no debe llegar al disco.
     /// </summary>
     private static string? SanitizeSubjectLabel(string? value) => SanitizeLabel(value, maskIdentity: false);
 
@@ -591,10 +593,7 @@ public sealed class ObservabilityStore
         if (!string.IsNullOrWhiteSpace(user))
         {
             var domain = FirstEvidence(e, "Dominio", "Domain");
-            var identity = string.IsNullOrWhiteSpace(domain) || user.Contains('\\')
-                ? user
-                : $"{domain}\\{user}";
-            return SanitizeSubjectLabel(identity);
+            return SanitizeSubjectLabel(PseudonymizeAccountIdentity(user, domain));
         }
 
         var service = FirstEvidence(e, "Servicio", "Service", "ServiceName");
@@ -604,6 +603,28 @@ public sealed class ObservabilityStore
         if (!string.IsNullOrWhiteSpace(process)) return SanitizeSubjectLabel(process);
 
         return null;
+    }
+
+    /// <summary>
+    /// La identidad de cuenta se pseudonimiza con el MISMO algoritmo/sal que el resto de capas
+    /// (correladores, collectors y export): el Subject se persiste en cada muestra y un
+    /// dominio\usuario en claro es reidentificable por diccionario.
+    /// </summary>
+    private static string PseudonymizeAccountIdentity(string user, string? domain)
+    {
+        var slash = user.IndexOf('\\');
+        if (slash >= 0)
+        {
+            var userDomain = user[..slash];
+            var account = user[(slash + 1)..];
+            return string.IsNullOrWhiteSpace(userDomain) || string.IsNullOrWhiteSpace(account)
+                ? TdmPseudonym.Create("USR", user)
+                : $"{TdmPseudonym.Create("DOM", userDomain)}\\{TdmPseudonym.Create("USR", account)}";
+        }
+
+        return string.IsNullOrWhiteSpace(domain)
+            ? TdmPseudonym.Create("USR", user)
+            : $"{TdmPseudonym.Create("DOM", domain)}\\{TdmPseudonym.Create("USR", user)}";
     }
 
     private static string? FirstEvidence(DiagnosticEvent e, params string[] keys)

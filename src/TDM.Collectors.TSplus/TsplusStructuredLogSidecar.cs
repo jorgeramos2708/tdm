@@ -91,7 +91,7 @@ public sealed class TsplusStructuredLogWriter : IDisposable
         _processId = Environment.ProcessId;
         Directory.CreateDirectory(_logDirectory);
 
-        _flushTimer = new Timer(FlushAsync, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        _flushTimer = new Timer(FlushTimerCallback, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }
 
     public async ValueTask WriteAsync(TsplusLogSchema.StructuredLogEntry entry, CancellationToken ct = default)
@@ -158,22 +158,24 @@ public sealed class TsplusStructuredLogWriter : IDisposable
         _currentFileSize = new FileInfo(_currentFile).Length;
     }
 
-    private async void FlushAsync(object? state)
+    // Callback síncrono de Timer: un async void dispara excepciones fuera del alcance de
+    // Try/Catch y su `await` con resultado descartado flush-eaba sin el gate (Release sin
+    // Wait). Si el gate no se adquiere en 1 s, este tick se salta; el siguiente reintenta.
+    private void FlushTimerCallback(object? state)
     {
+        if (!_gate.Wait(TimeSpan.FromSeconds(1))) return;
         try
         {
-            await _gate.WaitAsync(TimeSpan.FromSeconds(1));
-            try
-            {
-                if (_currentWriter != null)
-                    await _currentWriter.FlushAsync();
-            }
-            finally
-            {
-                _gate.Release();
-            }
+            _currentWriter?.Flush();
         }
-        catch { }
+        catch (ObjectDisposedException) { }
+        catch (SemaphoreFullException) { }
+        finally
+        {
+            try { _gate.Release(); }
+            catch (ObjectDisposedException) { }
+            catch (SemaphoreFullException) { }
+        }
     }
 
     public void Dispose()
@@ -185,6 +187,9 @@ public sealed class TsplusStructuredLogWriter : IDisposable
             _currentWriter?.Flush();
             _currentWriter?.Dispose();
             _currentStream?.Dispose();
+            _currentWriter = null;
+            _currentStream = null;
+            _currentFile = null;
         }
         finally
         {

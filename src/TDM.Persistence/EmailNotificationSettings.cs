@@ -1,6 +1,8 @@
 using System.Net.Mail;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 
@@ -8,7 +10,10 @@ namespace TDM.Persistence;
 
 /// <summary>
 /// Configuración SMTP compartida por la GUI y TDM.Service.
-/// La contraseña nunca se serializa en JSON: se guarda aparte cifrada con DPAPI de ámbito local-machine.
+/// La contraseña nunca se serializa en JSON: se guarda aparte cifrada con DPAPI de ámbito
+/// local-machine + entropía aleatoria por instalación (email-smtp.entropy) y con un ACL de
+/// archivo restringido (SYSTEM/Administrators/propietario), de modo que el flag
+/// CRYPTPROTECT_LOCAL_MACHINE no baste por sí solo para leerla desde cualquier proceso.
 /// </summary>
 public sealed record EmailNotificationSettings
 {
@@ -101,15 +106,19 @@ public sealed class EmailNotificationSettingsStore
     private readonly JsonSerializerOptions _json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true };
     private readonly SemaphoreSlim _gate = new(1, 1);
 
+    private const int EntropyLength = 32;
+
     public string RootPath { get; }
     public string SettingsPath { get; }
     public string SecretPath { get; }
+    public string EntropyPath { get; }
 
     public EmailNotificationSettingsStore(string? rootPath = null)
     {
         RootPath = string.IsNullOrWhiteSpace(rootPath) ? TdmDataPaths.MachineRootPath : Path.GetFullPath(rootPath);
         SettingsPath = Path.Combine(RootPath, "settings", "email-notifications.json");
         SecretPath = Path.Combine(RootPath, "settings", "email-smtp.secret");
+        EntropyPath = Path.Combine(RootPath, "settings", "email-smtp.entropy");
     }
 
     public async Task<EmailNotificationSettings> LoadAsync(CancellationToken ct = default)
@@ -163,6 +172,7 @@ public sealed class EmailNotificationSettingsStore
             if (clearStoredPassword)
             {
                 try { if (File.Exists(SecretPath)) File.Delete(SecretPath); } catch (FileNotFoundException) { }
+                try { if (File.Exists(EntropyPath)) File.Delete(EntropyPath); } catch (FileNotFoundException) { }
             }
             else if (!string.IsNullOrEmpty(newPassword))
             {
@@ -171,8 +181,15 @@ public sealed class EmailNotificationSettingsStore
                 var clearBytes = Encoding.UTF8.GetBytes(newPassword);
                 try
                 {
-                    var protectedBytes = MachineDpapi.Protect(clearBytes);
+                    // Entropía aleatoria por instalación (learn.microsoft.com/en-us/dotnet/standard/security/
+                    // how-to-use-data-protection, "Create random entropy"): el blob DPAPI local-machine
+                    // sin entropía puede descifrarlo cualquier proceso de la máquina; con el archivo de
+                    // entropía aparte, el descifrado exige también ese fichero.
+                    var entropy = await LoadOrCreateEntropyAsync(ct).ConfigureAwait(false);
+                    var protectedBytes = MachineDpapi.Protect(clearBytes, entropy);
                     await WriteBytesAtomicAsync(SecretPath, protectedBytes, ct).ConfigureAwait(false);
+                    SecretFileHardening.TryHarden(SecretPath);
+                    SecretFileHardening.TryHarden(EntropyPath);
                 }
                 finally { Array.Clear(clearBytes, 0, clearBytes.Length); }
             }
@@ -195,6 +212,8 @@ public sealed class EmailNotificationSettingsStore
         {
             try { if (File.Exists(SecretPath)) File.Delete(SecretPath); }
             catch (FileNotFoundException) { }
+            try { if (File.Exists(EntropyPath)) File.Delete(EntropyPath); }
+            catch (FileNotFoundException) { }
         }
         finally { _gate.Release(); }
     }
@@ -206,11 +225,46 @@ public sealed class EmailNotificationSettingsStore
         {
             var protectedBytes = await File.ReadAllBytesAsync(SecretPath, ct).ConfigureAwait(false);
             if (protectedBytes.Length == 0) return null;
-            var clear = MachineDpapi.Unprotect(protectedBytes);
+            var entropy = await TryReadEntropyAsync(ct).ConfigureAwait(false);
+            byte[]? clear = null;
+            if (entropy is not null)
+            {
+                try { clear = MachineDpapi.Unprotect(protectedBytes, entropy); }
+                catch (CryptographicException) { clear = null; } // Blob legado protegido sin entropía.
+            }
+            if (clear is null) clear = MachineDpapi.Unprotect(protectedBytes);
             try { return Encoding.UTF8.GetString(clear); }
             finally { Array.Clear(clear, 0, clear.Length); }
         }
         catch (CryptographicException) { return null; }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+        finally
+        {
+            // Migración best-effort: los secretos escritos por versiones previas reciben
+            // el mismo ACL restringido en cuanto se leen.
+            SecretFileHardening.TryHarden(SecretPath);
+            SecretFileHardening.TryHarden(EntropyPath);
+        }
+    }
+
+    private async Task<byte[]> LoadOrCreateEntropyAsync(CancellationToken ct)
+    {
+        var existing = await TryReadEntropyAsync(ct).ConfigureAwait(false);
+        if (existing is not null) return existing;
+        var entropy = RandomNumberGenerator.GetBytes(EntropyLength);
+        await WriteBytesAtomicAsync(EntropyPath, entropy, ct).ConfigureAwait(false);
+        return entropy;
+    }
+
+    private async Task<byte[]?> TryReadEntropyAsync(CancellationToken ct)
+    {
+        try
+        {
+            if (!File.Exists(EntropyPath)) return null;
+            var bytes = await File.ReadAllBytesAsync(EntropyPath, ct).ConfigureAwait(false);
+            return bytes.Length == EntropyLength ? bytes : null;
+        }
         catch (IOException) { return null; }
         catch (UnauthorizedAccessException) { return null; }
     }
@@ -275,33 +329,45 @@ internal static class MachineDpapi
     private const uint CryptProtectUiForbidden = 0x1;
     private const uint CryptProtectLocalMachine = 0x4;
 
-    public static byte[] Protect(byte[] clear)
+    public static byte[] Protect(byte[] clear, byte[]? entropy = null)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException("El almacenamiento seguro de la credencial SMTP requiere Windows.");
-        return Transform(clear, protect: true);
+        return Transform(clear, protect: true, entropy);
     }
 
-    public static byte[] Unprotect(byte[] encrypted)
+    public static byte[] Unprotect(byte[] encrypted, byte[]? entropy = null)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException("El almacenamiento seguro de la credencial SMTP requiere Windows.");
-        return Transform(encrypted, protect: false);
+        return Transform(encrypted, protect: false, entropy);
     }
 
-    private static byte[] Transform(byte[] input, bool protect)
+    private static byte[] Transform(byte[] input, bool protect, byte[]? entropy)
     {
         if (input.Length == 0) return [];
         var inputPtr = Marshal.AllocHGlobal(input.Length);
+        var entropyDataPtr = IntPtr.Zero;
+        var entropyBlobPtr = IntPtr.Zero;
         try
         {
             Marshal.Copy(input, 0, inputPtr, input.Length);
             var inputBlob = new DataBlob { cbData = input.Length, pbData = inputPtr };
+            if (entropy is { Length: > 0 })
+            {
+                // pOptionalEntropy es puntero a DATA_BLOB (cbData + pbData), no a los bytes:
+                // learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata.
+                entropyDataPtr = Marshal.AllocHGlobal(entropy.Length);
+                Marshal.Copy(entropy, 0, entropyDataPtr, entropy.Length);
+                var entropyBlob = new DataBlob { cbData = entropy.Length, pbData = entropyDataPtr };
+                entropyBlobPtr = Marshal.AllocHGlobal(Marshal.SizeOf<DataBlob>());
+                Marshal.StructureToPtr(entropyBlob, entropyBlobPtr, fDeleteOld: false);
+            }
             DataBlob outputBlob;
             var flags = CryptProtectUiForbidden | CryptProtectLocalMachine;
             var ok = protect
-                ? CryptProtectData(ref inputBlob, "TDM SMTP", IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, flags, out outputBlob)
-                : CryptUnprotectData(ref inputBlob, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, flags, out outputBlob);
+                ? CryptProtectData(ref inputBlob, "TDM SMTP", entropyBlobPtr, IntPtr.Zero, IntPtr.Zero, flags, out outputBlob)
+                : CryptUnprotectData(ref inputBlob, IntPtr.Zero, entropyBlobPtr, IntPtr.Zero, IntPtr.Zero, flags, out outputBlob);
             if (!ok)
                 throw new System.Security.Cryptography.CryptographicException(Marshal.GetLastWin32Error());
             try
@@ -317,6 +383,8 @@ internal static class MachineDpapi
         }
         finally
         {
+            if (entropyBlobPtr != IntPtr.Zero) Marshal.FreeHGlobal(entropyBlobPtr);
+            if (entropyDataPtr != IntPtr.Zero) Marshal.FreeHGlobal(entropyDataPtr);
             Marshal.FreeHGlobal(inputPtr);
         }
     }
@@ -352,4 +420,43 @@ internal static class MachineDpapi
 
     [DllImport("Kernel32.dll", SetLastError = true)]
     private static extern IntPtr LocalFree(IntPtr hMem);
+}
+
+/// <summary>
+/// ACL de archivo para los secretos SMTP (email-smtp.secret / email-smtp.entropy):
+/// DACL protegido (sin herencia) concediendo sólo a SYSTEM, Administrators y al
+/// propietario del archivo (Owner Rights SID S-1-3-4: "A group that represents the
+/// current owner of the object", learn.microsoft.com/en-us/openspecs/windows_protocols/
+/// ms-dtyp/81d92bba-d22b-4a8c-908a-554ab29148ab). Sin esto, DPAPI local-machine permite
+/// descifrar el blob a cualquier usuario de la máquina (flag CRYPTPROTECT_LOCAL_MACHINE:
+/// learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata y
+/// learn.microsoft.com/en-us/windows/win32/seccrypto/example-c-program-using-cryptprotectdata).
+/// Best-effort: si el proceso no puede fijar el DACL, el secreto queda como estaba.
+/// </summary>
+internal static class SecretFileHardening
+{
+    public static void TryHarden(string path)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists) return;
+            var security = info.GetAccessControl();
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            foreach (var sid in new[]
+                     {
+                         new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+                         new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+                         new SecurityIdentifier("S-1-3-4") // Owner Rights: representa al propietario actual.
+                     })
+            {
+                security.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl, AccessControlType.Allow));
+            }
+            info.SetAccessControl(security);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        catch (PlatformNotSupportedException) { }
+    }
 }

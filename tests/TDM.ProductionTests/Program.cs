@@ -197,7 +197,12 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("MonitoringDisposeSkipsResourcesWhileLoopsRun", MonitoringDisposeSkipsResourcesWhileLoopsRun),
     ("LogServiceDisposeIsRaceFreeAndPersistenceIsBounded", LogServiceDisposeIsRaceFreeAndPersistenceIsBounded),
     ("LogsViewModelBatchesBurstsOffTheEntryPath", LogsViewModelBatchesBurstsOffTheEntryPath),
-    ("WindowsPushSubscriptionRetriesUnexpectedFailures", WindowsPushSubscriptionRetriesUnexpectedFailures)
+    ("WindowsPushSubscriptionRetriesUnexpectedFailures", WindowsPushSubscriptionRetriesUnexpectedFailures),
+    ("PersistedStateAndIncidentSubjectsHideCleartextIdentities", PersistedStateAndIncidentSubjectsHideCleartextIdentities),
+    ("PseudonymSaltDefeatsDictionaryReuse", PseudonymSaltDefeatsDictionaryReuse),
+    ("SmtpSecretUsesEntropyAndRestrictedAcl", SmtpSecretUsesEntropyAndRestrictedAcl),
+    ("StructuredLogFlushHonorsGateWithoutAsyncVoid", StructuredLogFlushHonorsGateWithoutAsyncVoid),
+    ("RdpEtwCollectorIsDisposableAndRunScopedDisposed", RdpEtwCollectorIsDisposableAndRunScopedDisposed)
 };
 
 var failed = 0;
@@ -650,8 +655,14 @@ static async Task BurstCollapseReportsRealSpanAndSubjects()
         Equal("R3", incident.EvidenceId ?? "", "La ráfaga no conservó el EvidenceId del evento más reciente.");
         var subjects = (incident.Subject ?? string.Empty).Split(',', StringSplitOptions.TrimEntries);
         Equal(3, subjects.Length, $"El Subject de la ráfaga no unió los distintos usuarios sin duplicados: '{incident.Subject}'");
-        True(subjects.Contains("alice") && subjects.Contains("bob") && subjects.Contains("carol"),
-            $"El Subject de la ráfaga perdió identidades previas (hereda sólo la del último): '{incident.Subject}'");
+        // Fase 26: la identidad persistida va pseudonimizada (TdmPseudonym con sal por
+        // instalación), nunca en claro; el colapsado de ráfaga debe seguir uniendo las 3.
+        True(subjects.Contains(TdmPseudonym.Create("USR", "alice"))
+             && subjects.Contains(TdmPseudonym.Create("USR", "bob"))
+             && subjects.Contains(TdmPseudonym.Create("USR", "carol")),
+            $"El Subject de la ráfaga perdió identidades previas o dejó de pseudonimizar (hereda sólo la del último): '{incident.Subject}'");
+        False(subjects.Contains("alice") || subjects.Contains("bob") || subjects.Contains("carol"),
+            $"El Subject persistido lleva cuentas en claro: '{incident.Subject}'");
     }
     finally { TryDelete(root); }
 }
@@ -5026,6 +5037,255 @@ static Task WindowsPushSubscriptionRetriesUnexpectedFailures()
         "El flag de suscripción no se decide después de recorrer todos los canales.");
     True(text.Contains("ResolvedChannels.Clear()", StringComparison.Ordinal),
         "StopWatchers ya no limpia los canales resueltos; la re-suscripción saltaría todos los canales.");
+    return Task.CompletedTask;
+}
+
+static async Task PersistedStateAndIncidentSubjectsHideCleartextIdentities()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de persistencia sin sanear no ejecutable.");
+    var now = DateTimeOffset.Now;
+
+    // M1a: el Machine persistido del snapshot (baseline/history) va pseudonimizado.
+    var report = Report([ServiceStateEvent(now, "Running")], now) with
+    {
+        Sistema = new SystemSnapshot("MAQUINA-RAW-FIX93", "Windows Server", "2025", "test", "x64",
+            TimeSpan.FromHours(1), now, true, @"C:\\Program Files (x86)\\TSplus", "19")
+    };
+    var snapshot = StateSnapshotBuilder.Build(report, "1.0.0");
+    Equal(TdmPseudonym.Create("HOST", "MAQUINA-RAW-FIX93"), snapshot.Machine,
+        "El Machine persistido no usa el pseudónimo HOST del export.");
+    True(snapshot.Machine.StartsWith("HOST-", StringComparison.Ordinal) && snapshot.Machine.Length == "HOST-".Length + 8,
+        $"El Machine persistido no tiene el formato HOST-XXXXXXXX: {snapshot.Machine}");
+
+    var stateRoot = TempDir();
+    try
+    {
+        var store = new LocalStateStore(stateRoot);
+        await store.RecordAsync(snapshot, "production-test");
+        var historyDir = Path.Combine(stateRoot, "history");
+        True(Directory.Exists(historyDir), "El snapshot no abrió el journal de historial.");
+        var journal = string.Join("\n", Directory.EnumerateFiles(historyDir, "*.jsonl").Select(File.ReadAllText));
+        True(journal.Contains(snapshot.Machine, StringComparison.Ordinal),
+            "El journal de historial no contiene el pseudónimo del host.");
+        False(journal.Contains("MAQUINA-RAW-FIX93", StringComparison.Ordinal),
+            "El journal de historial persistió el nombre de equipo en claro.");
+    }
+    finally { TryDelete(stateRoot); }
+
+    // M1b: el Subject de cada muestra persistida pseudonimiza la identidad de cuenta.
+    var observabilityRoot = TempDir();
+    try
+    {
+        var store = new ObservabilityStore(observabilityRoot);
+        var events = new List<DiagnosticEvent>
+        {
+            new(now, "TSplus Log", "Remote Access", DiagnosticLayer.Tsplus, DiagnosticSeverity.Error,
+                "APPLICATION_CRASH", "crash 1",
+                Evidencia: [new EvidenceItem("RecordId", "R1"), new EvidenceItem("Usuario", "CORP\\jsmith")],
+                Producto: TsplusProduct.RemoteAccess)
+        };
+        var sample = await store.RecordAsync(Report(events, now), "monitor", new ObservabilityRuntimeState());
+        NotNull(sample.Incidents, "La muestra no conserva la colección de incidentes.");
+        var subject = sample.Incidents![0].Subject ?? string.Empty;
+        False(subject.Contains("jsmith", StringComparison.OrdinalIgnoreCase),
+            $"El Subject persistido conserva la cuenta en claro: '{subject}'");
+        False(subject.Contains("CORP", StringComparison.Ordinal),
+            $"El Subject persistido conserva el dominio en claro: '{subject}'");
+        Equal($"{TdmPseudonym.Create("DOM", "CORP")}\\{TdmPseudonym.Create("USR", "jsmith")}", subject,
+            "El Subject no usa el pseudónimo DOM\\USR esperado.");
+    }
+    finally { TryDelete(observabilityRoot); }
+
+    var snapshotText = File.ReadAllText(Path.Combine(root!, "src", "TDM.Persistence", "StateSnapshotBuilder.cs"));
+    True(snapshotText.Contains("TdmPseudonym.Create(\"HOST\", report.Sistema.Equipo)", StringComparison.Ordinal),
+        "StateSnapshotBuilder ya no pseudonimiza report.Sistema.Equipo al persistir.");
+    var observabilityText = File.ReadAllText(Path.Combine(root!, "src", "TDM.Persistence", "ObservabilityStore.cs"));
+    True(observabilityText.Contains("PseudonymizeAccountIdentity(user, domain)", StringComparison.Ordinal),
+        "IncidentSubject dejó de pseudonimizar la identidad de cuenta.");
+}
+
+static Task PseudonymSaltDefeatsDictionaryReuse()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de sal de pseudónimos no ejecutable.");
+    try
+    {
+        var saltA = new byte[32];
+        var saltB = new byte[32];
+        for (var i = 0; i < 32; i++) { saltA[i] = (byte)(i + 1); saltB[i] = (byte)(0xA0 + i); }
+
+        TdmPseudonym.ConfigureSalt(saltA);
+        var aliceA = TdmPseudonym.Create("USR", "alice");
+        True(aliceA.StartsWith("USR-", StringComparison.Ordinal) && aliceA.Length == 12 && aliceA[4..].All(Uri.IsHexDigit),
+            $"Formato de pseudónimo inválido con sal A: {aliceA}");
+        Equal(aliceA, TdmPseudonym.Create("USR", "alice"), "La misma sal no reproduce el pseudónimo (inestable).");
+        True(aliceA.Equals(TdmPseudonym.Create("USR", aliceA), StringComparison.Ordinal),
+            "La idempotencia prefijo-XXXXXXXX se perdió.");
+        Equal("N/D", TdmPseudonym.Create("USR", "N/D"), "La sentinela N/D debe conservarse.");
+        False(aliceA.Equals(TdmPseudonym.Create("USR", "bob"), StringComparison.Ordinal),
+            "Dos cuentas distintas colisionaron bajo la misma sal.");
+
+        TdmPseudonym.ConfigureSalt(saltB);
+        var aliceB = TdmPseudonym.Create("USR", "alice");
+        False(aliceA.Equals(aliceB, StringComparison.Ordinal),
+            "El pseudónimo es idéntico con sal distinta: un ataque de diccionario reidentifica instalaciones.");
+        True(aliceB.StartsWith("USR-", StringComparison.Ordinal) && aliceB.Length == 12,
+            $"Formato de pseudónimo inválido con sal B: {aliceB}");
+
+        TdmPseudonym.ConfigureSalt(saltA);
+        Equal(aliceA, TdmPseudonym.Create("USR", "alice"), "La sal configurada no determina el pseudónimo.");
+
+        var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Models", "TdmPseudonym.cs"));
+        True(text.Contains("HMACSHA256", StringComparison.Ordinal), "TdmPseudonym ya no usa HMAC-SHA256.");
+        True(text.Contains("pseudonym.salt", StringComparison.Ordinal), "Falta el archivo de sal por instalación.");
+        False(text.Contains("SHA256.HashData(Encoding.UTF8.GetBytes(value", StringComparison.Ordinal),
+            "Volvió el SHA-256 sin sal sobre el valor normalizado.");
+    }
+    finally { TdmPseudonym.ConfigureSalt(null); }
+    return Task.CompletedTask;
+}
+
+static async Task SmtpSecretUsesEntropyAndRestrictedAcl()
+{
+    var root = TempDir();
+    const string password = "s3cr3ta-FIX93";
+    try
+    {
+        var store = new EmailNotificationSettingsStore(root);
+        var settings = EmailNotificationSettings.Default with
+        {
+            Enabled = true,
+            SmtpHost = "smtp.example.com",
+            FromAddress = "tdm@example.com",
+            Recipients = ["ops@example.com"],
+            UserName = "tdm-sender"
+        };
+        True(EmailNotificationSettingsValidator.IsValid(settings), "La configuración SMTP de prueba no es válida.");
+        await store.SaveAsync(settings, newPassword: password);
+        True(await store.HasStoredPasswordAsync(), "La contraseña no quedó persistida.");
+
+        var roundtrip = await store.ReadPasswordAsync();
+        True(roundtrip is not null && roundtrip.Equals(password, StringComparison.Ordinal),
+            "El round-trip de la contraseña SMTP falló.");
+
+        True(File.Exists(store.EntropyPath), "No se creó el archivo de entropía por instalación.");
+        True(new FileInfo(store.EntropyPath).Length == 32, "El archivo de entropía no tiene 32 bytes aleatorios.");
+
+        // El blob exige la entropía: sin ella, CRYPTPROTECT_LOCAL_MACHINE no basta para leerlo.
+        var blob = await File.ReadAllBytesAsync(store.SecretPath);
+        var entropy = await File.ReadAllBytesAsync(store.EntropyPath);
+        try
+        {
+            var withoutEntropy = MachineDpapi.Unprotect(blob);
+            False(withoutEntropy.SequenceEqual(System.Text.Encoding.UTF8.GetBytes(password)),
+                "El blob DPAPI se descifra sin la entropía del archivo.");
+        }
+        catch (System.Security.Cryptography.CryptographicException) { /* lo esperado */ }
+        var withEntropy = MachineDpapi.Unprotect(blob, entropy);
+        True(System.Text.Encoding.UTF8.GetString(withEntropy).Equals(password, StringComparison.Ordinal),
+            "La entropía del archivo no descifra el blob.");
+
+        foreach (var secretFile in new[] { store.SecretPath, store.EntropyPath })
+        {
+            var acl = new FileInfo(secretFile).GetAccessControl();
+            True(acl.AreAccessRulesProtected, $"El ACL de {Path.GetFileName(secretFile)} no está protegido (hereda).");
+            var sids = new HashSet<string>(acl
+                .GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier))
+                .Cast<System.Security.AccessControl.AuthorizationRule>()
+                .Select(r => r.IdentityReference.Value));
+            True(sids.Contains("S-1-5-18"), $"{Path.GetFileName(secretFile)} no concede a SYSTEM.");
+            True(sids.Contains("S-1-5-32-544"), $"{Path.GetFileName(secretFile)} no concede a Administrators.");
+            True(sids.Contains("S-1-3-4"), $"{Path.GetFileName(secretFile)} no concede al propietario (Owner Rights).");
+        }
+
+        // Blob legado (protegido sin entropía, sin archivo de entropía) sigue legible.
+        var legacyRoot = TempDir();
+        try
+        {
+            var legacyStore = new EmailNotificationSettingsStore(legacyRoot);
+            Directory.CreateDirectory(Path.GetDirectoryName(legacyStore.SecretPath)!);
+            await File.WriteAllBytesAsync(legacyStore.SecretPath, MachineDpapi.Protect(System.Text.Encoding.UTF8.GetBytes(password)));
+            var legacy = await legacyStore.ReadPasswordAsync();
+            True(legacy is not null && legacy.Equals(password, StringComparison.Ordinal),
+                "El blob legado sin entropía dejó de leerse.");
+            False(File.Exists(legacyStore.EntropyPath), "La lectura legada no debe inventar un archivo de entropía.");
+        }
+        finally { TryDelete(legacyRoot); }
+
+        var repoRoot = FindRepoRoot();
+        NotNull(repoRoot, "No se localizó TDM.sln; gate SMTP no ejecutable.");
+        var text = File.ReadAllText(Path.Combine(repoRoot!, "src", "TDM.Persistence", "EmailNotificationSettings.cs"));
+        True(text.Contains("entropyBlobPtr", StringComparison.Ordinal),
+            "MachineDpapi ya no pasa pOptionalEntropy (DATA_BLOB) a CryptProtectData/CryptUnprotectData.");
+        True(text.Contains("SecretFileHardening.TryHarden(SecretPath)", StringComparison.Ordinal),
+            "El blob secreto ya no recibe el ACL restringido.");
+        True(text.Contains("SetAccessRuleProtection(isProtected: true", StringComparison.Ordinal),
+            "El DACL de los secretos no se protege contra herencia.");
+    }
+    finally { TryDelete(root); }
+}
+
+static async Task StructuredLogFlushHonorsGateWithoutAsyncVoid()
+{
+    var root = TempDir();
+    try
+    {
+        var writer = new TsplusStructuredLogWriter(Path.Combine(root, "logs"), "TESTHOST");
+        await writer.WriteAsync(new TsplusLogSchema.StructuredLogEntry(
+            Timestamp: DateTimeOffset.Now,
+            Host: "TESTHOST",
+            ProcessId: 1,
+            ThreadId: 1,
+            Level: "INFO",
+            Component: "RemoteAccess",
+            Category: "SESSION",
+            Message: "sesion estructurada FIX93"));
+        writer.Dispose();
+
+        var files = Directory.GetFiles(Path.Combine(root, "logs"), "*.jsonl");
+        True(files.Length > 0, "El escritor estructurado no creó su JSONL.");
+        True(File.ReadAllText(files[0]).Contains("sesion estructurada FIX93", StringComparison.Ordinal),
+            "La entrada no llegó al JSONL tras disponer el escritor.");
+
+        var repoRoot = FindRepoRoot();
+        NotNull(repoRoot, "No se localizó TDM.sln; gate del sidecar no ejecutable.");
+        var text = File.ReadAllText(Path.Combine(repoRoot!, "src", "TDM.Collectors.TSplus", "TsplusStructuredLogSidecar.cs"));
+        False(text.Contains("private async void", StringComparison.Ordinal),
+            "Volvió un async void en el sidecar: las excepciones del Timer quedarían fuera de todo Try/Catch.");
+        True(text.Contains("private void FlushTimerCallback(object? state)", StringComparison.Ordinal),
+            "El callback de flush del Timer no es síncrono.");
+        True(text.Contains("if (!_gate.Wait(TimeSpan.FromSeconds(1))) return;", StringComparison.Ordinal),
+            "El flush del Timer ya no respeta el gate (flush sin adquirir / Release desbalanceado).");
+        True(text.Contains("_currentWriter = null;", StringComparison.Ordinal),
+            "Dispose no anula el writer: un tick tardío escribiría sobre un stream ya dispuesto.");
+    }
+    finally { TryDelete(root); }
+}
+
+static Task RdpEtwCollectorIsDisposableAndRunScopedDisposed()
+{
+    IReadOnlyCollector collector = new RdpEtwCollector();
+    True(collector is IDisposable,
+        "RdpEtwCollector no declara IDisposable: su EventListener y su CTS nunca se dispone.");
+    ((IDisposable)collector).Dispose();
+    ((IDisposable)collector).Dispose();
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del collector RDP ETW no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "RdpEtwCollector.cs"));
+    True(text.Contains("IReadOnlyCollector, IDisposable", StringComparison.Ordinal),
+        "La clase no implementa IDisposable en su declaración.");
+    True(text.Contains("_listener?.Dispose();", StringComparison.Ordinal),
+        "CollectAsync no libera el listener ETW previo antes de recrearlo.");
+    True(text.Contains("_cts = null;", StringComparison.Ordinal),
+        "Dispose no anula el CTS: no es idempotente.");
+
+    var execution = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "Services", "DiagnosticExecutionService.cs"));
+    True(execution.Contains("collector is IDisposable disposable", StringComparison.Ordinal),
+        "La GUI no dispone los collectors IDisposable del run.");
+    True(execution.Contains("ReferenceEquals(collector, _windowsIncremental)", StringComparison.Ordinal),
+        "El dispose del run podría librar los incrementales compartidos entre ejecuciones.");
     return Task.CompletedTask;
 }
 

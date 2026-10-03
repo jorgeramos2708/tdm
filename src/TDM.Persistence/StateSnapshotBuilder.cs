@@ -81,7 +81,10 @@ public static class StateSnapshotBuilder
             2,
             toolVersion,
             DateTimeOffset.Now,
-            report.Sistema.Equipo,
+            // El host persistido en baseline/history se pseudonimiza con el MISMO algoritmo
+            // del export (SupportBundleSanitizer ya envía Equipo como HOST-XXXXXXXX): los
+            // snapshots at-rest no deben llevar el nombre de equipo en claro.
+            TdmPseudonym.Create("HOST", report.Sistema.Equipo),
             report.Sistema.SistemaOperativo,
             report.Sistema.Version,
             report.Sistema.Build,
