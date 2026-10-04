@@ -205,7 +205,10 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("RdpEtwCollectorIsDisposableAndRunScopedDisposed", RdpEtwCollectorIsDisposableAndRunScopedDisposed),
     ("ThirdPartyInventoryDeclaresScanGaps", ThirdPartyInventoryDeclaresScanGaps),
     ("SettingsSanitizeRewriteFailureIsObservable", SettingsSanitizeRewriteFailureIsObservable),
-    ("ObservabilityCompactionFailureIsContainedAndRetried", ObservabilityCompactionFailureIsContainedAndRetried)
+    ("ObservabilityCompactionFailureIsContainedAndRetried", ObservabilityCompactionFailureIsContainedAndRetried),
+    ("SafeWmiConvertsEveryNumericWmiType", SafeWmiConvertsEveryNumericWmiType),
+    ("SafeWmiParsesWmiLiteralsUnderInvariantCulture", SafeWmiParsesWmiLiteralsUnderInvariantCulture),
+    ("SafeWmiConvertsLiveProcessorLoadWithoutSentinel", SafeWmiConvertsLiveProcessorLoadWithoutSentinel)
 };
 
 var failed = 0;
@@ -5450,6 +5453,64 @@ static async Task ObservabilityCompactionFailureIsContainedAndRetried()
             "RecordAsync sigue invocando la compactación sin contención de E/S.");
     }
     finally { TryDelete(root); }
+}
+
+static Task SafeWmiConvertsEveryNumericWmiType()
+{
+    // L1 (auditoría crítica FIX93, Fase 28): los tipos estrechos que WMI entrega como
+    // tipos .NET (p. ej. Win32_Processor.LoadPercentage es uint16) caían al sentinel
+    // -1 y SystemResourceCollector.CollectCpu los filtraba con .Where(x => x >= 0).
+    Equal(38d, SafeWmi.ToDouble((ushort)38), "ToDouble no convirtió UInt16 (LoadPercentage).");
+    Equal(-5d, SafeWmi.ToDouble((short)-5), "ToDouble no convirtió Int16.");
+    Equal(7d, SafeWmi.ToDouble((byte)7), "ToDouble no convirtió Byte.");
+    Equal(-3d, SafeWmi.ToDouble((sbyte)-3), "ToDouble no convirtió SByte.");
+    Equal(38.5d, SafeWmi.ToDouble((decimal)38.5), "ToDouble no convirtió Decimal.");
+    Equal(-1d, SafeWmi.ToDouble(null), "ToDouble dejó de devolver el sentinel -1 para null.");
+    Equal(-1d, SafeWmi.ToDouble("abc"), "ToDouble dejó de devolver el sentinel -1 para texto no convertible.");
+
+    Equal(9ul, SafeWmi.ToUlong((ushort)9), "ToUlong no convirtió UInt16.");
+    Equal(7ul, SafeWmi.ToUlong((byte)7), "ToUlong no convirtió Byte.");
+    Equal(0ul, SafeWmi.ToUlong((short)-1), "ToUlong no descartó Int16 negativo.");
+    Equal(0ul, SafeWmi.ToUlong(null), "ToUlong dejó de devolver 0 para null.");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de conversión WMI no ejecutable.");
+    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Core", "SafeWmi.cs"));
+    True(text.Contains("ushort us => us", StringComparison.Ordinal),
+        "SafeWmi ya no contempla el tipo estrecho UInt16 en su conversión.");
+    True(text.Contains("CultureInfo.InvariantCulture", StringComparison.Ordinal),
+        "SafeWmi volvió a parsear literales solo con la cultura del sistema.");
+    return Task.CompletedTask;
+}
+
+static Task SafeWmiParsesWmiLiteralsUnderInvariantCulture()
+{
+    // L2 (auditoría crítica FIX93, Fase 28): double/ulong/int.TryParse sin cultura
+    // usaba la cultura del hilo; bajo es-ES "15.7" se leía como 157.
+    var prior = Thread.CurrentThread.CurrentCulture;
+    try
+    {
+        Thread.CurrentThread.CurrentCulture = new CultureInfo("es-ES");
+        Equal(15.7d, SafeWmi.ToDouble("15.7"), "ToDouble parseó el literal WMI con la cultura actual (es-ES).");
+        Equal(1234.56d, SafeWmi.ToDouble("1.234,56"), "ToDouble perdió el fallback a la cultura actual.");
+        Equal(1024ul, SafeWmi.ToUlong("1024"), "ToUlong parseó el literal WMI con la cultura actual (es-ES).");
+        Equal(-1d, SafeWmi.ToDouble("no-numerico"), "ToDouble dejó de devolver el sentinel -1 bajo cultura local.");
+    }
+    finally { Thread.CurrentThread.CurrentCulture = prior; }
+    return Task.CompletedTask;
+}
+
+static Task SafeWmiConvertsLiveProcessorLoadWithoutSentinel()
+{
+    // Contrato vivo de SystemResourceCollector.CollectCpu: cada LoadPercentage convertido
+    // debe quedar en rango, no en el sentinel -1 (máquina con WMI accesible).
+    var loads = SafeWmi.Query(
+        "SELECT LoadPercentage FROM Win32_Processor",
+        o => SafeWmi.ToDouble(o["LoadPercentage"]));
+    foreach (var load in loads)
+        True(load >= 0 && load <= 100,
+            $"LoadPercentage convertido a {load}; la CPU quedaría descartada o fuera de rango.");
+    return Task.CompletedTask;
 }
 
 static string? FindRepoRoot()

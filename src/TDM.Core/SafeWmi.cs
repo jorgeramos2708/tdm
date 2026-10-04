@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Management;
 using System.Runtime.InteropServices;
 
@@ -125,7 +126,13 @@ public static class SafeWmi
             uint u => (int)u,
             long l => (int)l,
             ulong ul => (int)ul,
-            string s when int.TryParse(s, out var parsed) => parsed,
+            ushort us => us,
+            short sh => sh,
+            byte b => b,
+            sbyte sb => sb,
+            // FIX93 F28 (LOW): literales WMI en cultura invariante; si no, cultura actual.
+            string raw when int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var inv) => inv,
+            string raw2 when int.TryParse(raw2, out var loc) => loc,
             _ => null
         };
     }
@@ -143,7 +150,13 @@ public static class SafeWmi
             int i => (uint)i,
             long l => (uint)l,
             ulong ul => (uint)ul,
-            string s when uint.TryParse(s, out var parsed) => parsed,
+            ushort us => us,
+            short sh => (uint)sh,
+            byte b => b,
+            sbyte sb => (uint)sb,
+            // FIX93 F28 (LOW): literales WMI en cultura invariante; si no, cultura actual.
+            string raw when uint.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var inv) => inv,
+            string raw2 when uint.TryParse(raw2, out var loc) => loc,
             _ => (uint?)null
         };
     }
@@ -161,7 +174,13 @@ public static class SafeWmi
             long l => (ulong)l,
             uint u => u,
             int i => (ulong)i,
-            string s when ulong.TryParse(s, out var parsed) => parsed,
+            ushort us => us,
+            short sh => (ulong)sh,
+            byte b => b,
+            sbyte sb => (ulong)sb,
+            // FIX93 F28 (LOW): literales WMI en cultura invariante; si no, cultura actual.
+            string raw when ulong.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var inv) => inv,
+            string raw2 when ulong.TryParse(raw2, out var loc) => loc,
             _ => null
         };
     }
@@ -190,11 +209,22 @@ public static class SafeWmi
         {
             double d => d,
             float f => f,
+            decimal m => (double)m,
             int i => i,
             uint u => u,
             long l => l,
             ulong ul => ul,
-            string s when double.TryParse(s, out var parsed) => parsed,
+            // FIX93 F28 (LOW): tipos estrechos de WMI (Win32_Processor.LoadPercentage es uint16)
+            // caían al sentinel -1 y SystemResourceCollector descartaba la CPU.
+            ushort us => us,
+            short sh => sh,
+            byte b => b,
+            sbyte sb => sb,
+            // FIX93 F28 (LOW): literales WMI en cultura invariante; si no, cultura actual.
+            string raw when double.TryParse(
+                raw, NumberStyles.Float | NumberStyles.AllowThousands,
+                CultureInfo.InvariantCulture, out var inv) => inv,
+            string raw2 when double.TryParse(raw2, out var loc) => loc,
             _ => -1
         };
     }
@@ -211,7 +241,15 @@ public static class SafeWmi
             long l => l >= 0 ? (ulong)l : 0,
             uint u => u,
             int i => i >= 0 ? (ulong)i : 0,
-            string s when ulong.TryParse(s, out var parsed) => parsed,
+            // FIX93 F28 (LOW): tipos estrechos de WMI que no estaban contemplados.
+            ushort us => us,
+            byte b => b,
+            short sh => sh >= 0 ? (ulong)sh : 0,
+            sbyte sb => sb >= 0 ? (ulong)sb : 0,
+            // FIX93 F28 (LOW): literales WMI en cultura invariante; si no, cultura actual.
+            string raw when ulong.TryParse(
+                raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var inv) => inv,
+            string raw2 when ulong.TryParse(raw2, out var loc) => loc,
             _ => 0
         };
     }
