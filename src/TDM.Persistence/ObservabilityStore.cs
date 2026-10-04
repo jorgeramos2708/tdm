@@ -124,6 +124,14 @@ public sealed class ObservabilityStore
     private DateTimeOffset _lastCompact = DateTimeOffset.MinValue;
     private int _lastReadDiscardedLines;
     public int LastReadDiscardedLines => Volatile.Read(ref _lastReadDiscardedLines);
+
+    /// <summary>
+    /// H10: último error de compactación de la ventana (null = sin fallos). La compactación
+    /// es mantenimiento best-effort: un fallo de E/S no aborta el ciclo de muestreo (ajustes,
+    /// ledger, notificaciones y latido continúan) y se reintenta en el siguiente disparador
+    /// porque <c>_lastCompact</c> sólo avanza tras una compactación exitosa.
+    /// </summary>
+    public string? LastCompactError { get; private set; }
     private readonly JsonSerializerOptions _json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -169,12 +177,36 @@ public sealed class ObservabilityStore
                 && File.Exists(WindowPath)
                 && new FileInfo(WindowPath).Length >= CompactAfterBytes)
             {
-                await CompactUnsafeAsync(sample.Timestamp, ct);
-                _lastCompact = sample.Timestamp;
+                await TryCompactAsync(sample.Timestamp, ct);
             }
         }
 
         return sample;
+    }
+
+    /// <summary>
+    /// Compacta la ventana de forma best-effort. H10: antes, un <see cref="IOException"/> de
+    /// <see cref="ReadAllUnsafeAsync"/> (ventana bloqueada por otro proceso, disco lleno…)
+    /// escapaba de <see cref="RecordAsync"/> y abortaba el ciclo completo del llamante sin
+    /// reintentos; ahora el fallo se declara en <see cref="LastCompactError"/> y la
+    /// compactación se reintenta en el siguiente disparador (MS: system.io.ioexception —
+    /// el ejemplo oficial captura IOException cuando el fichero está bloqueado). Sólo la
+    /// cancelación se propaga, siguiendo la cooperación de TPL (MS: task-cancellation).
+    /// </summary>
+    internal async Task<bool> TryCompactAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        try
+        {
+            await CompactUnsafeAsync(now, ct);
+            _lastCompact = now;
+            LastCompactError = null;
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            LastCompactError = $"{ex.GetType().Name}: {ex.Message}";
+            return false;
+        }
     }
 
     public async Task<IReadOnlyList<ObservabilitySample>> ReadWindowAsync(TimeSpan window, CancellationToken ct = default)

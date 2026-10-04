@@ -202,7 +202,10 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("PseudonymSaltDefeatsDictionaryReuse", PseudonymSaltDefeatsDictionaryReuse),
     ("SmtpSecretUsesEntropyAndRestrictedAcl", SmtpSecretUsesEntropyAndRestrictedAcl),
     ("StructuredLogFlushHonorsGateWithoutAsyncVoid", StructuredLogFlushHonorsGateWithoutAsyncVoid),
-    ("RdpEtwCollectorIsDisposableAndRunScopedDisposed", RdpEtwCollectorIsDisposableAndRunScopedDisposed)
+    ("RdpEtwCollectorIsDisposableAndRunScopedDisposed", RdpEtwCollectorIsDisposableAndRunScopedDisposed),
+    ("ThirdPartyInventoryDeclaresScanGaps", ThirdPartyInventoryDeclaresScanGaps),
+    ("SettingsSanitizeRewriteFailureIsObservable", SettingsSanitizeRewriteFailureIsObservable),
+    ("ObservabilityCompactionFailureIsContainedAndRetried", ObservabilityCompactionFailureIsContainedAndRetried)
 };
 
 var failed = 0;
@@ -5287,6 +5290,166 @@ static Task RdpEtwCollectorIsDisposableAndRunScopedDisposed()
     True(execution.Contains("ReferenceEquals(collector, _windowsIncremental)", StringComparison.Ordinal),
         "El dispose del run podría librar los incrementales compartidos entre ejecuciones.");
     return Task.CompletedTask;
+}
+
+static Task ThirdPartyInventoryDeclaresScanGaps()
+{
+    // H7a: la cobertura del inventario nunca puede ser "Disponible" si un escaneo falló.
+    Equal("Disponible", ThirdPartyInterferenceCollector.ResolveInventoryCoverage(null, null),
+        "Sin fallos la cobertura del inventario debe seguir siendo Disponible.");
+    Equal("Parcial", ThirdPartyInterferenceCollector.ResolveInventoryCoverage("Win32 5: acceso denegado", null),
+        "Un fallo en la enumeración de servicios dejó la cobertura como Disponible.");
+    Equal("Parcial", ThirdPartyInterferenceCollector.ResolveInventoryCoverage(null, "1 proceso(s) TSplus con módulos ilegibles (Win32 5)"),
+        "Un fallo en la lectura de módulos dejó la cobertura como Disponible.");
+    Equal("No disponible", ThirdPartyInterferenceCollector.ResolveInventoryCoverage("servicios", "módulos"),
+        "Con ambos escaneos caídos la cobertura debe ser No disponible.");
+
+    var now = DateTimeOffset.Now;
+    DiagnosticEvent Inventory(string? cobertura, string? detalle)
+    {
+        var ev = new List<EvidenceItem> { new("Productos observados", "Ninguno identificado") };
+        if (cobertura is not null) ev.Add(new EvidenceItem("Cobertura", cobertura));
+        if (detalle is not null) ev.Add(new EvidenceItem("Detalle de cobertura", detalle));
+        return new DiagnosticEvent(now, "TDM", "Software de terceros observado", DiagnosticLayer.Seguridad,
+            DiagnosticSeverity.Informativo, "THIRD_PARTY_RUNTIME_INVENTORY", "inventario", Evidencia: ev);
+    }
+    static CoverageSourceAssessment ThirdPartySource(DiagnosticCoverageAssessment assessment)
+        => assessment.Fuentes.Single(f => f.Fuente.Contains("Terceros", StringComparison.Ordinal));
+
+    // H7b: el analizador de cobertura consume la clave declarada por el inventario.
+    var parcial = DiagnosticCoverageAnalyzer.Analyze(Report([Inventory("Parcial", "Servicios: Win32 5")], now));
+    Equal("Parcial", ThirdPartySource(parcial).Estado,
+        "El analizador reportó la fuente de terceros como Disponible pese a la brecha declarada.");
+    True(parcial.Limitaciones.Any(l => l.Contains("Terceros", StringComparison.Ordinal)),
+        "La brecha de inventario de terceros no quedó como limitación del diagnóstico.");
+
+    var noDisponible = DiagnosticCoverageAnalyzer.Analyze(Report([Inventory("No disponible", "ambos escaneos")], now));
+    Equal("No disponible", ThirdPartySource(noDisponible).Estado,
+        "Un inventario totalmente no evaluado debe reportarse No disponible.");
+
+    var legado = DiagnosticCoverageAnalyzer.Analyze(Report([Inventory(null, null)], now));
+    Equal("Disponible", ThirdPartySource(legado).Estado,
+        "Los inventarios legados sin clave de cobertura deben conservar el comportamiento previo.");
+
+    var sinEvento = DiagnosticCoverageAnalyzer.Analyze(Report([], now));
+    Equal("Parcial", ThirdPartySource(sinEvento).Estado,
+        "La ausencia del inventario debe seguir reportando Parcial.");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de Terceros no ejecutable.");
+    var collectorSrc = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "ThirdPartyInterferenceCollector.cs"));
+    True(collectorSrc.Contains("catch (OperationCanceledException) { throw; }", StringComparison.Ordinal),
+        "El catch de la enumeración de servicios volvió a tragarse la cancelación.");
+    True(collectorSrc.Contains("Detalle de cobertura", StringComparison.Ordinal),
+        "El inventario ya no declara el detalle de sus brechas de cobertura.");
+    True(collectorSrc.Contains("mainModuleError", StringComparison.Ordinal),
+        "El fallo de MainModule volvió a capturarse en vacío sin rastro.");
+    var analyzerSrc = File.ReadAllText(Path.Combine(root!, "src", "TDM.Correlation", "DiagnosticCoverageAnalyzer.cs"));
+    True(analyzerSrc.Contains("AddThirdParty(report, sources, limitations)", StringComparison.Ordinal),
+        "AddThirdParty no recibe la lista de limitaciones del diagnóstico.");
+    return Task.CompletedTask;
+}
+
+static async Task SettingsSanitizeRewriteFailureIsObservable()
+{
+    var root = TempDir();
+    try
+    {
+        var store = new SupportMonitoringSettingsStore(root);
+        Directory.CreateDirectory(Path.GetDirectoryName(store.Path)!);
+        static bool HasCpuWarning70(string json)
+            => json.Contains("\"cpuWarning\": 70", StringComparison.Ordinal)
+            || json.Contains("\"cpuWarning\":70", StringComparison.Ordinal);
+
+        // Reescritura limpia: los umbrales saneados llegan a disco y no hay error declarado.
+        await File.WriteAllTextAsync(store.Path, "{\"thresholds\":{\"cpuWarning\":200,\"cpuCritical\":250}}");
+        var loaded = await store.LoadAsync();
+        True(loaded.Thresholds.CpuWarning < loaded.Thresholds.CpuCritical,
+            "Los umbrales inválidos no se sanearon en memoria.");
+        True(store.LastSanitizeRewriteError is null,
+            "Con una reescritura limpia no debe declararse error.");
+        True(HasCpuWarning70(await File.ReadAllTextAsync(store.Path)),
+            "Los umbrales saneados no se reescribieron en disco.");
+
+        // Fichero abierto sin FILE_SHARE_DELETE: el Move de reescritura falla con IOException
+        // y el fallo debe quedar observable en lugar de tragarse en un catch vacío.
+        await File.WriteAllTextAsync(store.Path, "{\"thresholds\":{\"cpuWarning\":300,\"cpuCritical\":350}}");
+        using (new FileStream(store.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            var locked = await store.LoadAsync();
+            Equal(70d, locked.Thresholds.CpuWarning,
+                "La carga con el fichero bloqueado no devolvió los umbrales saneados en memoria.");
+            NotNull(store.LastSanitizeRewriteError,
+                "H9: el fallo de reescritura en disco quedó invisible.");
+        }
+
+        // Al liberar, la siguiente carga reescribe y limpia el estado del error.
+        var recovered = await store.LoadAsync();
+        Equal(70d, recovered.Thresholds.CpuWarning, "La carga posterior a liberar el fichero no saneó.");
+        True(store.LastSanitizeRewriteError is null,
+            "El error quedó congelado tras una reescritura exitosa.");
+        True(HasCpuWarning70(await File.ReadAllTextAsync(store.Path)),
+            "El fichero sigue con los umbrales inválidos tras liberarlo.");
+
+        var rootDir = FindRepoRoot();
+        NotNull(rootDir, "No se localizó TDM.sln; gate de settings no ejecutable.");
+        var settingsSrc = File.ReadAllText(Path.Combine(rootDir!, "src", "TDM.Persistence", "SupportMonitoringSettings.cs"));
+        False(settingsSrc.Contains("try { await SaveAsync(sanitized, ct); } catch { }", StringComparison.Ordinal),
+            "La reescritura sigue tragando el fallo en un catch vacío.");
+        True(settingsSrc.Contains("catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)", StringComparison.Ordinal),
+            "La reescritura no declara sus fallos de E/S de forma observable.");
+    }
+    finally { TryDelete(root); }
+}
+
+static async Task ObservabilityCompactionFailureIsContainedAndRetried()
+{
+    var root = TempDir();
+    try
+    {
+        var store = new ObservabilityStore(root);
+        await store.RecordAsync(Report([], DateTimeOffset.Now), "monitor", new ObservabilityRuntimeState());
+        True(File.Exists(store.WindowPath), "La ventana de observabilidad no se creó.");
+        var before = await File.ReadAllBytesAsync(store.WindowPath);
+        True(before.Length > 0, "La ventana quedó vacía tras registrar la muestra.");
+
+        // Ventana ilegible (otro proceso la abrió sin compartir lectura): la compactación
+        // best-effort debe fallar sin propagar y sin reescribir la historia.
+        var compacted = true;
+        using (new FileStream(store.WindowPath, FileMode.Open, FileAccess.Read, FileShare.Write | FileShare.Delete))
+        {
+            compacted = await store.TryCompactAsync(DateTimeOffset.Now, default);
+        }
+        False(compacted, "La compactación declaró éxito con la ventana ilegible.");
+        NotNull(store.LastCompactError, "H10: el fallo de compactación quedó invisible.");
+        var afterFailed = await File.ReadAllBytesAsync(store.WindowPath);
+        Equal(before.Length, afterFailed.Length,
+            "La compactación reescribió la ventana con lectura fallida (pérdida de historia).");
+
+        // Liberado: se recupera y limpia el error declarado.
+        compacted = await store.TryCompactAsync(DateTimeOffset.Now, default);
+        True(compacted, "La compactación no se recuperó tras liberar el fichero.");
+        True(store.LastCompactError is null,
+            "El error quedó congelado tras una compactación exitosa.");
+        True(File.Exists(store.WindowPath), "La ventana desapareció tras compactar.");
+
+        // La cancelación no se traga en la contención best-effort (TPL: task-cancellation).
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var canceled = false;
+        try { await store.TryCompactAsync(DateTimeOffset.Now, cts.Token); }
+        catch (OperationCanceledException) { canceled = true; }
+        True(canceled, "La cancelación se tragó dentro de la compactación contenida.");
+
+        var rootDir = FindRepoRoot();
+        NotNull(rootDir, "No se localizó TDM.sln; gate de observabilidad no ejecutable.");
+        var obsSrc = File.ReadAllText(Path.Combine(rootDir!, "src", "TDM.Persistence", "ObservabilityStore.cs"));
+        True(obsSrc.Contains("await TryCompactAsync(sample.Timestamp, ct)", StringComparison.Ordinal),
+            "RecordAsync no delega la compactación en la versión contenida de E/S.");
+        False(obsSrc.Contains("await CompactUnsafeAsync(sample.Timestamp, ct);", StringComparison.Ordinal),
+            "RecordAsync sigue invocando la compactación sin contención de E/S.");
+    }
+    finally { TryDelete(root); }
 }
 
 static string? FindRepoRoot()

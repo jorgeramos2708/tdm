@@ -205,6 +205,14 @@ public sealed class SupportMonitoringSettingsStore
     private readonly JsonSerializerOptions _json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true };
     public string Path { get; }
 
+    /// <summary>
+    /// H9: último error al reescribir en disco los umbrales saneados durante la carga
+    /// (null = la reescritura fue limpia o no hizo falta). La carga sigue devolviendo en
+    /// memoria los umbrales saneados, pero un fallo de E/S ya no queda invisible para el
+    /// operador ni para las pruebas (MS: standard/design-guidelines/exceptions).
+    /// </summary>
+    public string? LastSanitizeRewriteError { get; private set; }
+
     public SupportMonitoringSettingsStore(string? rootPath = null)
     {
         var root = string.IsNullOrWhiteSpace(rootPath) ? LocalStateStore.DefaultRootPath : rootPath;
@@ -226,8 +234,24 @@ public sealed class SupportMonitoringSettingsStore
         catch (UnauthorizedAccessException) { return SupportMonitoringSettings.Default; }
         if (loaded is null) return SupportMonitoringSettings.Default;
         var sanitized = loaded with { Thresholds = SupportThresholdsValidator.Sanitize(loaded.Thresholds) };
-        if (sanitized.Thresholds.Equals(loaded.Thresholds)) return sanitized;
-        try { await SaveAsync(sanitized, ct); } catch { }
+        if (sanitized.Thresholds.Equals(loaded.Thresholds))
+        {
+            LastSanitizeRewriteError = null;
+            return sanitized;
+        }
+        try
+        {
+            await SaveAsync(sanitized, ct);
+            LastSanitizeRewriteError = null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // H9: el rewrite self-heal falla (p. ej. fichero bloqueado sin FILE_SHARE_DELETE,
+            // MS system.io.ioexception) pero los umbrales saneados ya están en memoria; el
+            // fallo se declara en lugar de tragarse en un catch vacío. Las excepciones ajenas
+            // a E/S se propagan: ocultarlas ocultaría errores de diseño.
+            LastSanitizeRewriteError = $"{ex.GetType().Name}: {ex.Message}";
+        }
         return sanitized;
     }
 

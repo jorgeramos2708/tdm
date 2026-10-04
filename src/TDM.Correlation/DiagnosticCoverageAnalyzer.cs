@@ -40,7 +40,7 @@ public static class DiagnosticCoverageAnalyzer
         AddForensicArtifacts(report, sources, limitations);
         AddLocalHistory(report, sources, limitations);
         AddLongitudinalHistoryCoverage(report, sources, limitations);
-        AddThirdParty(report, sources);
+        AddThirdParty(report, sources, limitations);
         AddFarmCoverage(report, sources, limitations);
         AddPerformanceCoverage(report, sources, limitations);
         if (report.DiagnosticoContinuo)
@@ -303,12 +303,37 @@ public static class DiagnosticCoverageAnalyzer
         return "Parcial";
     }
 
-    private static void AddThirdParty(DiagnosticReport report, List<CoverageSourceAssessment> sources)
+    private static void AddThirdParty(DiagnosticReport report, List<CoverageSourceAssessment> sources, List<string> limitations)
     {
         var e = report.Eventos.LastOrDefault(x => x.Tipo == "THIRD_PARTY_RUNTIME_INVENTORY");
-        sources.Add(e is null
-            ? new("Terceros / EDR / módulos externos", "Parcial", "No se obtuvo inventario contextual de terceros en esta vista.", false)
-            : new("Terceros / EDR / módulos externos", "Disponible", "Inventario contextual disponible; presencia no implica causalidad.", false));
+        if (e is null)
+        {
+            sources.Add(new("Terceros / EDR / módulos externos", "Parcial", "No se obtuvo inventario contextual de terceros en esta vista.", false));
+            return;
+        }
+
+        // H7: el inventario declara su propia cobertura en la evidencia; un escaneo fallido
+        // (servicios o módulos ilegibles) no puede reportarse como "Disponible". Los eventos
+        // legados sin la clave conservan el comportamiento previo.
+        var declared = EvidenceReader.Value(e, "Cobertura");
+        var detail = EvidenceReader.Value(e, "Detalle de cobertura");
+        var status = declared is null
+            ? "Disponible"
+            : declared.Contains("No disponible", StringComparison.OrdinalIgnoreCase) ? "No disponible"
+            : declared.Contains("Parcial", StringComparison.OrdinalIgnoreCase) || declared.Contains("No evalu", StringComparison.OrdinalIgnoreCase) ? "Parcial"
+            : "Disponible";
+
+        if (status == "Disponible")
+        {
+            sources.Add(new("Terceros / EDR / módulos externos", "Disponible", "Inventario contextual disponible; presencia no implica causalidad.", false));
+            return;
+        }
+
+        var detalle = string.IsNullOrWhiteSpace(detail)
+            ? $"Inventario contextual no evaluado por completo ({declared})."
+            : $"Inventario contextual no evaluado por completo: {detail}";
+        sources.Add(new("Terceros / EDR / módulos externos", status, detalle, false));
+        limitations.Add("Terceros/EDR: el inventario de software de terceros no pudo evaluarse por completo; su ausencia no demuestra que no exista dicho software.");
     }
 
     private static void AddFarmCoverage(DiagnosticReport report, List<CoverageSourceAssessment> sources, List<string> limitations)

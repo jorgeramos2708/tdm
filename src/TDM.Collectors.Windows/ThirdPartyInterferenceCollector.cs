@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.Eventing.Reader;
 using System.ServiceProcess;
@@ -25,8 +26,31 @@ public sealed class ThirdPartyInterferenceCollector : IReadOnlyCollector
         if (!context.Sistema.TsplusDetectado)
             return Task.FromResult(CollectorResult.Empty);
 
-        var runtimes = EnumerateThirdPartySecurityRuntimes(cancellationToken);
-        var loadedModules = EnumerateExternalModulesInTsplusProcesses(context.Sistema, cancellationToken);
+        var runtimeScan = EnumerateThirdPartySecurityRuntimes(cancellationToken);
+        var moduleScan = EnumerateExternalModulesInTsplusProcesses(context.Sistema, cancellationToken);
+        var runtimes = runtimeScan.Items;
+        var loadedModules = moduleScan.Items;
+
+        // H7: la cobertura se declara en la propia evidencia; un escaneo fallido (p. ej. sin
+        // permisos para enumerar servicios o leer módulos de procesos elevados) no puede
+        // reportarse como "Disponible / Ninguno identificado".
+        var evidence = new List<EvidenceItem>
+        {
+            new("Runtimes de seguridad/red observados", runtimeScan.Failure is null ? runtimes.Count.ToString() : "No evaluado"),
+            new("Productos observados", runtimeScan.Failure is not null
+                ? "No evaluado"
+                : runtimes.Count == 0 ? "Ninguno identificado" : string.Join(" | ", runtimes.Select(x => x.Display).Distinct(StringComparer.OrdinalIgnoreCase).Take(20))),
+            new("Módulos externos cargados en procesos TSplus", moduleScan.Failure is null ? loadedModules.Count.ToString() : "No evaluado"),
+            new("Cobertura", ResolveInventoryCoverage(runtimeScan.Failure, moduleScan.Failure)),
+            new("Interpretación", "Presencia no implica causalidad; sólo se usa como contexto o para resolver un módulo con error explícito")
+        };
+        if (runtimeScan.Failure is not null || moduleScan.Failure is not null)
+        {
+            var gaps = new List<string>();
+            if (runtimeScan.Failure is not null) gaps.Add("Servicios: " + runtimeScan.Failure);
+            if (moduleScan.Failure is not null) gaps.Add("Módulos: " + moduleScan.Failure);
+            evidence.Add(new EvidenceItem("Detalle de cobertura", string.Join(" · ", gaps)));
+        }
 
         events.Add(new DiagnosticEvent(
             DateTimeOffset.Now,
@@ -36,13 +60,7 @@ public sealed class ThirdPartyInterferenceCollector : IReadOnlyCollector
             DiagnosticSeverity.Informativo,
             "THIRD_PARTY_RUNTIME_INVENTORY",
             "Inventario local y no causal de software de seguridad/red de terceros y módulos externos observados en procesos TSplus.",
-            Evidencia:
-            [
-                new EvidenceItem("Runtimes de seguridad/red observados", runtimes.Count.ToString()),
-                new EvidenceItem("Productos observados", runtimes.Count == 0 ? "Ninguno identificado" : string.Join(" | ", runtimes.Select(x => x.Display).Distinct(StringComparer.OrdinalIgnoreCase).Take(20))),
-                new EvidenceItem("Módulos externos cargados en procesos TSplus", loadedModules.Count.ToString()),
-                new EvidenceItem("Interpretación", "Presencia no implica causalidad; sólo se usa como contexto o para resolver un módulo con error explícito")
-            ]));
+            Evidencia: evidence));
 
         ReadThirdPartyCrashModules(context, loadedModules, findings, events, cancellationToken);
         ReadExplicitThirdPartySignals(context, runtimes, events, cancellationToken);
@@ -137,22 +155,35 @@ public sealed class ThirdPartyInterferenceCollector : IReadOnlyCollector
                     Capa: DiagnosticLayer.Seguridad));
             }
         }
-        catch (EventLogNotFoundException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (EventLogNotFoundException ex)
+        {
+            // H7: canal inexistente = la fuente no se pudo leer; se declara en lugar de
+            // fingir que no hubo módulos de terceros (patrón de Fase 23 en DependencyLoad).
+            AddThirdPartyChannelCoverageFinding(findings, "Application", "No disponible", ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            AddThirdPartyChannelCoverageFinding(findings, "Application", "No disponible", ex.Message);
+        }
         catch (EventLogException ex)
         {
             // Y1: una lectura corrupta a mitad de canal no debe perder los módulos ya
             // identificados ni silenciar la cobertura: se declara parcial con rastro.
-            findings.Add(new DiagnosticFinding(
-                "THIRD-PARTY-EVENTLOG-COVERAGE",
-                "Interferencia de terceros",
-                DiagnosticSeverity.Advertencia,
-                "La lectura de Application para módulos de terceros quedó parcial.",
-                "Los módulos ya identificados se conservan; la cobertura del canal queda parcial.",
-                [new EvidenceItem("Canal", "Application"), new EvidenceItem("Cobertura", "Parcial"), new EvidenceItem("Detalle", ex.Message)],
-                ConfidenceLevel.Media,
-                Capa: DiagnosticLayer.Seguridad));
+            AddThirdPartyChannelCoverageFinding(findings, "Application", "Parcial", ex.Message);
         }
+    }
+
+    private static void AddThirdPartyChannelCoverageFinding(List<DiagnosticFinding> findings, string channel, string coverage, string detail)
+    {
+        findings.Add(new DiagnosticFinding(
+            "THIRD-PARTY-EVENTLOG-COVERAGE",
+            "Interferencia de terceros",
+            DiagnosticSeverity.Advertencia,
+            $"La lectura de {channel} para módulos de terceros quedó con cobertura {coverage}.",
+            "Los módulos ya identificados se conservan; la brecha de cobertura se declara honestamente.",
+            [new EvidenceItem("Canal", channel), new EvidenceItem("Cobertura", coverage), new EvidenceItem("Detalle", detail)],
+            ConfidenceLevel.Media,
+            Capa: DiagnosticLayer.Seguridad));
     }
 
     private static void ReadExplicitThirdPartySignals(
@@ -218,29 +249,42 @@ public sealed class ThirdPartyInterferenceCollector : IReadOnlyCollector
                         ]));
                 }
             }
-            catch (EventLogNotFoundException) { }
-            catch (UnauthorizedAccessException) { }
+            catch (EventLogNotFoundException ex)
+            {
+                // H7: idem sitio anterior; el canal ilegible se declara como brecha.
+                AddThirdPartyChannelCoverageEvent(events, log, "No disponible", ex.Message);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                AddThirdPartyChannelCoverageEvent(events, log, "No disponible", ex.Message);
+            }
             catch (EventLogException ex)
             {
                 // Y1: idem sitio anterior, para Application y System (aquí solo hay eventos,
                 // así que el rastro es un evento de cobertura, no un finding).
-                events.Add(new DiagnosticEvent(
-                    DateTimeOffset.Now, "TDM", "Interferencia de terceros / " + log,
-                    DiagnosticLayer.Seguridad, DiagnosticSeverity.Advertencia, "THIRD_PARTY_EVENTLOG_COVERAGE",
-                    $"La lectura de {log} para señales de terceros quedó parcial; lo ya leído se conserva.",
-                    Evidencia:
-                    [
-                        new EvidenceItem("Canal", log),
-                        new EvidenceItem("Cobertura", "Parcial"),
-                        new EvidenceItem("Detalle", ex.Message)
-                    ]));
+                AddThirdPartyChannelCoverageEvent(events, log, "Parcial", ex.Message);
             }
         }
     }
 
-    private static List<ThirdPartyRuntimeInfo> EnumerateThirdPartySecurityRuntimes(CancellationToken ct)
+    private static void AddThirdPartyChannelCoverageEvent(List<DiagnosticEvent> events, string log, string coverage, string detail)
+    {
+        events.Add(new DiagnosticEvent(
+            DateTimeOffset.Now, "TDM", "Interferencia de terceros / " + log,
+            DiagnosticLayer.Seguridad, DiagnosticSeverity.Advertencia, "THIRD_PARTY_EVENTLOG_COVERAGE",
+            $"La lectura de {log} para señales de terceros quedó con cobertura {coverage}; lo ya leído se conserva.",
+            Evidencia:
+            [
+                new EvidenceItem("Canal", log),
+                new EvidenceItem("Cobertura", coverage),
+                new EvidenceItem("Detalle", detail)
+            ]));
+    }
+
+    private static ScanResult<ThirdPartyRuntimeInfo> EnumerateThirdPartySecurityRuntimes(CancellationToken ct)
     {
         var result = new List<ThirdPartyRuntimeInfo>();
+        string? failure = null;
         try
         {
             foreach (var service in ServiceController.GetServices())
@@ -259,23 +303,40 @@ public sealed class ThirdPartyInterferenceCollector : IReadOnlyCollector
                 }
             }
         }
-        catch { }
-        return result
-            .GroupBy(x => x.Display, StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.First())
-            .ToList();
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // H7: GetServices puede lanzar Win32Exception (MS: servicecontroller.getservices) y el
+            // catch vacío convertía ese fallo en "Ninguno identificado". La cancelación tampoco
+            // se traga: ThrowIfCancellationRequested dentro del bucle debe propagarse (MS:
+            // parallel-programming/task-cancellation, cooperación vía OperationCanceledException).
+            failure = DescribeScanFailure(ex);
+        }
+        return new ScanResult<ThirdPartyRuntimeInfo>(
+            result
+                .GroupBy(x => x.Display, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList(),
+            failure);
     }
 
-    private static Dictionary<string, ExternalModuleInfo> EnumerateExternalModulesInTsplusProcesses(SystemSnapshot system, CancellationToken ct)
+    private static ModuleScanResult EnumerateExternalModulesInTsplusProcesses(SystemSnapshot system, CancellationToken ct)
     {
         var result = new Dictionary<string, ExternalModuleInfo>(StringComparer.OrdinalIgnoreCase);
+        var unreadableProcesses = 0;
+        string? firstFailure = null;
+        string? Failure() => unreadableProcesses == 0
+            ? null
+            : $"{unreadableProcesses} proceso(s) TSplus con módulos ilegibles ({firstFailure})";
         foreach (var process in Process.GetProcesses())
         {
             using (process)
             {
                 ct.ThrowIfCancellationRequested();
                 string? exePath = null;
-                try { exePath = process.MainModule?.FileName; } catch { }
+                Exception? mainModuleError = null;
+                try { exePath = process.MainModule?.FileName; }
+                catch (Exception ex) { mainModuleError = ex; }
                 string name;
                 try { name = process.ProcessName; } catch { continue; }
                 if (!TouchesTsplus(name, exePath, system)) continue;
@@ -290,14 +351,39 @@ public sealed class ThirdPartyInterferenceCollector : IReadOnlyCollector
                         if (IsWindowsModule(moduleName, path) || IsTsplusModule(moduleName, path, system)) continue;
                         var info = DescribeModule(path) ?? new ExternalModuleInfo(path, null, null);
                         result.TryAdd(moduleName, info);
-                        if (result.Count >= 200) return result;
+                        if (result.Count >= 200) return new ModuleScanResult(result, Failure());
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    // H7: Process.Modules lanza Win32Exception/InvalidOperationException para
+                    // procesos protegidos o de otra bitness (MS: process.modules). Un proceso
+                    // TSplus que no pudo leerse no prueba que no lleve módulos externos: se
+                    // declara la brecha en lugar de inventar "0 módulos externos".
+                    unreadableProcesses++;
+                    firstFailure ??= DescribeScanFailure(mainModuleError ?? ex);
+                }
             }
         }
-        return result;
+        return new ModuleScanResult(result, Failure());
     }
+
+    private static string DescribeScanFailure(Exception ex) => ex switch
+    {
+        Win32Exception win32 => $"Win32 {win32.NativeErrorCode}: {win32.Message}",
+        UnauthorizedAccessException => "acceso denegado",
+        _ => $"{ex.GetType().Name}: {ex.Message}"
+    };
+
+    /// <summary>
+    /// H7: la cobertura declarada del inventario. "Disponible" sólo cuando ambos escaneos
+    /// (servicios y módulos) terminaron sin error; el <c>DiagnosticCoverageAnalyzer</c>
+    /// consume esta misma clave desde la evidencia del evento.
+    /// </summary>
+    public static string ResolveInventoryCoverage(string? runtimeFailure, string? moduleFailure)
+        => runtimeFailure is not null && moduleFailure is not null ? "No disponible"
+            : runtimeFailure is not null || moduleFailure is not null ? "Parcial"
+            : "Disponible";
 
     private static string? ReadServiceImagePath(string serviceName)
     {
@@ -432,4 +518,6 @@ public sealed class ThirdPartyInterferenceCollector : IReadOnlyCollector
 
     private sealed record ThirdPartyRuntimeInfo(string Display, string? Path, string[] Tokens);
     private sealed record ExternalModuleInfo(string Path, string? Company, string? Product);
+    private sealed record ScanResult<T>(List<T> Items, string? Failure);
+    private sealed record ModuleScanResult(Dictionary<string, ExternalModuleInfo> Items, string? Failure);
 }
