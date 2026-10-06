@@ -7,7 +7,7 @@
 
 **Restricción documental (requisito del cliente)**: toda recomendación se apoya sólo en documentación oficial de Microsoft y TSplus. Cada URL citada fue verificada en esta sesión (salvo indicación). Los IDs de evento sin documentación oficial se declaran explícitamente en §Brecha documental y **no** se usan como base de remediación.
 
-**Recuento**: **5 CRITICAL · 12 HIGH · 22 MEDIUM · 17 LOW = 56 hallazgos** (**C1 corregido en Fase 29** → 55 abiertos).
+**Recuento**: **5 CRITICAL · 12 HIGH · 22 MEDIUM · 17 LOW = 56 hallazgos** (**C1 en Fase 29; C2, C3 y M-19 en Fase 30** → 52 abiertos).
 
 ---
 
@@ -48,6 +48,9 @@ Además, el monitoreo 24/7 no tiene recuperación declarada (C5) y la ventana de
 | 19 | TSplus — *Rehosting your license* (`end of use date`, rehost cada 6 meses con soporte) | https://docs.tsplus.net/tsplus/rehosting-your-license | ✅ verificada — C3 |
 | 20 | TSplus — *Web Credentials* (credenciales web e-mail/PIN) | https://docs.tsplus.net/tsplus/web-credentials | ✅ verificada — **no aplica a licencia** (nota en C3) |
 | 21 | MS .NET — `Double.TryParse`, `Process.Modules`, `IOException`, `ServiceController.GetServices`, `Task` cancellation, *Standard date/time format strings*, *Design Guidelines: Exceptions* | (URLs verificadas en Fases 17–28, sesiones previas) | ✅ — cerrados en auditorías previas |
+| 22 | MS — *Correct disk space problems on NTFS volumes* (chkdsk de solo lectura distingue datos/metadatos/cuotas; limpieza de disco) | https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/disk-space-problems-on-ntfs-volumes | ✅ verificada — C2 |
+| 23 | MS — *Disk Cleanup* (`cleanmgr`, liberación de espacio en Windows Server) | https://learn.microsoft.com/en-us/windows-server/storage/file-server/disk-cleanup | ✅ verificada — C2 (remediación) |
+| 24 | MS DSC — *RebootPending resource* (CBS, Windows Update, `PendingFileRenameOperations`, renombre de equipo) | https://learn.microsoft.com/en-us/powershell/dsc/reference/resources/microsoft/windows/rebootpending/ | ✅ verificada — M-19 |
 
 ---
 
@@ -60,19 +63,19 @@ Además, el monitoreo 24/7 no tiene recuperación declarada (C5) y la ventana de
 - **Doc oficial**: MS `Win32_Processor.LoadPercentage` (doc 16) valida la *captura* (promedio último segundo), no los umbrales; los umbrales son contrato interno TDM y deben respetar la configuración.
 - **Fix (F29)**: inyectar los thresholds en los detectores y reemplazar todos los literales; añadir *gate de configuración* (test que falle si un `*Warning/*Critical` de settings no tiene consumidor detector). → **corregido en Fase 29** (`e434104`: contrato `ResourceDetectionThresholds` en TDM.Models + `SupportThresholds.ToDetectionThresholds()` como único punto de traducción en TDM.Persistence, inyección vía `DiagnosticContext.ResourceThresholds` en los 6 puntos de construcción, evaluadores puros `EvaluateCpuSeverity`/`EvaluateMemorySeverity`/`EvaluateDiskSeverity` con mensajes que citan el umbral configurado, nuevo hallazgo `RESOURCE-CPU-CRITICAL` para consumir `CpuCritical`, `ResourceLoadGuard` paramétrico (idéntico por defecto: 85/70 CPU, 10/20 % libre); tests `DetectionHonorsConfiguredThresholds` + `ConfiguredResourceThresholdsAreWiredIntoDetection` (mapeo de los 6 keys + gate estático de literales/inyección), gates 192/192 · 47/47 · 7/7 · publish 139082951)
 
-### C2 — Disco lleno / saturación de memoria jamás pueden ser causa raíz · ABIERTO
+### C2 — Disco lleno / saturación de memoria jamás pueden ser causa raíz · CERRADO (Fase 30)
 
 - **Evidencia**: `SystemResourceCollector.cs:175,187,89` genera `RESOURCE-DISK-CRITICAL-*`, `RESOURCE-DISK-WARNING-*`, `RESOURCE-MEMORY-CRITICAL` (severidad Crítico/Advertencia); `TdmWorker.cs:566-568` sólo los ve como señal; grep en `src\TDM.Correlation` no encuentra ningún candidato con prefijo `RESOURCE-` (sólo mención en `DiagnosticPrecisionAnalyzer.cs:225`). (`ag.` + `ver. parcial`)
 - **Impacto**: si el disco lleno causó el incidente (logs, temporales, actualizaciones TSplus), TDM lo **detecta pero nunca lo rankea** → causa raíz ausente pese a evidencia confirmada. Rompe el pipeline detección → correlación → ranking para el síntoma más común de servidores.
 - **Doc oficial**: coherente con el texto del propio hallazgo («puede afectar logs, temporales, actualizaciones») y con MS doc 10 (contadores de memoria) como fuente de medición.
-- **Fix (F30)**: reglas `AddResourceExhaustionCandidates` con umbral configurado, ventana temporal y exigencia de evidencia acompañante (consistente con el diseño conservador actual).
+- **Fix (F30)**: reglas `AddResourceExhaustionCandidates` con umbral configurado, ventana temporal y exigencia de evidencia acompañante (consistente con el diseño conservador actual). → **corregido en Fase 30** (`2da0be6`: `RootCauseCorrelator.Rules.Resources.cs` — cada hallazgo Critico `RESOURCE-DISK-CRITICAL-*`/`RESOURCE-MEMORY-CRITICAL` genera candidato (ids `ROOT-RESOURCE-DISK-EXHAUSTION-{letra}`/`ROOT-RESOURCE-MEMORY-EXHAUSTION`); elevación a 93/Alta con `IncidentTime` sólo con señal funcional independiente (`IsCausalSignal` + ventana + ≤15 min del fin), sin ella 76/Media; evidencia `Umbral crítico configurado` añadida por el collector; KB `MS-DISK-SPACE`/`MS-LOW-MEMORY` (docs 22–23 + doc 10); tests `ResourceExhaustionFindingsReachRootCauseRanking` + `ResourceExhaustionCandidateNeedsRecentWindowedSymptom`, gates 196/196 · 47/47 · 7/7 · publish 139107527)
 
-### C3 — Licencia TSplus excluida del pool causal de correlación · ABIERTO
+### C3 — Licencia TSplus excluida del pool causal de correlación · CERRADO (Fase 30)
 
 - **Evidencia** (`ver.`): `RootCauseCorrelator.cs:33` `.Where(e => e.Tipo != "LICENSE")` filtra la entrada `tsplusErrors` que alimenta la mayoría de reglas TSplus; pero `TsplusLogParser.cs:118` y `TsplusStructuredLogSidecar.cs:266` sí clasifican eventos como `LICENSE`, y `TsplusGuidedTroubleshooter.cs:432,440` sí los usa → inconsistencia interna (el guiado habla de licencia, el ranking nunca).
 - **Impacto**: expiración/estado de licencia TSplus como causa de caída de sesión web nunca aparece en `CausasRaiz`.
 - **Doc oficial**: TSplus docs 18 y 19 (estado de licencia y `end of use date` son condiciones operativas documentadas). **Nota**: el doc 20 (`web-credentials`) trata credenciales web e-mail/PIN y **no** respalda este hallazgo; se retiró como citación (auditorías previas la usaron indebidamente).
-- **Fix (F30)**: candidato `LICENSE` conservador (sólo con temporalidad + severidad Error/Crítico), sin bajar el listón de evidencia primaria.
+- **Fix (F30)**: candidato `LICENSE` conservador (sólo con temporalidad + severidad Error/Crítico), sin bajar el listón de evidencia primaria. → **corregido en Fase 30** (`2da0be6`: `RootCauseCorrelator.Rules.License.cs` — `AddLicenseCandidates` lee `report.Eventos` `Tipo == "LICENSE"` fechados dentro de la ventana con severidad Error/Crítico y emite `ROOT-TSPLUS-LICENSE` a 76/Media con `HoraIncidente` del evento más reciente; KB `TSPLUS-LICENSE` (docs 18–19); el filtro `Tipo != "LICENSE"` del pool `tsplusErrors` se conserva intacto; test `LicenseErrorNeedsTimestampedSeverityInWindow`)
 
 ### C4 — Collector ETW RDP no funcional y cobertura declarada sin entregar · ABIERTO
 
@@ -132,7 +135,7 @@ Además, el monitoreo 24/7 no tiene recuperación declarada (C5) y la ventana de
 | M-16 | Canary escribe eventos pese al mandato read-only de diagnóstico | (`ag.`) | `ag.` |
 | M-17 | Identidad de evento rota en colectores secundarios (mismos campos distintos) | (`ag.`) | `ag.` |
 | M-18 | Evidencia de impacto se **crea** (`"Causa del paro demostrada": No`, `"Alcance potencial (sesiones observadas)"`) pero su render en informe/GUI no está garantizado — verificar presencia en export | creación: `RootCauseCorrelator.cs:140`, `FunctionalImpactAnalyzer.cs:370-371` (`ver.`); render: pendiente | `ver.`/pendiente |
-| M-19 | *Pending reboot* nunca compite como causa raíz (condición temporal documentable) | (`ag.`) | `ag.` |
+| M-19 | *Pending reboot* nunca compite como causa raíz (condición temporal documentable) | (`ag.`) | **CERRADO (F30, `2da0be6`)**: `ROOT-WINDOWS-PENDING-REBOOT` en `Rules.WindowsFarm.cs` — 72/Media sin síntoma, 88/Alta con síntoma de sesión en ventana; KB `MS-REBOOT-PENDING` (doc 24); test `PendingRebootCandidateScalesWithSessionSymptom` |
 | M-20 | Hallazgos `TSPLUS-PROCESS-MODULE-MISSING` sin consumidor → procesos afectados no mostrados | (`ag.`) | `ag.` |
 | M-21 | Sin declaración de hueco cuando TDM estuvo caído (path servicio): la ventana se lee como "sin novedad" | (`ag.`) | `ag.` |
 | M-22 | `TimeCreated` re-evaluado al leer (offset vs escritura) y deriva federada midiendo retardo del escritor, no del host | (`ag.`) | `ag.` |
@@ -204,6 +207,6 @@ Gates obligatorios por fase (en orden): `dotnet build TDM.sln -c Release --no-re
 
 ## Estado
 
-- **Hallazgos abiertos**: 56 (5 C · 12 H · 22 M · 17 L).
-- **Cerrados**: 0.
-- **Remediación**: plan F29–F35 aprobado por el usuario; F29 pendiente de inicio.
+- **Hallazgos abiertos**: 52 (2 C · 12 H · 21 M · 17 L).
+- **Cerrados**: 4 — C1 (F29, `e434104`), C2 · C3 · M-19 (F30, `2da0be6`).
+- **Remediación**: plan F29–F35 aprobado por el usuario; F29 y F30 completadas con gates verdes; F31 (C4, C5) pendiente de inicio.
