@@ -7,7 +7,7 @@
 
 **Restricción documental (requisito del cliente)**: toda recomendación se apoya sólo en documentación oficial de Microsoft y TSplus. Cada URL citada fue verificada en esta sesión (salvo indicación). Los IDs de evento sin documentación oficial se declaran explícitamente en §Brecha documental y **no** se usan como base de remediación.
 
-**Recuento**: **5 CRITICAL · 12 HIGH · 22 MEDIUM · 17 LOW = 56 hallazgos** (**C1 en Fase 29; C2, C3 y M-19 en Fase 30** → 52 abiertos).
+**Recuento**: **5 CRITICAL · 12 HIGH · 22 MEDIUM · 17 LOW = 56 hallazgos** (**C1 en F29; C2, C3 y M-19 en F30; C4, C5 y L-08 en F31** → 49 abiertos).
 
 ---
 
@@ -51,6 +51,8 @@ Además, el monitoreo 24/7 no tiene recuperación declarada (C5) y la ventana de
 | 22 | MS — *Correct disk space problems on NTFS volumes* (chkdsk de solo lectura distingue datos/metadatos/cuotas; limpieza de disco) | https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/disk-space-problems-on-ntfs-volumes | ✅ verificada — C2 |
 | 23 | MS — *Disk Cleanup* (`cleanmgr`, liberación de espacio en Windows Server) | https://learn.microsoft.com/en-us/windows-server/storage/file-server/disk-cleanup | ✅ verificada — C2 (remediación) |
 | 24 | MS DSC — *RebootPending resource* (CBS, Windows Update, `PendingFileRenameOperations`, renombre de equipo) | https://learn.microsoft.com/en-us/powershell/dsc/reference/resources/microsoft/windows/rebootpending/ | ✅ verificada — M-19 |
+| 25 | MS .NET — `EventListener` ("el objetivo de todos los eventos generados por implementaciones de `EventSource` en el dominio de aplicación actual") | https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.tracing.eventlistener | ✅ verificada — C4 |
+| 26 | MS .NET — `EventLogWatcher` (suscripción a eventos entrantes del Event Log; `EventRecordWritten` por evento publicado) | https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.eventing.reader.eventlogwatcher | ✅ verificada — C4 (sink real) |
 
 ---
 
@@ -77,20 +79,20 @@ Además, el monitoreo 24/7 no tiene recuperación declarada (C5) y la ventana de
 - **Doc oficial**: TSplus docs 18 y 19 (estado de licencia y `end of use date` son condiciones operativas documentadas). **Nota**: el doc 20 (`web-credentials`) trata credenciales web e-mail/PIN y **no** respalda este hallazgo; se retiró como citación (auditorías previas la usaron indebidamente).
 - **Fix (F30)**: candidato `LICENSE` conservador (sólo con temporalidad + severidad Error/Crítico), sin bajar el listón de evidencia primaria. → **corregido en Fase 30** (`2da0be6`: `RootCauseCorrelator.Rules.License.cs` — `AddLicenseCandidates` lee `report.Eventos` `Tipo == "LICENSE"` fechados dentro de la ventana con severidad Error/Crítico y emite `ROOT-TSPLUS-LICENSE` a 76/Media con `HoraIncidente` del evento más reciente; KB `TSPLUS-LICENSE` (docs 18–19); el filtro `Tipo != "LICENSE"` del pool `tsplusErrors` se conserva intacto; test `LicenseErrorNeedsTimestampedSeverityInWindow`)
 
-### C4 — Collector ETW RDP no funcional y cobertura declarada sin entregar · ABIERTO
+### C4 — Collector ETW RDP no funcional y cobertura declarada sin entregar · CERRADO (Fase 31)
 
 - **Evidencia** (`ver.`): `RdpEtwCollector.cs`
   1. **Sin drenaje**: `CollectAsync` crea listas locales (`:28-29`) y las devuelve vacías en `:40,53,93`; el listener recibe los campos `_events/_findings` (`:65`) que jamás se leen.
   2. **Cobertura no entregable**: la lista `coverage` (`:30,39,52,56,78-80,90`) no se retorna nunca — `CollectorResult` sólo tiene `Hallazgos` y `Eventos` (`DiagnosticModels.cs:226-231`).
   3. **API inadecuada**: `EventSource.GetSources()`/`EventListener` (`:67-76,136-143`) sólo observa `EventSource` .NET **en-proceso**; los proveedores ETW nativos nombrados (`Microsoft-Windows-TerminalServices-*`) no pueden aparecer jamás → cero captura posible.
 - **Impacto**: característica "P2-01 ETW sub-segundo" declarada en GUI/servicio sin producir ni un evento, y sin forma de saberlo (cobertura descartada). Confianza artificial en cobertura de transiciones RDP.
-- **Fix (F31)**: o reescritura con sink válido (lector `EventLogWatcher`/suscripción con drenaje real + campo de cobertura entregable), o desactivación explícita con estado "No soportado" en cobertura. Preferente: eliminar el claim hasta tener sink correcto.
+- **Fix (F31)**: o reescritura con sink válido (lector `EventLogWatcher`/suscripción con drenaje real + campo de cobertura entregable), o desactivación explícita con estado "No soportado" en cobertura. Preferente: eliminar el claim hasta tener sink correcto. → **corregido en Fase 31** (`a830356`: retirada del claim — se eliminan `RdpEtwCollector.cs`, su registro en `CollectorCatalog` y la opción `EnableRdpEtw` en los 4 puntos de construcción; la cobertura de transiciones RDP queda sólo en fuentes reales con evidencia entregable por corrida — `WINDOWS_PUSH_EVENT_COVERAGE` de `WindowsPushEventCollector`, sink `EventLogWatcher` sobre los 3 canales Operational (docs 25–26), más `RdpEventCollector` por lote e incremental/forense; tests `PhantomRdpEtwCollectorRetiredAndRealSinkDeclaresCoverage` + `RunScopeDisposesDisposableCollectors` (renombrado desde `RdpEtwCollectorIsDisposableAndRunScopedDisposed`), gates 198/198 · 47/47 · 7/7 · publish 139091143)
 
-### C5 — Monitoreo 24/7 sin recuperación ni watchdog declarados · ABIERTO
+### C5 — Monitoreo 24/7 sin recuperación ni watchdog declarados · CERRADO (Fase 31)
 
 - **Evidencia** (`ag.`): no hay `sc failure`/`sc failureflag` en el instalador ni watchdog/watchdog-heartbeat; el propio servicio TDM puede caerse sin acción de recuperación ni alerta STALLED.
 - **Doc oficial**: docs 3 (`sc failure`: `restart/5000`…), 5 (`sc failureflag`), 4 (`error=` en arranque).
-- **Fix (F31/F33)**: declarar `sc failure` + `failureflag=1` para servicios TDM/TSplus monitorizados, heartbeat con estado STALLED, y documentar en informe la ausencia de recuperación.
+- **Fix (F31/F33)**: declarar `sc failure` + `failureflag=1` para servicios TDM/TSplus monitorizados, heartbeat con estado STALLED, y documentar en informe la ausencia de recuperación. → **corregido en Fase 31** (`a830356`: `Install-TDM.cmd` declara `sc.exe failure TDM.Service reset= 86400 actions= restart/5000/restart/15000/restart/60000` + `sc.exe failureflag TDM.Service 1` (docs 3 y 5, re-verificadas; fallo de instalación si SCM los rechaza) — sólo para `TDM.Service`, que es el servicio del que TDM es propietario: Windows/TSplus conservan su propia recuperación; `ServiceHeartbeatStore.DescribeStatus`/`StalledFinding` convierten un latido >150 s en el hallazgo `TDM-SERVICE-HEARTBEAT-STALLED` (Advertencia con edad/umbral/PID y remedio `sc qfailure` citando doc 3) que el diagnóstico GUI añade al informe, y `TelemetryReadService` muestra `TDM.Service · STALLED` en la fuente; el watchdog externo ya existía como script de repositorio (`Register-TdmWatchdog.ps1`, fuera del paquete instalado); test `ServiceRecoveryIsDeclaredAndStalledHeartbeatSurfaces`)
 
 ---
 
@@ -151,7 +153,7 @@ Además, el monitoreo 24/7 no tiene recuperación declarada (C5) y la ventana de
 | L-05 | `DriftProximityMatcher` con cultura actual (F28 ya demostró el riesgo es-ES) | (`ag.`) |
 | L-06 | Encadenamiento de clusters sin límite | `IncidentClusterAnalyzer` (`ag.`) |
 | L-07 | `@SystemTime` con `+00:00` vs `Z` en escrituras | (`ag.`) |
-| L-08 | Severidad ETW fija Informativo sin mapeo | `RdpEtwCollector.cs:154` (`ver.`) |
+| L-08 | Severidad ETW fija Informativo sin mapeo | `RdpEtwCollector.cs:154` (`ver.`); **corregido en Fase 31** (`a830356`: el código vivía en el collector retirado por C4) |
 | L-09 | Formatos de log pequeños no evaluados por el detector de formato | `TsplusLogDiscovery` (`ag.`) |
 | L-10 | Método muerto `RefreshCoverage` en GUI | (`ag.`) |
 | L-11 | Sidecar de logs estructurado sin cablear en pipeline | `TsplusStructuredLogSidecar` (`ag.`) |
@@ -207,6 +209,6 @@ Gates obligatorios por fase (en orden): `dotnet build TDM.sln -c Release --no-re
 
 ## Estado
 
-- **Hallazgos abiertos**: 52 (2 C · 12 H · 21 M · 17 L).
-- **Cerrados**: 4 — C1 (F29, `e434104`), C2 · C3 · M-19 (F30, `2da0be6`).
-- **Remediación**: plan F29–F35 aprobado por el usuario; F29 y F30 completadas con gates verdes; F31 (C4, C5) pendiente de inicio.
+- **Hallazgos abiertos**: 49 (0 C · 12 H · 21 M · 16 L).
+- **Cerrados**: 7 — C1 (F29, `e434104`), C2 · C3 · M-19 (F30, `2da0be6`), C4 · C5 · L-08 (F31, `a830356`).
+- **Remediación**: plan F29–F35 aprobado por el usuario; F29–F31 completadas con gates verdes; F32 (H2, H3, H9, H11) pendiente de inicio.
