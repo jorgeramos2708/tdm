@@ -45,6 +45,9 @@ public sealed class TdmWorker : BackgroundService
     private long _completedSamples;
     private int _deferredSamples;
     private int _consecutiveDefers;
+    // Fase 29 (C1): umbrales de detección de recursos desde la configuración operativa.
+    // null hasta la primera carga exitosa => ResourceDetectionThresholds.Default.
+    private ResourceDetectionThresholds? _resourceThresholds;
     private readonly CollectorCircuitBreaker _circuitBreaker = new();
     private readonly TdmHealthCheck _healthCheck;
     private DateTimeOffset _lastHealthCheckAt = DateTimeOffset.MinValue;
@@ -122,7 +125,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
                     try
                     {
                     await ProcessNotificationSelfTestAsync(dispatcher, stoppingToken).ConfigureAwait(false);
-                    var guard = ResourceLoadGuard.Capture();
+                    var guard = ResourceLoadGuard.Capture(_resourceThresholds);
                     if (guard.ShouldDefer)
                     {
                         _deferredSamples++;
@@ -162,6 +165,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
                             var configStore = new SupportMonitoringSettingsStore(_root);
                             var monitoringSettings = await configStore.LoadAsync(stoppingToken).ConfigureAwait(false);
                             var thresholds = monitoringSettings.Thresholds;
+                            _resourceThresholds = thresholds.ToDetectionThresholds();
                             options = new DiagnosticOptions
                             {
                                 MaxFilesPerDirectory = thresholds.MaxFilesPerDirectory,
@@ -182,7 +186,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
                         }
 
                         var recoveryLookback = _windowsIncremental.RecoveryLookback(DateTimeOffset.Now);
-                        var context = new DiagnosticContext(snapshot, recoveryLookback ?? NormalInterval, TsplusProfile: tsplusProfile, Options: options);
+                        var context = new DiagnosticContext(snapshot, recoveryLookback ?? NormalInterval, TsplusProfile: tsplusProfile, Options: options, ResourceThresholds: _resourceThresholds);
                         var collectors = CollectorCatalog.CreateServiceMonitor(guard, includeHeavy);
                         collectors.Add(_windowsIncremental);
                         collectors.Add(_tsplusIncremental);
@@ -410,6 +414,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
             var configStore = new SupportMonitoringSettingsStore(_root);
             var monitoringSettings = await configStore.LoadAsync(ct).ConfigureAwait(false);
             var thresholds = monitoringSettings.Thresholds;
+            _resourceThresholds = thresholds.ToDetectionThresholds();
             options = new DiagnosticOptions
             {
                 MaxFilesPerDirectory = thresholds.MaxFilesPerDirectory,
@@ -430,7 +435,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
         }
 
         var recoveryLookback = _windowsIncremental.RecoveryLookback(DateTimeOffset.Now);
-        var context = new DiagnosticContext(snapshot, recoveryLookback ?? EmergencyPolicy.Lookback, TsplusProfile: tsplusProfile, Options: options);
+        var context = new DiagnosticContext(snapshot, recoveryLookback ?? EmergencyPolicy.Lookback, TsplusProfile: tsplusProfile, Options: options, ResourceThresholds: _resourceThresholds);
         var policy = DiagnosticExecutionPolicy.Uniform(EmergencyPolicy.CollectorTimeout, EmergencyPolicy.MaxRawEvents);
         var engine = new DiagnosticEngine(
             new IReadOnlyCollector[] { _windowsIncremental, _tsplusIncremental },
@@ -671,6 +676,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
                 var configStore = new SupportMonitoringSettingsStore(_root);
                 var monitoringSettings = await configStore.LoadAsync(ct).ConfigureAwait(false);
                 var thresholds = monitoringSettings.Thresholds;
+                _resourceThresholds = thresholds.ToDetectionThresholds();
                 options = new DiagnosticOptions
                 {
                     MaxFilesPerDirectory = thresholds.MaxFilesPerDirectory,
@@ -690,7 +696,7 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
                 _logger.LogDebug(ex, "No se pudo cargar configuración de umbrales (longitudinal); usando valores por defecto");
             }
 
-            var context = new DiagnosticContext(snapshot with { FechaCaptura = DateTimeOffset.Now }, TimeSpan.FromMinutes(15), TsplusProfile: tsplusProfile, Options: options);
+            var context = new DiagnosticContext(snapshot with { FechaCaptura = DateTimeOffset.Now }, TimeSpan.FromMinutes(15), TsplusProfile: tsplusProfile, Options: options, ResourceThresholds: _resourceThresholds);
             var policy = DiagnosticExecutionPolicy.Uniform(collectorTimeout, 8_000);
             var engine = new DiagnosticEngine(collectors, policy, _circuitBreaker);
             var report = await engine.RunAsync(context, ct).ConfigureAwait(false);

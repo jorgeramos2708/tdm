@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TDM.Models;
 
 namespace TDM.Persistence;
 
@@ -42,6 +43,13 @@ public sealed record SupportThresholds
     public int MaxBytesPerFileIncremental { get; init; } = 256 * 1024;
     public long MaxTotalBytesIncremental { get; init; } = 1024 * 1024;
     public int MaxEventsIncremental { get; init; } = 300;
+
+    // Fase 29 (C1): traduce la configuración operativa a los umbrales que consumen los
+    // collectors de recursos. Los collectors no referencian TDM.Persistence, por lo que
+    // este es el único punto de traducción al contrato de TDM.Models.
+    public ResourceDetectionThresholds ToDetectionThresholds() =>
+        new(CpuWarning, CpuCritical, MemoryUsedWarning, MemoryUsedCritical,
+            DiskFreeWarningPercent, DiskFreeCriticalPercent);
 }
 
 

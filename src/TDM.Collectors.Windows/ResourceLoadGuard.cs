@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using TDM.Models;
 
 namespace TDM.Collectors.Windows;
 
@@ -30,10 +31,10 @@ public static class ResourceLoadGuard
         bool AllowsIntensiveSampling,
         string Summary);
 
-    public static Snapshot Capture()
+    public static Snapshot Capture(ResourceDetectionThresholds? thresholds = null)
     {
         var memory = ReadMemory();
-        return BuildSnapshot(ReadCpuPercent(), memory.FreePercent, memory.TotalBytes);
+        return BuildSnapshot(ReadCpuPercent(), memory.FreePercent, memory.TotalBytes, thresholds ?? ResourceDetectionThresholds.Default);
     }
 
     /// <summary>
@@ -41,25 +42,29 @@ public static class ResourceLoadGuard
     /// Sólo lee GetSystemTimes + GlobalMemoryStatusEx; no ejecuta collectors, WMI, Event Log
     /// ni lecturas de archivos TSplus.
     /// </summary>
-    public static Snapshot CaptureDisplay()
+    public static Snapshot CaptureDisplay(ResourceDetectionThresholds? thresholds = null)
     {
         var memory = ReadMemory();
-        return BuildSnapshot(ReadDisplayCpuPercent(), memory.FreePercent, memory.TotalBytes);
+        return BuildSnapshot(ReadDisplayCpuPercent(), memory.FreePercent, memory.TotalBytes, thresholds ?? ResourceDetectionThresholds.Default);
     }
 
-    private static Snapshot BuildSnapshot(double? cpu, double? memoryFree, ulong? memoryTotalBytes)
+    private static Snapshot BuildSnapshot(double? cpu, double? memoryFree, ulong? memoryTotalBytes, ResourceDetectionThresholds thresholds)
     {
-        // El monitor debe ceder ante un servidor bajo presión. Los umbrales son deliberadamente
-        // conservadores: no se usa la muestra de TDM si la CPU ya está muy ocupada o la memoria
-        // libre es escasa. El diagnóstico manual no se bloquea por esta regla.
-        var shouldDefer = (cpu.HasValue && cpu.Value >= 85d)
-                          || (memoryFree.HasValue && memoryFree.Value <= 10d);
+        // El monitor debe ceder ante un servidor bajo presión. Los umbrales provienen de la
+        // configuración operativa (Fase 29, C1); con los valores por defecto el comportamiento
+        // es idéntico al histórico: aplazo con CPU >= 85 o memoria libre <= 10 %, y muestreo
+        // intensivo sólo con CPU < 70 y memoria libre >= 20 %. El diagnóstico manual no se
+        // bloquea por esta regla.
+        var memoryFreeCritical = 100d - thresholds.MemoryUsedCriticalPercent;
+        var memoryFreeWarning = 100d - thresholds.MemoryUsedWarningPercent;
+        var shouldDefer = (cpu.HasValue && cpu.Value >= thresholds.CpuCriticalPercent)
+                          || (memoryFree.HasValue && memoryFree.Value <= memoryFreeCritical);
 
         // El modo de 30 s sólo se habilita cuando hay margen suficiente. En caso contrario el
         // monitor permanece a 60 s aunque exista un cambio reciente.
         var allowsIntensive = cpu.HasValue && memoryFree.HasValue
-                              && cpu.Value < 70d
-                              && memoryFree.Value >= 20d;
+                              && cpu.Value < thresholds.CpuWarningPercent
+                              && memoryFree.Value >= memoryFreeWarning;
 
         var cpuText = cpu.HasValue ? $"CPU {cpu.Value:0}%" : "CPU N/D";
         var memText = memoryFree.HasValue ? $"memoria libre {memoryFree.Value:0.0}%" : "memoria N/D";

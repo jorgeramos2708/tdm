@@ -146,7 +146,8 @@ public sealed class IntegratedMonitoringService : IDisposable
             _usesExternalService = await IsServiceMonitoringAvailableAsync(ct).ConfigureAwait(false);
             if (_usesExternalService) return;
 
-            var load = ResourceLoadGuard.Capture();
+            var resourceThresholds = await LoadResourceThresholdsSafeAsync(ct).ConfigureAwait(false);
+            var load = ResourceLoadGuard.Capture(resourceThresholds);
             if (load.ShouldDefer) return;
 
             var now = DateTimeOffset.Now;
@@ -219,6 +220,23 @@ public sealed class IntegratedMonitoringService : IDisposable
         return result;
     }
 
+    // Fase 29 (C1): umbrales de detección de recursos desde la configuración operativa.
+    // Un fallo de lectura nunca debe tumbar el ciclo de muestreo: devuelve null y la
+    // detección usa ResourceDetectionThresholds.Default.
+    private async Task<ResourceDetectionThresholds?> LoadResourceThresholdsSafeAsync(CancellationToken ct)
+    {
+        try
+        {
+            var store = _portableSettingsStore ?? new SupportMonitoringSettingsStore(_writeRoot);
+            var settings = await store.LoadAsync(ct).ConfigureAwait(false);
+            return settings.Thresholds.ToDetectionThresholds();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
     private async Task RecordStateChannelAsync(
         SystemSnapshot snapshot,
         IReadOnlyList<IReadOnlyCollector> collectors,
@@ -226,7 +244,8 @@ public sealed class IntegratedMonitoringService : IDisposable
         TimeSpan collectorTimeout,
         CancellationToken ct)
     {
-        var context = new DiagnosticContext(snapshot with { FechaCaptura = DateTimeOffset.Now }, TimeSpan.FromMinutes(15));
+        var resourceThresholds = await LoadResourceThresholdsSafeAsync(ct).ConfigureAwait(false);
+        var context = new DiagnosticContext(snapshot with { FechaCaptura = DateTimeOffset.Now }, TimeSpan.FromMinutes(15), ResourceThresholds: resourceThresholds);
         var engine = new DiagnosticEngine(collectors, collectorTimeout: collectorTimeout, maxRawEvents: 8_000);
         var report = await engine.RunAsync(context, ct).ConfigureAwait(false);
         report = DiagnosticWorkflow.EnrichOperationalState(report);
@@ -241,9 +260,10 @@ public sealed class IntegratedMonitoringService : IDisposable
 
         try
         {
-            var load = ResourceLoadGuard.Capture();
+            var resourceThresholds = await LoadResourceThresholdsSafeAsync(ct).ConfigureAwait(false);
+            var load = ResourceLoadGuard.Capture(resourceThresholds);
             var snapshot = await GetSystemSnapshotAsync(ct).ConfigureAwait(false);
-            var context = new DiagnosticContext(snapshot, TimeSpan.FromMinutes(5));
+            var context = new DiagnosticContext(snapshot, TimeSpan.FromMinutes(5), ResourceThresholds: resourceThresholds);
             var collectors = CollectorCatalog.CreateLightweight(load);
             // El presupuesto total es menor al intervalo de 5 s: una API lenta no puede
             // convertir el monitor visual en un ciclo de 10/15 s ni acumular ejecuciones.

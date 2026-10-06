@@ -208,7 +208,9 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("ObservabilityCompactionFailureIsContainedAndRetried", ObservabilityCompactionFailureIsContainedAndRetried),
     ("SafeWmiConvertsEveryNumericWmiType", SafeWmiConvertsEveryNumericWmiType),
     ("SafeWmiParsesWmiLiteralsUnderInvariantCulture", SafeWmiParsesWmiLiteralsUnderInvariantCulture),
-    ("SafeWmiConvertsLiveProcessorLoadWithoutSentinel", SafeWmiConvertsLiveProcessorLoadWithoutSentinel)
+    ("SafeWmiConvertsLiveProcessorLoadWithoutSentinel", SafeWmiConvertsLiveProcessorLoadWithoutSentinel),
+    ("DetectionHonorsConfiguredThresholds", DetectionHonorsConfiguredThresholds),
+    ("ConfiguredResourceThresholdsAreWiredIntoDetection", ConfiguredResourceThresholdsAreWiredIntoDetection)
 };
 
 var failed = 0;
@@ -5510,6 +5512,128 @@ static Task SafeWmiConvertsLiveProcessorLoadWithoutSentinel()
     foreach (var load in loads)
         True(load >= 0 && load <= 100,
             $"LoadPercentage convertido a {load}; la CPU quedaría descartada o fuera de rango.");
+    return Task.CompletedTask;
+}
+
+static Task DetectionHonorsConfiguredThresholds()
+{
+    // C1 (auditoría de efectividad, Fase 29): la detección de recursos clasifica contra
+    // los umbrales de SupportMonitoringSettings (llegan vía DiagnosticContext.ResourceThresholds),
+    // no contra literales fijos.
+    var defaults = ResourceDetectionThresholds.Default;
+
+    True(SystemResourceCollector.EvaluateCpuSeverity(70, defaults) == DiagnosticSeverity.Advertencia,
+        "CPU en 70 % (umbral de aviso por defecto) no elevó Advertencia.");
+    True(SystemResourceCollector.EvaluateCpuSeverity(85, defaults) == DiagnosticSeverity.Critico,
+        "CPU en 85 % (umbral crítico por defecto) no elevó Crítico.");
+    True(SystemResourceCollector.EvaluateCpuSeverity(69.9, defaults) is null,
+        "CPU por debajo del umbral de aviso por defecto generó hallazgo.");
+
+    var customCpu = defaults with { CpuWarningPercent = 90, CpuCriticalPercent = 95 };
+    True(SystemResourceCollector.EvaluateCpuSeverity(85, customCpu) is null,
+        "La CPU siguió el valor por defecto pese a que la configuración fija el aviso en 90 %.");
+    True(SystemResourceCollector.EvaluateCpuSeverity(90, customCpu) == DiagnosticSeverity.Advertencia,
+        "La CPU no honró el umbral de aviso configurado (90 %).");
+    True(SystemResourceCollector.EvaluateCpuSeverity(95, customCpu) == DiagnosticSeverity.Critico,
+        "La CPU no honró el umbral crítico configurado (95 %).");
+
+    True(SystemResourceCollector.EvaluateMemorySeverity(19, defaults) == DiagnosticSeverity.Advertencia,
+        "Memoria con 81 % de uso no elevó Advertencia (aviso 80 %).");
+    True(SystemResourceCollector.EvaluateMemorySeverity(10, defaults) == DiagnosticSeverity.Critico,
+        "Memoria con 90 % de uso no elevó Crítico (crítico 90 %).");
+    True(SystemResourceCollector.EvaluateMemorySeverity(21, defaults) is null,
+        "Memoria con 79 % de uso generó hallazgo.");
+
+    var customMemory = defaults with { MemoryUsedWarningPercent = 60, MemoryUsedCriticalPercent = 70 };
+    True(SystemResourceCollector.EvaluateMemorySeverity(35, customMemory) == DiagnosticSeverity.Advertencia,
+        "La memoria no honró el umbral de aviso configurado (65 % de uso).");
+    True(SystemResourceCollector.EvaluateMemorySeverity(25, customMemory) == DiagnosticSeverity.Critico,
+        "La memoria no honró el umbral crítico configurado (75 % de uso).");
+    True(SystemResourceCollector.EvaluateMemorySeverity(45, customMemory) is null,
+        "La memoria siguió el valor por defecto pese a la configuración (55 % de uso).");
+
+    True(SystemResourceCollector.EvaluateDiskSeverity(10, defaults) == DiagnosticSeverity.Advertencia,
+        "Disco con 10 % libre no elevó Advertencia (aviso 10 %).");
+    True(SystemResourceCollector.EvaluateDiskSeverity(5, defaults) == DiagnosticSeverity.Critico,
+        "Disco con 5 % libre no elevó Crítico (crítico 5 %).");
+    True(SystemResourceCollector.EvaluateDiskSeverity(10.1, defaults) is null,
+        "Disco por encima del umbral de aviso por defecto generó hallazgo.");
+
+    var customDisk = defaults with { DiskFreeWarningPercent = 20, DiskFreeCriticalPercent = 10 };
+    True(SystemResourceCollector.EvaluateDiskSeverity(15, customDisk) == DiagnosticSeverity.Advertencia,
+        "El disco no honró el umbral de aviso configurado (15 % libre).");
+    True(SystemResourceCollector.EvaluateDiskSeverity(10, customDisk) == DiagnosticSeverity.Critico,
+        "El disco no honró el umbral crítico configurado (10 % libre).");
+    True(SystemResourceCollector.EvaluateDiskSeverity(21, customDisk) is null,
+        "El disco siguió el valor por defecto pese a la configuración (21 % libre).");
+    return Task.CompletedTask;
+}
+
+static Task ConfiguredResourceThresholdsAreWiredIntoDetection()
+{
+    // C1 (auditoría de efectividad, Fase 29): la configuración operativa debe llegar hasta
+    // la detección. Gate estático: contrato en Models, traducción en Persistence, consumo en
+    // el collector y presencia en todos los puntos de construcción de DiagnosticContext.
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de umbrales de detección no ejecutable.");
+
+    var models = File.ReadAllText(Path.Combine(root!, "src", "TDM.Models", "DiagnosticModels.cs"));
+    True(models.Contains("ResourceDetectionThresholds? ResourceThresholds = null", StringComparison.Ordinal),
+        "DiagnosticContext no expone el parámetro de umbrales de detección.");
+
+    var persistence = File.ReadAllText(Path.Combine(root!, "src", "TDM.Persistence", "SupportMonitoringSettings.cs"));
+    True(persistence.Contains("public ResourceDetectionThresholds ToDetectionThresholds()", StringComparison.Ordinal),
+        "SupportThresholds no expone la traducción a los umbrales de detección.");
+    var configured = new SupportThresholds
+    {
+        CpuWarning = 71,
+        CpuCritical = 86,
+        MemoryUsedWarning = 81,
+        MemoryUsedCritical = 91,
+        DiskFreeWarningPercent = 11,
+        DiskFreeCriticalPercent = 6
+    };
+    var mapped = configured.ToDetectionThresholds();
+    Equal(71d, mapped.CpuWarningPercent, "CpuWarning no se tradujo a CpuWarningPercent.");
+    Equal(86d, mapped.CpuCriticalPercent, "CpuCritical no se tradujo a CpuCriticalPercent.");
+    Equal(81d, mapped.MemoryUsedWarningPercent, "MemoryUsedWarning no se tradujo.");
+    Equal(91d, mapped.MemoryUsedCriticalPercent, "MemoryUsedCritical no se tradujo.");
+    Equal(11d, mapped.DiskFreeWarningPercent, "DiskFreeWarningPercent no se tradujo.");
+    Equal(6d, mapped.DiskFreeCriticalPercent, "DiskFreeCriticalPercent no se tradujo.");
+
+    var collector = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "SystemResourceCollector.cs"));
+    True(collector.Contains("context.ResourceThresholds ?? ResourceDetectionThresholds.Default", StringComparison.Ordinal),
+        "SystemResourceCollector no lee los umbrales del contexto.");
+    True(collector.Contains("RESOURCE-CPU-CRITICAL", StringComparison.Ordinal),
+        "El umbral crítico de CPU no tiene hallazgo consumidor.");
+    False(collector.Contains("average >= 95", StringComparison.Ordinal),
+        "SystemResourceCollector conserva el literal histórico de CPU (95 %).");
+    False(collector.Contains("freePct <= 5", StringComparison.Ordinal),
+        "SystemResourceCollector conserva el literal histórico de memoria/disco (5 %).");
+    False(collector.Contains("freePct <= 10", StringComparison.Ordinal),
+        "SystemResourceCollector conserva el literal histórico de memoria/disco (10 %).");
+
+    var guard = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "ResourceLoadGuard.cs"));
+    False(guard.Contains(">= 85d", StringComparison.Ordinal),
+        "ResourceLoadGuard conserva el literal histórico de CPU crítica (85d).");
+    False(guard.Contains("< 70d", StringComparison.Ordinal),
+        "ResourceLoadGuard conserva el literal histórico de CPU de aviso (70d).");
+    True(guard.Contains("thresholds.CpuCriticalPercent", StringComparison.Ordinal),
+        "ResourceLoadGuard no consume los umbrales configurados.");
+
+    var worker = File.ReadAllText(Path.Combine(root!, "src", "TDM.Service", "TdmWorker.cs"));
+    True(worker.Contains("ResourceThresholds: _resourceThresholds", StringComparison.Ordinal),
+        "TdmWorker no inyecta los umbrales configurados en el contexto.");
+    True(worker.Contains("ResourceLoadGuard.Capture(_resourceThresholds)", StringComparison.Ordinal),
+        "TdmWorker no aplica los umbrales configurados al gobernador de carga.");
+    var execution = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "Services", "DiagnosticExecutionService.cs"));
+    True(execution.Contains("ResourceThresholds: thresholds.ToDetectionThresholds()", StringComparison.Ordinal),
+        "DiagnosticExecutionService no inyecta los umbrales configurados en el contexto.");
+    var integrated = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "Services", "IntegratedMonitoringService.cs"));
+    True(integrated.Contains("ResourceThresholds: resourceThresholds", StringComparison.Ordinal),
+        "IntegratedMonitoringService no inyecta los umbrales configurados en el contexto.");
+    True(integrated.Contains("ResourceLoadGuard.Capture(resourceThresholds)", StringComparison.Ordinal),
+        "IntegratedMonitoringService no aplica los umbrales configurados al gobernador de carga.");
     return Task.CompletedTask;
 }
 

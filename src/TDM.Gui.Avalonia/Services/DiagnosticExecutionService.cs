@@ -76,7 +76,7 @@ public async Task<DiagnosticReport> RunAsync(string period, CancellationToken ct
         MaxEventsIncremental = thresholds.MaxEventsIncremental
     };
 
-    var context = new DiagnosticContext(snapshot, lookback, TsplusProfile: tsplusProfile, Options: options);
+    var context = new DiagnosticContext(snapshot, lookback, TsplusProfile: tsplusProfile, Options: options, ResourceThresholds: thresholds.ToDetectionThresholds());
     var continuous = ContinuousDiagnosticMerger.ShouldContinue(_continuousBaseline, lookback, DateTimeOffset.Now);
     if (!continuous)
     {

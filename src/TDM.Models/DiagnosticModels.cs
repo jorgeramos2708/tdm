@@ -204,12 +204,30 @@ public sealed record SystemSnapshot(
     public bool DeteccionInconclusa() => TsplusEstadoDeteccion == TsplusDetectionState.NotEvaluated;
 }
 
+/// <summary>
+/// Umbrales de detección de recursos del sistema (C1 de la auditoría de efectividad, Fase 29).
+/// Espejo operativo de los umbrales de configuración: TDM.Collectors.Windows sólo referencia
+/// TDM.Models, de modo que el contrato vive aquí y la traducción desde la configuración
+/// (SupportThresholds de TDM.Persistence) ocurre en un único punto de ese ensamblado.
+/// </summary>
+public sealed record ResourceDetectionThresholds(
+    double CpuWarningPercent,
+    double CpuCriticalPercent,
+    double MemoryUsedWarningPercent,
+    double MemoryUsedCriticalPercent,
+    double DiskFreeWarningPercent,
+    double DiskFreeCriticalPercent)
+{
+    public static ResourceDetectionThresholds Default { get; } = new(70d, 85d, 80d, 90d, 10d, 5d);
+}
+
 public sealed record DiagnosticContext(
     SystemSnapshot Sistema,
     TimeSpan Lookback,
     DateTimeOffset? HoraIncidente = null,
     TsplusReleaseProfile? TsplusProfile = null,
-    DiagnosticOptions? Options = null);
+    DiagnosticOptions? Options = null,
+    ResourceDetectionThresholds? ResourceThresholds = null);
 
 public sealed record DiagnosticOptions(
     int? MaxFilesPerDirectory = null,

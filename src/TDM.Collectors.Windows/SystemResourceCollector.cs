@@ -27,9 +27,13 @@ public sealed class SystemResourceCollector : IReadOnlyCollector
         var events = new List<DiagnosticEvent>();
         var evidence = new List<EvidenceItem>();
 
-        var memoryEvaluated = CollectMemory(evidence, findings);
-        var cpuEvaluated = CollectCpu(evidence, findings);
-        var disksEvaluated = CollectDisks(context, evidence, findings);
+        // Fase 29 (C1): la detección honra los umbrales configurados (SupportMonitoringSettings
+        // llegan vía DiagnosticContext.ResourceThresholds); sin configuración se usan los
+        // valores por defecto, idénticos a los literales históricos.
+        var thresholds = context.ResourceThresholds ?? ResourceDetectionThresholds.Default;
+        var memoryEvaluated = CollectMemory(evidence, findings, thresholds);
+        var cpuEvaluated = CollectCpu(evidence, findings, thresholds);
+        var disksEvaluated = CollectDisks(context, evidence, findings, thresholds);
         var processCoverage = CollectTopProcesses(evidence);
         var tcpCoverage = CollectTcpPressure(evidence, findings);
         var coverageComplete = memoryEvaluated && cpuEvaluated;
@@ -51,7 +55,36 @@ public sealed class SystemResourceCollector : IReadOnlyCollector
         return Task.FromResult(new CollectorResult(findings, events));
     }
 
-    private static bool CollectMemory(List<EvidenceItem> evidence, List<DiagnosticFinding> findings)
+    /// <summary>
+    /// Clasifica la memoria libre (% free) contra los umbrales configurados de uso.
+    /// Fase 29 (C1): evaluador puro para que la detección honre la configuración
+    /// sin depender de lecturas WMI en tiempo de prueba.
+    /// </summary>
+    public static DiagnosticSeverity? EvaluateMemorySeverity(double freePercent, ResourceDetectionThresholds thresholds)
+    {
+        var usedPercent = 100d - freePercent;
+        if (usedPercent >= thresholds.MemoryUsedCriticalPercent) return DiagnosticSeverity.Critico;
+        if (usedPercent >= thresholds.MemoryUsedWarningPercent) return DiagnosticSeverity.Advertencia;
+        return null;
+    }
+
+    /// <summary> Clasifica la carga instantánea de CPU contra los umbrales configurados (Fase 29, C1). </summary>
+    public static DiagnosticSeverity? EvaluateCpuSeverity(double averagePercent, ResourceDetectionThresholds thresholds)
+    {
+        if (averagePercent >= thresholds.CpuCriticalPercent) return DiagnosticSeverity.Critico;
+        if (averagePercent >= thresholds.CpuWarningPercent) return DiagnosticSeverity.Advertencia;
+        return null;
+    }
+
+    /// <summary> Clasifica el espacio libre de disco contra los umbrales configurados (Fase 29, C1). </summary>
+    public static DiagnosticSeverity? EvaluateDiskSeverity(double freePercent, ResourceDetectionThresholds thresholds)
+    {
+        if (freePercent <= thresholds.DiskFreeCriticalPercent) return DiagnosticSeverity.Critico;
+        if (freePercent <= thresholds.DiskFreeWarningPercent) return DiagnosticSeverity.Advertencia;
+        return null;
+    }
+
+    private static bool CollectMemory(List<EvidenceItem> evidence, List<DiagnosticFinding> findings, ResourceDetectionThresholds thresholds)
     {
         var os = SafeWmi.Query(
             "SELECT TotalVisibleMemorySize,FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory FROM Win32_OperatingSystem",
@@ -83,34 +116,35 @@ public sealed class SystemResourceCollector : IReadOnlyCollector
         if (totalVirtualKb > 0)
             evidence.Add(new("Memoria virtual", $"{KbToGb(freeVirtualKb):F2} GB libres de {KbToGb(totalVirtualKb):F2} GB"));
 
-            if (totalKb > 0 && freePct <= 5)
-            {
-                findings.Add(new DiagnosticFinding(
-                    "RESOURCE-MEMORY-CRITICAL",
-                    "Memoria física",
-                    DiagnosticSeverity.Critico,
-                    "El servidor presenta presión crítica de memoria en el snapshot actual.",
-                    "La memoria disponible está en 5% o menos. Este estado puede degradar servicios, provocar timeouts o agravar fallos, pero por sí solo no demuestra que haya causado un incidente histórico.",
-                    [new("Memoria libre", $"{freePct:F1}%"), new("Disponible", $"{KbToGb(freeKb):F2} GB"), new("Total", $"{KbToGb(totalKb):F2} GB")],
-                    ConfidenceLevel.Confirmada,
-                    Capa: DiagnosticLayer.Windows));
-            }
-            else if (totalKb > 0 && freePct <= 10)
-            {
-                findings.Add(new DiagnosticFinding(
-                    "RESOURCE-MEMORY-WARNING",
-                    "Memoria física",
-                    DiagnosticSeverity.Advertencia,
-                    "El servidor presenta presión elevada de memoria en el snapshot actual.",
-                    "La memoria disponible está en 10% o menos. TDM la conserva como condición preventiva y exige evidencia temporal adicional antes de atribuirle un crash.",
-                    [new("Memoria libre", $"{freePct:F1}%"), new("Disponible", $"{KbToGb(freeKb):F2} GB"), new("Total", $"{KbToGb(totalKb):F2} GB")],
-                    ConfidenceLevel.Alta,
-                    Capa: DiagnosticLayer.Windows));
-            }
-            return totalKb > 0;
+        var memorySeverity = totalKb > 0 ? EvaluateMemorySeverity(freePct, thresholds) : null;
+        if (memorySeverity == DiagnosticSeverity.Critico)
+        {
+            findings.Add(new DiagnosticFinding(
+                "RESOURCE-MEMORY-CRITICAL",
+                "Memoria física",
+                DiagnosticSeverity.Critico,
+                "El servidor presenta presión crítica de memoria en el snapshot actual.",
+                $"La memoria usada alcanza {100d - freePct:F1}% (umbral crítico configurado {thresholds.MemoryUsedCriticalPercent:0.##}%). Este estado puede degradar servicios, provocar timeouts o agravar fallos, pero por sí solo no demuestra que haya causado un incidente histórico.",
+                [new("Memoria libre", $"{freePct:F1}%"), new("Disponible", $"{KbToGb(freeKb):F2} GB"), new("Total", $"{KbToGb(totalKb):F2} GB")],
+                ConfidenceLevel.Confirmada,
+                Capa: DiagnosticLayer.Windows));
+        }
+        else if (memorySeverity == DiagnosticSeverity.Advertencia)
+        {
+            findings.Add(new DiagnosticFinding(
+                "RESOURCE-MEMORY-WARNING",
+                "Memoria física",
+                DiagnosticSeverity.Advertencia,
+                "El servidor presenta presión elevada de memoria en el snapshot actual.",
+                $"La memoria usada alcanza {100d - freePct:F1}% (umbral de aviso configurado {thresholds.MemoryUsedWarningPercent:0.##}%). TDM la conserva como condición preventiva y exige evidencia temporal adicional antes de atribuirle un crash.",
+                [new("Memoria libre", $"{freePct:F1}%"), new("Disponible", $"{KbToGb(freeKb):F2} GB"), new("Total", $"{KbToGb(totalKb):F2} GB")],
+                ConfidenceLevel.Alta,
+                Capa: DiagnosticLayer.Windows));
+        }
+        return totalKb > 0;
     }
 
-    private static bool CollectCpu(List<EvidenceItem> evidence, List<DiagnosticFinding> findings)
+    private static bool CollectCpu(List<EvidenceItem> evidence, List<DiagnosticFinding> findings, ResourceDetectionThresholds thresholds)
     {
         var loads = SafeWmi.Query(
             "SELECT LoadPercentage FROM Win32_Processor",
@@ -127,14 +161,27 @@ public sealed class SystemResourceCollector : IReadOnlyCollector
         var average = loads.Average();
         evidence.Add(new("CPU", $"Carga instantánea aproximada {average:F0}%"));
         evidence.Add(Metric(ResourceMetricKeys.CpuPercent, average));
-        if (average >= 95)
+        var cpuSeverity = EvaluateCpuSeverity(average, thresholds);
+        if (cpuSeverity == DiagnosticSeverity.Critico)
+        {
+            findings.Add(new DiagnosticFinding(
+                "RESOURCE-CPU-CRITICAL",
+                "CPU",
+                DiagnosticSeverity.Critico,
+                "La CPU presenta una carga instantánea crítica.",
+                $"La carga instantánea {average:F0}% alcanza o supera el umbral crítico configurado {thresholds.CpuCriticalPercent:0.##}%. El valor es una fotografía del momento del análisis. TDM no lo considera causa raíz sin eventos o evidencia histórica que lo vinculen temporalmente con el incidente.",
+                [new("Carga CPU", $"{average:F0}%")],
+                ConfidenceLevel.Alta,
+                Capa: DiagnosticLayer.Windows));
+        }
+        else if (cpuSeverity == DiagnosticSeverity.Advertencia)
         {
             findings.Add(new DiagnosticFinding(
                 "RESOURCE-CPU-HIGH",
                 "CPU",
                 DiagnosticSeverity.Advertencia,
-                "La CPU presenta una carga instantánea muy alta.",
-                "El valor es una fotografía del momento del análisis. TDM no la considera causa raíz sin eventos o evidencia histórica que la vinculen temporalmente con el incidente.",
+                "La CPU presenta una carga instantánea alta.",
+                $"La carga instantánea {average:F0}% supera el umbral de aviso configurado {thresholds.CpuWarningPercent:0.##}%. El valor es una fotografía del momento del análisis. TDM no la considera causa raíz sin eventos o evidencia histórica que la vinculen temporalmente con el incidente.",
                 [new("Carga CPU", $"{average:F0}%")],
                 ConfidenceLevel.Media,
                 Capa: DiagnosticLayer.Windows));
@@ -142,7 +189,7 @@ public sealed class SystemResourceCollector : IReadOnlyCollector
         return true;
     }
 
-    private static bool CollectDisks(DiagnosticContext context, List<EvidenceItem> evidence, List<DiagnosticFinding> findings)
+    private static bool CollectDisks(DiagnosticContext context, List<EvidenceItem> evidence, List<DiagnosticFinding> findings, ResourceDetectionThresholds thresholds)
     {
         var importantRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var systemRoot = Path.GetPathRoot(Environment.SystemDirectory);
@@ -169,26 +216,27 @@ public sealed class SystemResourceCollector : IReadOnlyCollector
                 evidence.Add(Metric(ResourceMetricKeys.DiskTotalBytes(drive.Name), total));
 
                 if (!importantRoots.Contains(drive.Name)) continue;
-                if (total > 0 && freePct <= 5)
+                var diskSeverity = total > 0 ? EvaluateDiskSeverity(freePct, thresholds) : null;
+                if (diskSeverity == DiagnosticSeverity.Critico)
                 {
                     findings.Add(new DiagnosticFinding(
                         $"RESOURCE-DISK-CRITICAL-{drive.Name[0]}",
                         $"Disco {drive.Name}",
                         DiagnosticSeverity.Critico,
                         "Una unidad crítica para Windows/TSplus tiene muy poco espacio libre.",
-                        "5% o menos de espacio libre puede afectar logs, temporales, actualizaciones y aplicaciones. TDM no limpia archivos ni modifica cuotas.",
+                        $"{thresholds.DiskFreeCriticalPercent:0.##}% o menos de espacio libre (umbral crítico configurado) puede afectar logs, temporales, actualizaciones y aplicaciones. TDM no limpia archivos ni modifica cuotas.",
                         [new("Unidad", drive.Name), new("Espacio libre", $"{freePct:F1}%"), new("Disponible", $"{BytesToGb(free):F2} GB")],
                         ConfidenceLevel.Confirmada,
                         Capa: DiagnosticLayer.Windows));
                 }
-                else if (total > 0 && freePct <= 10)
+                else if (diskSeverity == DiagnosticSeverity.Advertencia)
                 {
                     findings.Add(new DiagnosticFinding(
                         $"RESOURCE-DISK-WARNING-{drive.Name[0]}",
                         $"Disco {drive.Name}",
                         DiagnosticSeverity.Advertencia,
                         "Una unidad crítica para Windows/TSplus tiene espacio libre reducido.",
-                        "10% o menos de espacio libre se conserva como alerta preventiva; debe correlacionarse con errores de disco, I/O o escritura antes de considerarse causal.",
+                        $"{thresholds.DiskFreeWarningPercent:0.##}% o menos de espacio libre (umbral de aviso configurado) se conserva como alerta preventiva; debe correlacionarse con errores de disco, I/O o escritura antes de considerarse causal.",
                         [new("Unidad", drive.Name), new("Espacio libre", $"{freePct:F1}%"), new("Disponible", $"{BytesToGb(free):F2} GB")],
                         ConfidenceLevel.Alta,
                         Capa: DiagnosticLayer.Windows));

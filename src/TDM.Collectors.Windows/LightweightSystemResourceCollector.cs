@@ -19,7 +19,7 @@ public sealed class LightweightSystemResourceCollector : IReadOnlyCollector
     public Task<CollectorResult> CollectAsync(DiagnosticContext context, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var snap = _snapshot ?? ResourceLoadGuard.Capture();
+        var snap = _snapshot ?? ResourceLoadGuard.Capture(context.ResourceThresholds);
         // Q10: la CPU por GetSystemTimes es un delta entre dos capturas; la primera muestra es
         // N/D por naturaleza (las claves Metric.* de memoria sí se publican desde el ciclo 1).
         var cpu = snap.CpuPercent.HasValue ? $"Carga instantánea aproximada {snap.CpuPercent.Value:0.0}%" : "N/D (primera muestra; requiere dos capturas consecutivas)";
