@@ -7,7 +7,7 @@
 
 **Restricción documental (requisito del cliente)**: toda recomendación se apoya sólo en documentación oficial de Microsoft y TSplus. Cada URL citada fue verificada en esta sesión (salvo indicación). Los IDs de evento sin documentación oficial se declaran explícitamente en §Brecha documental y **no** se usan como base de remediación.
 
-**Recuento**: **5 CRITICAL · 12 HIGH · 22 MEDIUM · 17 LOW = 56 hallazgos abiertos.**
+**Recuento**: **5 CRITICAL · 12 HIGH · 22 MEDIUM · 17 LOW = 56 hallazgos** (**C1 corregido en Fase 29** → 55 abiertos).
 
 ---
 
@@ -53,12 +53,12 @@ Además, el monitoreo 24/7 no tiene recuperación declarada (C5) y la ventana de
 
 ## CRITICAL (5)
 
-### C1 — Los umbrales configurados por el usuario no gobiernan la detección · ABIERTO
+### C1 — Los umbrales configurados por el usuario no gobiernan la detección · CERRADO (Fase 29)
 
 - **Evidencia** (`ver.`): `SystemResourceCollector.cs:86,98` memoria con literales `freePct <= 5 / <= 10`; `:130` CPU `average >= 95`; `:172,184` disco `freePct <= 5 / <= 10`; `ResourceLoadGuard.cs:55,61` `>= 85` / `< 70`. La configuración `SupportMonitoringSettings.cs:7-18` (`CpuWarning=70`, `MemoryUsedWarning=80`, `DiskFreeWarningPercent=10`, `DiskFreeCriticalPercent=5`, `SessionWarning=80`, `TdmCpuWarning=3`) sólo se consume en dashboards de GUI (`PerformanceDashboardViewModel.cs:41-44`, `GeneralDashboardViewModel.cs:36`, `PreventiveDashboardViewModel.cs:50-52`) — nunca llega a los detectores.
 - **Impacto**: el operador fija un umbral en Administración y cree haber endurecido la alerta; la detección sigue con valores duros distintos (p.ej. CPU 95 % vs 70 % configurado). Umbral "configurado pero no aplicado" es un fallo silencioso de efectividad.
 - **Doc oficial**: MS `Win32_Processor.LoadPercentage` (doc 16) valida la *captura* (promedio último segundo), no los umbrales; los umbrales son contrato interno TDM y deben respetar la configuración.
-- **Fix (F29)**: inyectar los thresholds en los detectores y reemplazar todos los literales; añadir *gate de configuración* (test que falle si un `*Warning/*Critical` de settings no tiene consumidor detector).
+- **Fix (F29)**: inyectar los thresholds en los detectores y reemplazar todos los literales; añadir *gate de configuración* (test que falle si un `*Warning/*Critical` de settings no tiene consumidor detector). → **corregido en Fase 29** (`e434104`: contrato `ResourceDetectionThresholds` en TDM.Models + `SupportThresholds.ToDetectionThresholds()` como único punto de traducción en TDM.Persistence, inyección vía `DiagnosticContext.ResourceThresholds` en los 6 puntos de construcción, evaluadores puros `EvaluateCpuSeverity`/`EvaluateMemorySeverity`/`EvaluateDiskSeverity` con mensajes que citan el umbral configurado, nuevo hallazgo `RESOURCE-CPU-CRITICAL` para consumir `CpuCritical`, `ResourceLoadGuard` paramétrico (idéntico por defecto: 85/70 CPU, 10/20 % libre); tests `DetectionHonorsConfiguredThresholds` + `ConfiguredResourceThresholdsAreWiredIntoDetection` (mapeo de los 6 keys + gate estático de literales/inyección), gates 192/192 · 47/47 · 7/7 · publish 139082951)
 
 ### C2 — Disco lleno / saturación de memoria jamás pueden ser causa raíz · ABIERTO
 
