@@ -42,7 +42,6 @@ public static class CollectorCatalog
         new UserSessionProfileCollector(),
         windowsEvents ?? new WindowsEventCollector(),
         new WindowsPushEventCollector(),
-        new RdpEtwCollector(),
         new WindowsLogIntegrityCollector(),
         new WindowsForensicEventCollector(),
         new WindowsChangeEventCollector(),

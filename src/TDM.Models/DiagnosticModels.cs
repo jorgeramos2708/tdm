@@ -234,7 +234,6 @@ public sealed record DiagnosticOptions(
     int? MaxBytesPerFile = null,
     long? MaxTotalBytes = null,
     int? MaxEvents = null,
-    bool EnableRdpEtw = false,
     int? CauseStabilityFlappingThreshold = null,
     int? MaxFilesPerDirectoryIncremental = null,
     int? MaxBytesPerFileIncremental = null,

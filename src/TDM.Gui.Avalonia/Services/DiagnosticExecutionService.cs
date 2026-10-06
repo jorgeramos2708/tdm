@@ -68,7 +68,6 @@ public async Task<DiagnosticReport> RunAsync(string period, CancellationToken ct
         MaxBytesPerFile = thresholds.MaxBytesPerFile,
         MaxTotalBytes = thresholds.MaxTotalBytes,
         MaxEvents = thresholds.MaxEvents,
-        EnableRdpEtw = false, // Auto-enabled by RdpEtwCollector when admin
         CauseStabilityFlappingThreshold = thresholds.CauseStabilityFlappingThreshold,
         MaxFilesPerDirectoryIncremental = thresholds.MaxFilesPerDirectoryIncremental,
         MaxBytesPerFileIncremental = thresholds.MaxBytesPerFileIncremental,
@@ -97,10 +96,9 @@ public async Task<DiagnosticReport> RunAsync(string period, CancellationToken ct
     }
     finally
     {
-        // Los collectors IDisposable de esta ejecución (p. ej. RdpEtwCollector con su
-        // EventListener) se crean por run en CreateFull(): dispónelos aquí, excluyendo los
-        // incrementales compartidos entre ejecuciones. Sólo esta catálogo contiene
-        // RdpEtwCollector, por lo que el alcance del dispose es la GUI.
+        // Los collectors IDisposable de esta ejecución se crean por run en CreateFull():
+        // dispónelos aquí, excluyendo los incrementales compartidos entre ejecuciones
+        // (el alcance del dispose es la GUI; el catálogo del servicio no se disp aquí).
         foreach (var collector in collectors)
         {
             if (collector is IDisposable disposable
@@ -182,6 +180,11 @@ public async Task<DiagnosticReport> RunAsync(string period, CancellationToken ct
                 ServiceHeartbeatStore.IsFresh(heartbeat), diagnosticRoot, TdmDataPaths.MachineRootPath);
             if (divergence is not null)
                 report = report with { Hallazgos = [.. report.Hallazgos, divergence] };
+            // C5 (F31): un latido instalado pero rancio se declara STALLED en el informe;
+            // sin este pase el hueco del monitoreo 24/7 se leía como «sin novedad».
+            var stalled = ServiceHeartbeatStore.StalledFinding(heartbeat, DateTimeOffset.Now);
+            if (stalled is not null)
+                report = report with { Hallazgos = [.. report.Hallazgos, stalled] };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

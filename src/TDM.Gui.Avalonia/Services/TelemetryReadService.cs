@@ -103,6 +103,13 @@ public sealed class TelemetryReadService
             {
                 return (machineRoot, $"TDM.Service · {heartbeat?.Status} · {heartbeat?.Timestamp.ToLocalTime():HH:mm:ss}");
             }
+            // C5 (F31): latido instalado pero rancio ⇒ STALLED visible en la fuente de datos;
+            // la raíz de lectura sigue siendo local (es la GUI la que muestrea).
+            if (heartbeat is not null && !ServiceHeartbeatStore.IsFresh(heartbeat))
+            {
+                return (LocalStateStore.DefaultRootPath,
+                    $"TDM.Service · STALLED · última señal {heartbeat.Timestamp.ToLocalTime():HH:mm:ss}");
+            }
         }
         catch (UnauthorizedAccessException) { }
         catch (IOException) { }

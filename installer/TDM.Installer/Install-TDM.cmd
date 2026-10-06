@@ -43,6 +43,15 @@ if errorlevel 1 (
 if errorlevel 1 goto :fail
 
 sc.exe description TDM.Service "Monitoreo y diagnostico operativo de TSplus" >nul
+
+echo Declarando recuperacion del servicio TDM...
+rem docs 3 y 5 (Microsoft): acciones de recuperacion ante fallo + failureflag=1 para
+rem dispararlas tambien cuando el servicio se detiene por error.
+sc.exe failure TDM.Service reset= 86400 actions= restart/5000/restart/15000/restart/60000 >nul
+if errorlevel 1 goto :fail
+sc.exe failureflag TDM.Service 1 >nul
+if errorlevel 1 goto :fail
+
 sc.exe start TDM.Service >nul
 if errorlevel 1 goto :fail
 

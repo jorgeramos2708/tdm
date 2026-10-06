@@ -202,7 +202,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("PseudonymSaltDefeatsDictionaryReuse", PseudonymSaltDefeatsDictionaryReuse),
     ("SmtpSecretUsesEntropyAndRestrictedAcl", SmtpSecretUsesEntropyAndRestrictedAcl),
     ("StructuredLogFlushHonorsGateWithoutAsyncVoid", StructuredLogFlushHonorsGateWithoutAsyncVoid),
-    ("RdpEtwCollectorIsDisposableAndRunScopedDisposed", RdpEtwCollectorIsDisposableAndRunScopedDisposed),
+    ("RunScopeDisposesDisposableCollectors", RunScopeDisposesDisposableCollectors),
     ("ThirdPartyInventoryDeclaresScanGaps", ThirdPartyInventoryDeclaresScanGaps),
     ("SettingsSanitizeRewriteFailureIsObservable", SettingsSanitizeRewriteFailureIsObservable),
     ("ObservabilityCompactionFailureIsContainedAndRetried", ObservabilityCompactionFailureIsContainedAndRetried),
@@ -214,7 +214,9 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("ResourceExhaustionFindingsReachRootCauseRanking", ResourceExhaustionFindingsReachRootCauseRanking),
     ("ResourceExhaustionCandidateNeedsRecentWindowedSymptom", ResourceExhaustionCandidateNeedsRecentWindowedSymptom),
     ("LicenseErrorNeedsTimestampedSeverityInWindow", LicenseErrorNeedsTimestampedSeverityInWindow),
-    ("PendingRebootCandidateScalesWithSessionSymptom", PendingRebootCandidateScalesWithSessionSymptom)
+    ("PendingRebootCandidateScalesWithSessionSymptom", PendingRebootCandidateScalesWithSessionSymptom),
+    ("PhantomRdpEtwCollectorRetiredAndRealSinkDeclaresCoverage", PhantomRdpEtwCollectorRetiredAndRealSinkDeclaresCoverage),
+    ("ServiceRecoveryIsDeclaredAndStalledHeartbeatSurfaces", ServiceRecoveryIsDeclaredAndStalledHeartbeatSurfaces)
 };
 
 var failed = 0;
@@ -5275,29 +5277,124 @@ static async Task StructuredLogFlushHonorsGateWithoutAsyncVoid()
     finally { TryDelete(root); }
 }
 
-static Task RdpEtwCollectorIsDisposableAndRunScopedDisposed()
+static Task RunScopeDisposesDisposableCollectors()
 {
-    IReadOnlyCollector collector = new RdpEtwCollector();
-    True(collector is IDisposable,
-        "RdpEtwCollector no declara IDisposable: su EventListener y su CTS nunca se dispone.");
-    ((IDisposable)collector).Dispose();
-    ((IDisposable)collector).Dispose();
-
+    // F26: contrato de dispose por run (colectores con recursos no administrados).
+    // El collector ETW fantasma fue retirado en F31 (C4), de modo que el contrato se
+    // valida sobre el mecanismo de la GUI y el alcance que preserva los incrementales.
     var root = FindRepoRoot();
-    NotNull(root, "No se localizó TDM.sln; gate del collector RDP ETW no ejecutable.");
-    var text = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "RdpEtwCollector.cs"));
-    True(text.Contains("IReadOnlyCollector, IDisposable", StringComparison.Ordinal),
-        "La clase no implementa IDisposable en su declaración.");
-    True(text.Contains("_listener?.Dispose();", StringComparison.Ordinal),
-        "CollectAsync no libera el listener ETW previo antes de recrearlo.");
-    True(text.Contains("_cts = null;", StringComparison.Ordinal),
-        "Dispose no anula el CTS: no es idempotente.");
-
+    NotNull(root, "No se localizó TDM.sln; gate del alcance de dispose no ejecutable.");
     var execution = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "Services", "DiagnosticExecutionService.cs"));
     True(execution.Contains("collector is IDisposable disposable", StringComparison.Ordinal),
         "La GUI no dispone los collectors IDisposable del run.");
     True(execution.Contains("ReferenceEquals(collector, _windowsIncremental)", StringComparison.Ordinal),
         "El dispose del run podría librar los incrementales compartidos entre ejecuciones.");
+    return Task.CompletedTask;
+}
+
+static async Task PhantomRdpEtwCollectorRetiredAndRealSinkDeclaresCoverage()
+{
+    // C4 (auditoría de efectividad, Fase 31): RdpEtwCollector no entregaba drenaje ni
+    // cobertura y su API (EventSource/EventListener) sólo ve proveedores en-proceso, así
+    // que jamás capturaba Microsoft-Windows-TerminalServices-*. Se retira el claim y la
+    // cobertura de transiciones RDP la declara el sink real (EventLogWatcher sobre los
+    // canales Operational) con evidencia entregable en cada corrida.
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del collector ETW no ejecutable.");
+    False(File.Exists(Path.Combine(root!, "src", "TDM.Collectors.Windows", "RdpEtwCollector.cs")),
+        "El collector ETW fantasma sigue en el repositorio.");
+    var catalog = File.ReadAllText(Path.Combine(root!, "src", "TDM.Application", "CollectorCatalog.cs"));
+    False(catalog.Contains("RdpEtwCollector", StringComparison.Ordinal),
+        "El catálogo aún registra RdpEtwCollector.");
+    foreach (var relative in new[]
+             {
+                 Path.Combine("src", "TDM.Models", "DiagnosticModels.cs"),
+                 Path.Combine("src", "TDM.Service", "TdmWorker.cs"),
+                 Path.Combine("src", "TDM.Gui.Avalonia", "Services", "DiagnosticExecutionService.cs")
+             })
+    {
+        var text = File.ReadAllText(Path.Combine(root!, relative));
+        False(text.Contains("EnableRdpEtw", StringComparison.Ordinal),
+            $"El claim ETW persiste como opción en {relative}.");
+    }
+
+    var push = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsPushEventCollector.cs"));
+    True(push.Contains("EventLogWatcher", StringComparison.Ordinal),
+        "El sink real de eventos RDP ya no usa EventLogWatcher (API oficial de suscripción).");
+    foreach (var channel in new[]
+             {
+                 "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational",
+                 "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational",
+                 "Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operational"
+             })
+    {
+        True(push.Contains(channel, StringComparison.Ordinal),
+            $"El sink real ya no suscribe el canal {channel}.");
+    }
+
+    try
+    {
+        WindowsPushEventCollector.StopWatchers();
+        var run = await new WindowsPushEventCollector().CollectAsync(Context(TimeSpan.FromHours(1)));
+        var coverage = run.Eventos.FirstOrDefault(e => e.Tipo == "WINDOWS_PUSH_EVENT_COVERAGE");
+        NotNull(coverage, "El sink real de transiciones RDP no declara cobertura en cada corrida.");
+        True(coverage!.Mensaje.StartsWith("Canales suscritos: ", StringComparison.Ordinal),
+            "La cobertura del sink real no informa canales suscritos.");
+        True(coverage.Evidencia is { Count: > 0 },
+            "La cobertura declarada llegó sin evidencia entregable por canal.");
+    }
+    finally
+    {
+        WindowsPushEventCollector.StopWatchers();
+    }
+}
+
+static Task ServiceRecoveryIsDeclaredAndStalledHeartbeatSurfaces()
+{
+    // C5 (auditoría de efectividad, Fase 31): el instalador declara la recuperación del
+    // servicio (sc failure + failureflag, docs 3 y 5) y un latido instalado pero rancio
+    // se declara STALLED en el informe en lugar de leerse como «sin novedad».
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de recuperación/latido no ejecutable.");
+    var installer = File.ReadAllText(Path.Combine(root!, "installer", "TDM.Installer", "Install-TDM.cmd"));
+    True(installer.Contains("sc.exe failure TDM.Service reset= 86400 actions= restart/5000/restart/15000/restart/60000", StringComparison.Ordinal),
+        "El instalador no declara las acciones de recuperación del servicio (sc failure).");
+    True(installer.Contains("sc.exe failureflag TDM.Service 1", StringComparison.Ordinal),
+        "El instalador no declara failureflag=1 (recuperación también ante detención por error).");
+    True(installer.IndexOf("sc.exe create TDM.Service", StringComparison.Ordinal) >= 0 &&
+          installer.IndexOf("sc.exe failure TDM.Service", StringComparison.Ordinal) > installer.IndexOf("sc.exe create TDM.Service", StringComparison.Ordinal),
+        "La recuperación se declara antes de que el servicio exista.");
+
+    var fresh = new TdmServiceHeartbeat(DateTimeOffset.Now.AddMinutes(-1), "1.0", "RUNNING", 1234, 60, 42, 0);
+    var stale = fresh with { Timestamp = DateTimeOffset.Now.AddMinutes(-10) };
+    True(ServiceHeartbeatStore.DescribeStatus(fresh) == "RUNNING",
+        "Un latido fresco debe exponer su estado real.");
+    True(ServiceHeartbeatStore.DescribeStatus(stale) == "STALLED",
+        "Un latido rancio no se declaró STALLED.");
+    True(ServiceHeartbeatStore.DescribeStatus(null) is null,
+        "Sin archivo de latido no hay estado que declarar (servicio no instalado/portable).");
+    True(ServiceHeartbeatStore.StalledFinding(fresh, DateTimeOffset.Now) is null,
+        "Un latido fresco generó un hallazgo STALLED falso.");
+    True(ServiceHeartbeatStore.StalledFinding(null, DateTimeOffset.Now) is null,
+        "Sin latido se generó un hallazgo STALLED falso.");
+
+    var stalled = ServiceHeartbeatStore.StalledFinding(stale, DateTimeOffset.Now);
+    NotNull(stalled, "Un latido rancio no generó el hallazgo STALLED en el informe.");
+    Equal("TDM-SERVICE-HEARTBEAT-STALLED", stalled!.Id, "El hallazgo STALLED cambió de identidad.");
+    Equal(DiagnosticSeverity.Advertencia, stalled.Severidad, "El hueco del monitoreo no debe declararse Error/Crítico.");
+    True(stalled.Evidencia.Any(e => e.Clave == "Edad del latido (s)"),
+        "El hallazgo STALLED no declara la edad del latido.");
+    True(stalled.UrlOficial?.Contains("cc742019", StringComparison.Ordinal) == true,
+        "El hallazgo STALLED no documenta la recuperación con la guía oficial de sc failure.");
+    True(ServiceHeartbeatStore.StalledFinding(stale, DateTimeOffset.Now.AddMinutes(-5)) is not null,
+        "El hallazgo STALLED dejó de declararse con el paso del tiempo.");
+
+    var execution = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "Services", "DiagnosticExecutionService.cs"));
+    True(execution.Contains("StalledFinding(heartbeat", StringComparison.Ordinal),
+        "El diagnóstico GUI no integra el latido STALLED en el informe.");
+    var telemetry = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "Services", "TelemetryReadService.cs"));
+    True(telemetry.Contains("STALLED", StringComparison.Ordinal),
+        "La fuente de datos de la GUI no muestra el estado STALLED.");
     return Task.CompletedTask;
 }
 
