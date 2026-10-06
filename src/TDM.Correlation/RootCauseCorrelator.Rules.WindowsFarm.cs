@@ -76,7 +76,30 @@ public static partial class RootCauseCorrelator
                 TsplusProduct.RemoteAccess));
         }
 
-
+        // M-19 (auditoría de efectividad, Fase 30): el reinicio pendiente era sólo un
+        // hallazgo y nunca competía como causa raíz pese a ser una condición temporal
+        // documentada (CBS, Windows Update, PendingFileRenameOperations, renombre de
+        // equipo). Con síntoma de sesión remota en la ventana compite como candidato;
+        // sin él se conserva como antecedente preventivo con confianza media.
+        var pendingReboot = report.Hallazgos.FirstOrDefault(f => f.Id == "WINDOWS-PENDING-REBOOT");
+        if (pendingReboot is not null)
+        {
+            drafts.Add(new CandidateDraft(
+                "ROOT-WINDOWS-PENDING-REBOOT",
+                "Windows / reinicio pendiente",
+                DiagnosticLayer.Windows,
+                symptom is null ? 72 : 88,
+                symptom is null ? ConfidenceLevel.Media : ConfidenceLevel.Alta,
+                "Windows mantiene operaciones que requieren reinicio (CBS, Windows Update, renombre de archivos o equipo).",
+                symptom is null
+                    ? "TDM confirmó indicadores de reinicio pendiente. Sin un síntoma de sesión remota en la ventana, se conserva como antecedente preventivo y no se declara causa del incidente."
+                    : "TDM confirmó indicadores de reinicio pendiente y la ventana contiene un síntoma de sesión remota. Un ciclo de mantenimiento/reinicio sin completar puede dejar actualizaciones o reemplazos de archivos a medio aplicar; complete el reinicio y valide si persiste la falla. TDM no reinicia el servidor.",
+                Merge(pendingReboot.Evidencia, symptomEvidence),
+                "MS-REBOOT-PENDING",
+                symptom?.Timestamp,
+                "WINDOWS",
+                TsplusProduct.RemoteAccess));
+        }
     }
 
     private static DiagnosticEvent? RemoteSessionSymptom(DiagnosticReport report)

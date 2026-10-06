@@ -61,6 +61,10 @@ public static partial class RootCauseCorrelator
         AddExternalSecurityCandidates(report, drafts, tsplusErrors, defenderTsplusEvents);
         AddWindowsCompatibilityCandidates(report, drafts);
         AddDirectorySessionAndFarmCandidates(report, drafts, tsplusErrors);
+        // C2/C3 (auditoría de efectividad, Fase 30): agotamiento de recursos crítico y
+        // eventos de licencia TSplus con temporalidad también compiten en el ranking.
+        AddResourceExhaustionCandidates(report, drafts);
+        AddLicenseCandidates(report, drafts);
 
         // P1-drift→síntoma: post-pass acotado sobre drafts (no nuevos candidatos).
         ApplyConfigurationDriftProximity(report, drafts);

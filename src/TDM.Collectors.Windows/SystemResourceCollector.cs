@@ -125,7 +125,7 @@ public sealed class SystemResourceCollector : IReadOnlyCollector
                 DiagnosticSeverity.Critico,
                 "El servidor presenta presión crítica de memoria en el snapshot actual.",
                 $"La memoria usada alcanza {100d - freePct:F1}% (umbral crítico configurado {thresholds.MemoryUsedCriticalPercent:0.##}%). Este estado puede degradar servicios, provocar timeouts o agravar fallos, pero por sí solo no demuestra que haya causado un incidente histórico.",
-                [new("Memoria libre", $"{freePct:F1}%"), new("Disponible", $"{KbToGb(freeKb):F2} GB"), new("Total", $"{KbToGb(totalKb):F2} GB")],
+                [new("Memoria libre", $"{freePct:F1}%"), new("Disponible", $"{KbToGb(freeKb):F2} GB"), new("Total", $"{KbToGb(totalKb):F2} GB"), new("Umbral crítico configurado", $"{thresholds.MemoryUsedCriticalPercent:0.##}% en uso")],
                 ConfidenceLevel.Confirmada,
                 Capa: DiagnosticLayer.Windows));
         }
@@ -225,7 +225,7 @@ public sealed class SystemResourceCollector : IReadOnlyCollector
                         DiagnosticSeverity.Critico,
                         "Una unidad crítica para Windows/TSplus tiene muy poco espacio libre.",
                         $"{thresholds.DiskFreeCriticalPercent:0.##}% o menos de espacio libre (umbral crítico configurado) puede afectar logs, temporales, actualizaciones y aplicaciones. TDM no limpia archivos ni modifica cuotas.",
-                        [new("Unidad", drive.Name), new("Espacio libre", $"{freePct:F1}%"), new("Disponible", $"{BytesToGb(free):F2} GB")],
+                        [new("Unidad", drive.Name), new("Espacio libre", $"{freePct:F1}%"), new("Disponible", $"{BytesToGb(free):F2} GB"), new("Umbral crítico configurado", $"{thresholds.DiskFreeCriticalPercent:0.##}% libre")],
                         ConfidenceLevel.Confirmada,
                         Capa: DiagnosticLayer.Windows));
                 }

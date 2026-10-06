@@ -166,7 +166,31 @@ public static class OfficialKnowledgeBase
                 "Troubleshoot user profiles with events",
                 "Correlaciona User Profile Service, Application y el canal operacional del perfil con el usuario y la sesión afectada antes de modificar el perfil.",
                 "https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/troubleshoot-user-profiles-events",
-                "Windows / perfiles de usuario")
+                "Windows / perfiles de usuario"),
+
+            ["MS-DISK-SPACE"] = new(
+                "MS-DISK-SPACE",
+                "Microsoft",
+                "Correct disk space problems on NTFS volumes",
+                "Verifica el espacio libre real del volumen crítico (chkdsk de solo lectura distingue datos de usuario, metadatos y cuotas NTFS) y libera espacio con la herramienta de limpieza de disco de Windows antes de culpar a la aplicación. TDM no borra archivos ni modifica cuotas.",
+                "https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/disk-space-problems-on-ntfs-volumes",
+                "Windows Server / almacenamiento"),
+
+            ["MS-LOW-MEMORY"] = new(
+                "MS-LOW-MEMORY",
+                "Microsoft",
+                "Troubleshoot memory consumption between identical Windows Server environments",
+                "Comprueba con Monitor de rendimiento los contadores Available MBytes y % Committed Bytes In Use y compara la carga de trabajo de las sesiones antes de ampliar memoria o reiniciar servicios. TDM no cambia prioridades, pagefile ni tamaño de memoria.",
+                "https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/memory-consumption-between-identical-windows-server-environments",
+                "Windows Server / memoria"),
+
+            ["TSPLUS-LICENSE"] = new(
+                "TSPLUS-LICENSE",
+                "TSplus",
+                "Activating your license / Rehosting your license",
+                "Valida en la consola TSplus el estado de la licencia de Remote Access (activación y posible problema de activación) y la fecha de rehosting (cada 6 meses con soporte vigente). TDM sólo lee los eventos de log; no activa, no rehostea ni modifica la licencia.",
+                "https://docs.tsplus.net/tsplus/activating-your-license",
+                "TSplus Remote Access / licencia")
         };
 
     public static OfficialGuidance? Get(string id) => Entries.TryGetValue(id, out var value) ? value : null;

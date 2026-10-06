@@ -210,7 +210,11 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("SafeWmiParsesWmiLiteralsUnderInvariantCulture", SafeWmiParsesWmiLiteralsUnderInvariantCulture),
     ("SafeWmiConvertsLiveProcessorLoadWithoutSentinel", SafeWmiConvertsLiveProcessorLoadWithoutSentinel),
     ("DetectionHonorsConfiguredThresholds", DetectionHonorsConfiguredThresholds),
-    ("ConfiguredResourceThresholdsAreWiredIntoDetection", ConfiguredResourceThresholdsAreWiredIntoDetection)
+    ("ConfiguredResourceThresholdsAreWiredIntoDetection", ConfiguredResourceThresholdsAreWiredIntoDetection),
+    ("ResourceExhaustionFindingsReachRootCauseRanking", ResourceExhaustionFindingsReachRootCauseRanking),
+    ("ResourceExhaustionCandidateNeedsRecentWindowedSymptom", ResourceExhaustionCandidateNeedsRecentWindowedSymptom),
+    ("LicenseErrorNeedsTimestampedSeverityInWindow", LicenseErrorNeedsTimestampedSeverityInWindow),
+    ("PendingRebootCandidateScalesWithSessionSymptom", PendingRebootCandidateScalesWithSessionSymptom)
 };
 
 var failed = 0;
@@ -5634,6 +5638,148 @@ static Task ConfiguredResourceThresholdsAreWiredIntoDetection()
         "IntegratedMonitoringService no inyecta los umbrales configurados en el contexto.");
     True(integrated.Contains("ResourceLoadGuard.Capture(resourceThresholds)", StringComparison.Ordinal),
         "IntegratedMonitoringService no aplica los umbrales configurados al gobernador de carga.");
+    return Task.CompletedTask;
+}
+
+static Task ResourceExhaustionFindingsReachRootCauseRanking()
+{
+    // C2 (auditoría de efectividad, Fase 30): los hallazgos críticos de recursos emitidos
+    // con los umbrales configurados deben convertirse en candidato de causa raíz; con una
+    // señal funcional independiente dentro de la ventana y ≤15 min del fin se elevan a Alta.
+    var now = DateTimeOffset.Now;
+    var crash = new DiagnosticEvent(now.AddMinutes(-2), "Application Error", "wsession.exe",
+        DiagnosticLayer.Tsplus, DiagnosticSeverity.Critico, "APPLICATION_CRASH", "Faulting application wsession.exe",
+        Evidencia: [new EvidenceItem("Aplicación", "wsession.exe")], Producto: TsplusProduct.RemoteAccess);
+    var disk = new DiagnosticFinding("RESOURCE-DISK-CRITICAL-C", "Disco C:", DiagnosticSeverity.Critico,
+        "Una unidad crítica tiene muy poco espacio libre.", "3.1 % libre por debajo del umbral crítico configurado.",
+        [new EvidenceItem("Unidad", "C:"), new EvidenceItem("Espacio libre", "3.1%"), new EvidenceItem("Umbral crítico configurado", "5% libre")],
+        ConfidenceLevel.Confirmada, Capa: DiagnosticLayer.Windows);
+    var memory = new DiagnosticFinding("RESOURCE-MEMORY-CRITICAL", "Memoria física", DiagnosticSeverity.Critico,
+        "Presión crítica de memoria.", "95.8 % en uso por encima del umbral crítico configurado.",
+        [new EvidenceItem("Memoria libre", "4.2%"), new EvidenceItem("Umbral crítico configurado", "90% en uso")],
+        ConfidenceLevel.Confirmada, Capa: DiagnosticLayer.Windows);
+
+    var candidates = RootCauseCorrelator.Analyze(Report([crash], now, [disk, memory]));
+    var diskCandidate = candidates.FirstOrDefault(c => c.Id == "ROOT-RESOURCE-DISK-EXHAUSTION-C");
+    var memoryCandidate = candidates.FirstOrDefault(c => c.Id == "ROOT-RESOURCE-MEMORY-EXHAUSTION");
+    NotNull(diskCandidate, "El hallazgo crítico de disco no llegó al ranking de causas raíz.");
+    NotNull(memoryCandidate, "El hallazgo crítico de memoria no llegó al ranking de causas raíz.");
+    Equal(93, diskCandidate!.Puntaje, "El candidato de disco no se elevó con señal acompañante.");
+    Equal(ConfidenceLevel.Alta, diskCandidate.Confianza, "El candidato de disco no quedó en Alta con señal acompañante.");
+    True(diskCandidate.HoraIncidente == crash.Timestamp, "El síntoma no ancló la hora de incidente del candidato de disco.");
+    Equal(93, memoryCandidate!.Puntaje, "El candidato de memoria no se elevó con señal acompañante.");
+    Equal(ConfidenceLevel.Alta, memoryCandidate.Confianza, "El candidato de memoria no quedó en Alta con señal acompañante.");
+    var diskThreshold = diskCandidate.Evidencia.FirstOrDefault(e => e.Clave == "Umbral crítico configurado")?.Valor ?? "N/D";
+    Equal("5% libre", diskThreshold, "La evidencia del umbral configurado no viajó al candidato de disco.");
+    var memoryThreshold = memoryCandidate.Evidencia.FirstOrDefault(e => e.Clave == "Umbral crítico configurado")?.Valor ?? "N/D";
+    Equal("90% en uso", memoryThreshold, "La evidencia del umbral configurado no viajó al candidato de memoria.");
+    var companion = diskCandidate.Evidencia.FirstOrDefault(e => e.Clave == "Señal funcional acompañante")?.Valor ?? "";
+    True(companion.Contains("APPLICATION_CRASH", StringComparison.Ordinal),
+        "La señal acompañante no quedó registrada en la evidencia del candidato.");
+    NotNull(diskCandidate.SolucionSugerida, "La guía oficial de espacio en disco no se adjuntó al candidato.");
+    True(diskCandidate.UrlOficial?.Contains("learn.microsoft.com", StringComparison.Ordinal) == true,
+        "La URL oficial de Microsoft no se adjuntó al candidato de disco.");
+    True(memoryCandidate.UrlOficial?.Contains("learn.microsoft.com", StringComparison.Ordinal) == true,
+        "La URL oficial de Microsoft no se adjuntó al candidato de memoria.");
+    return Task.CompletedTask;
+}
+
+static Task ResourceExhaustionCandidateNeedsRecentWindowedSymptom()
+{
+    // C2: sin señal funcional reciente el candidato se conserva como hipótesis Media (el
+    // umbral configurado sigue confirmado, pero no se afirma causalidad) y los hallazgos
+    // de aviso no promocionan candidato alguno.
+    var now = DateTimeOffset.Now;
+    var staleCrash = new DiagnosticEvent(now.AddHours(-3), "Application Error", "wsession.exe",
+        DiagnosticLayer.Tsplus, DiagnosticSeverity.Critico, "APPLICATION_CRASH", "Faulting application wsession.exe",
+        Producto: TsplusProduct.RemoteAccess);
+    var memory = new DiagnosticFinding("RESOURCE-MEMORY-CRITICAL", "Memoria física", DiagnosticSeverity.Critico,
+        "Presión crítica de memoria.", "95.8 % en uso.",
+        [new EvidenceItem("Memoria libre", "4.2%"), new EvidenceItem("Umbral crítico configurado", "90% en uso")],
+        ConfidenceLevel.Confirmada, Capa: DiagnosticLayer.Windows);
+    var preventive = RootCauseCorrelator.Analyze(Report([staleCrash], now, [memory]));
+    var hypothesis = preventive.FirstOrDefault(c => c.Id == "ROOT-RESOURCE-MEMORY-EXHAUSTION");
+    NotNull(hypothesis, "El hallazgo crítico de memoria desapareció sin señal reciente en la ventana.");
+    Equal(76, hypothesis!.Puntaje, "Sin señal reciente el candidato de memoria mantuvo el puntaje elevado.");
+    Equal(ConfidenceLevel.Media, hypothesis.Confianza, "Sin señal reciente el candidato de memoria se declaró Alta.");
+    True(hypothesis.HoraIncidente is null, "Sin señal reciente el candidato de memoria recibió hora de incidente.");
+    var missing = hypothesis.Evidencia.FirstOrDefault(e => e.Clave == "Señal funcional acompañante")?.Valor ?? "N/D";
+    Equal("No observada", missing, "La ausencia de señal acompañante no quedó registrada en la evidencia.");
+
+    var warning = new DiagnosticFinding("RESOURCE-MEMORY-WARNING", "Memoria física", DiagnosticSeverity.Advertencia,
+        "Presión elevada de memoria.", "81 % en uso.",
+        [new EvidenceItem("Memoria libre", "19.0%")], ConfidenceLevel.Alta, Capa: DiagnosticLayer.Windows);
+    var recentCrash = new DiagnosticEvent(now.AddMinutes(-1), "Application Error", "wsession.exe",
+        DiagnosticLayer.Tsplus, DiagnosticSeverity.Critico, "APPLICATION_CRASH", "Faulting application wsession.exe",
+        Producto: TsplusProduct.RemoteAccess);
+    var warningsOnly = RootCauseCorrelator.Analyze(Report([recentCrash], now, [warning]));
+    True(warningsOnly.All(c => !c.Id.StartsWith("ROOT-RESOURCE", StringComparison.Ordinal)),
+        "Un hallazgo de aviso de recursos promocionó candidato de causa raíz.");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de evidencia de umbral crítico no ejecutable.");
+    var collector = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "SystemResourceCollector.cs"));
+    True(collector.Contains("\"Umbral crítico configurado\"", StringComparison.Ordinal),
+        "SystemResourceCollector no publica el umbral crítico configurado como evidencia del hallazgo.");
+    return Task.CompletedTask;
+}
+
+static Task LicenseErrorNeedsTimestampedSeverityInWindow()
+{
+    // C3 (auditoría de efectividad, Fase 30): los eventos LICENSE sólo entran al ranking
+    // con temporalidad (fechados y dentro de la ventana) y severidad Error/Crítico, y
+    // nunca por encima de Media.
+    var now = DateTimeOffset.Now;
+    var licenseError = new DiagnosticEvent(now.AddMinutes(-30), "TSplus", "Licencia",
+        DiagnosticLayer.Tsplus, DiagnosticSeverity.Error, "LICENSE", "License expired or invalid",
+        Evidencia: [new EvidenceItem("Archivo", "license.log")], Producto: TsplusProduct.RemoteAccess);
+    var ranked = RootCauseCorrelator.Analyze(Report([licenseError], now));
+    var license = ranked.FirstOrDefault(c => c.Id == "ROOT-TSPLUS-LICENSE");
+    NotNull(license, "El evento de licencia Error fechado no llegó al ranking.");
+    Equal(76, license!.Puntaje, "El candidato de licencia superó el listón conservador de puntaje.");
+    Equal(ConfidenceLevel.Media, license.Confianza, "El candidato de licencia se declaró por encima de Media.");
+    True(license.HoraIncidente == licenseError.Timestamp, "El evento de licencia no ancló la hora de incidente.");
+    True(license.UrlOficial?.Contains("docs.tsplus.net", StringComparison.Ordinal) == true,
+        "La guía oficial de licencia TSplus no se adjuntó al candidato.");
+    Equal("TSPLUS", license.OrigenClasificado, "El candidato de licencia no clasificó su origen TSPLUS.");
+
+    var advisory = licenseError with { Severidad = DiagnosticSeverity.Advertencia };
+    True(RootCauseCorrelator.Analyze(Report([advisory], now)).All(c => c.Id != "ROOT-TSPLUS-LICENSE"),
+        "Un evento de licencia Advertencia generó candidato.");
+    var undated = licenseError with { Timestamp = null };
+    True(RootCauseCorrelator.Analyze(Report([undated], now)).All(c => c.Id != "ROOT-TSPLUS-LICENSE"),
+        "Un evento de licencia sin fecha generó candidato (sin temporalidad).");
+    return Task.CompletedTask;
+}
+
+static Task PendingRebootCandidateScalesWithSessionSymptom()
+{
+    // M-19 (auditoría de efectividad, Fase 30): el reinicio pendiente pasa de hallazgo a
+    // candidato; con síntoma de sesión remota en la ventana compite como Alta y sin él se
+    // conserva como antecedente preventivo Media.
+    var now = DateTimeOffset.Now;
+    var reboot = new DiagnosticFinding("WINDOWS-PENDING-REBOOT", "Windows", DiagnosticSeverity.Advertencia,
+        "Windows tiene operaciones que requieren reinicio.", "CBS/Windows Update pendientes.",
+        [new EvidenceItem("Motivos", "Component-Based Servicing | Windows Update"), new EvidenceItem("Cobertura", "Completa")],
+        ConfidenceLevel.Alta, Capa: DiagnosticLayer.Windows);
+
+    var quiet = RootCauseCorrelator.Analyze(Report([], now, [reboot]));
+    var quietReboot = quiet.FirstOrDefault(c => c.Id == "ROOT-WINDOWS-PENDING-REBOOT");
+    NotNull(quietReboot, "El hallazgo de reinicio pendiente no produjo candidato.");
+    Equal(72, quietReboot!.Puntaje, "Sin síntoma el reinicio pendiente mantuvo un puntaje elevado.");
+    Equal(ConfidenceLevel.Media, quietReboot.Confianza, "Sin síntoma el reinicio pendiente se declaró Alta.");
+    True(quietReboot.HoraIncidente is null, "Sin síntoma el reinicio pendiente recibió hora de incidente.");
+    True(quietReboot.UrlOficial?.Contains("rebootpending", StringComparison.Ordinal) == true,
+        "La guía oficial de reinicio pendiente no se adjuntó al candidato.");
+
+    var symptom = new DiagnosticEvent(now.AddMinutes(-4), "TermService", "Remote Desktop Services",
+        DiagnosticLayer.Rdp, DiagnosticSeverity.Error, "RDP_SESSION_FAILURE", "La sesión RDP falló.");
+    var symptomatic = RootCauseCorrelator.Analyze(Report([symptom], now, [reboot]));
+    var correlated = symptomatic.FirstOrDefault(c => c.Id == "ROOT-WINDOWS-PENDING-REBOOT");
+    NotNull(correlated, "El candidato de reinicio pendiente desapareció con síntoma presente.");
+    Equal(88, correlated!.Puntaje, "Con síntoma el reinicio pendiente no se elevó.");
+    Equal(ConfidenceLevel.Alta, correlated.Confianza, "Con síntoma el reinicio pendiente no quedó en Alta.");
+    True(correlated.HoraIncidente == symptom.Timestamp, "El síntoma no ancló la hora de incidente del reinicio pendiente.");
     return Task.CompletedTask;
 }
 
