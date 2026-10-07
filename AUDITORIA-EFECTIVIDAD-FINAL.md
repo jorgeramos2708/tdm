@@ -7,7 +7,7 @@
 
 **Restricción documental (requisito del cliente)**: toda recomendación se apoya sólo en documentación oficial de Microsoft y TSplus. Cada URL citada fue verificada en esta sesión (salvo indicación). Los IDs de evento sin documentación oficial se declaran explícitamente en §Brecha documental y **no** se usan como base de remediación.
 
-**Recuento**: **5 CRITICAL · 12 HIGH · 22 MEDIUM · 17 LOW = 56 hallazgos** (**C1 en F29; C2, C3 y M-19 en F30; C4, C5 y L-08 en F31** → 49 abiertos).
+**Recuento**: **5 CRITICAL · 12 HIGH · 22 MEDIUM · 17 LOW = 56 hallazgos** (**C1 en F29; C2, C3 y M-19 en F30; C4, C5 y L-08 en F31; H2, H3, H9, H11 y M-14 en F32** → 44 abiertos).
 
 ---
 
@@ -53,6 +53,21 @@ Además, el monitoreo 24/7 no tiene recuperación declarada (C5) y la ventana de
 | 24 | MS DSC — *RebootPending resource* (CBS, Windows Update, `PendingFileRenameOperations`, renombre de equipo) | https://learn.microsoft.com/en-us/powershell/dsc/reference/resources/microsoft/windows/rebootpending/ | ✅ verificada — M-19 |
 | 25 | MS .NET — `EventListener` ("el objetivo de todos los eventos generados por implementaciones de `EventSource` en el dominio de aplicación actual") | https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.tracing.eventlistener | ✅ verificada — C4 |
 | 26 | MS .NET — `EventLogWatcher` (suscripción a eventos entrantes del Event Log; `EventRecordWritten` por evento publicado) | https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.eventing.reader.eventlogwatcher | ✅ verificada — C4 (sink real) |
+| 27 | MS — *Bookmarking Events* (bookmark = posición exacta del último evento leído; reanudación de la lectura) | https://learn.microsoft.com/en-us/windows/win32/wes/bookmarking-events | ✅ verificada (F32) — H2 |
+| 28 | MS — *Querying for Events* (`EvtQueryReverseDirection`: leer de más reciente a más antiguo para obtener el punto de partida) | https://learn.microsoft.com/en-us/windows/win32/wes/querying-for-events | ✅ verificada (F32) — H2 |
+| 29 | MS — evento 4732 (miembro añadido a grupo local; recomendación de monitoreo con `Level=0`) | https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4732 | ✅ verificada (F32) — H9 |
+| 30 | MS — evento 4771 (falla de preautenticación Kerberos) | https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4771 | ✅ verificada (F32) — H9 |
+| 31 | MS — evento 4776 (falla de credenciales NTLM) | https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4776 | ✅ verificada (F32) — H9 |
+| 32 | MS — evento 4779 (desconexión de sesión Terminal Services / Fast User Switching) | https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4779 | ✅ verificada (F32) — H9 |
+| 33 | MS KB2001093 — DNS 4013 (el servidor DNS espera la réplica inicial de AD; arranque demorado) | https://learn.microsoft.com/en-us/troubleshoot/windows-server/networking/troubleshoot-dns-event-id-4013 | ✅ verificada (F32) — H9 |
+| 34 | MS KB969488 — DNS 4015 (el servidor DNS encontró un error crítico) | https://learn.microsoft.com/en-us/troubleshoot/windows-server/networking/event-4015-dns-server-encounters-critical-error | ✅ verificada (F32) — H9 |
+| 35 | MS — Kernel-Power 41 (el sistema se reinició sin apagado limpio; `Level: Critical`) | https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/event-id-41-restart | ✅ verificada (F32) — H9 |
+| 36 | MS — evento 7022 (servicio NSI colgado al iniciar, SCM) | https://learn.microsoft.com/en-us/troubleshoot/azure/virtual-machines/windows/azure-vm-nsi-not-starting | ✅ verificada (F32) — H9 |
+| 37 | MS KB2702157 — evento 7036 (transición de estado de servicio, `Level: Information`) | https://learn.microsoft.com/en-us/troubleshoot/system-center/orchestrator/runbook-service-stops | ✅ verificada (F32) — H11 |
+| 38 | MS KB933757 — eventos 7000/7026 (driver de dispositivo habilitado sin hardware presente) | https://learn.microsoft.com/en-us/troubleshoot/windows-client/setup-upgrade-and-drivers/system-log-event-id-7000-7026 | ✅ verificada (F32) — H9 (sólo contexto; §Brecha) |
+| 39 | MS — *Service Trigger Events* (arranque por disparo; `SERVICE_TRIGGER_INFO`) | https://learn.microsoft.com/en-us/windows/win32/services/service-trigger-events | ✅ verificada (F32) — H11 |
+| 40 | MS — `SERVICE_DELAYED_AUTO_START_INFO` (nivel 3 de `QueryServiceConfig2`) | https://learn.microsoft.com/en-us/windows/win32/api/winsvc/ns-winsvc-service_delayed_auto_start_info | ✅ verificada (F32) — H11 |
+| 41 | MS — `QueryServiceConfig2A` (`dwInfoLevel` 1–4 y 8) | https://learn.microsoft.com/en-us/windows/desktop/api/Winsvc/nf-winsvc-queryserviceconfig2a | ✅ verificada (F32) — H11 |
 
 ---
 
@@ -101,16 +116,16 @@ Además, el monitoreo 24/7 no tiene recuperación declarada (C5) y la ventana de
 | ID | Hallazgo | Evidencia | Doc oficial | Fix |
 |---|---|---|---|---|
 | H1 | **Sesiones=0 / "No evaluado" en casi todas las muestras**: sin evento `USER_SESSION_INVENTORY`, `ActiveSessions` cae a `0` (dato falso, no "desconocido") y cobertura a `No evaluado`; el inventario sólo sale en ciclos heavy/full, pero el pipeline realtime y la GUI muestran el 0 como cifra | `ObservabilityStore.cs:246-255` (`ver.`); `SupportDashboardViewModel.cs:170,316`; `CollectorCatalog.cs:42,118,148` | — | F33: inventario en ciclo ligero o `ActiveSessions=null` cuando no hay dato |
-| H2 | **Push con query `"*"` sin filtro temporal/RecordId**: escaneo completo del canal cada ciclo; sin cursor no hay contabilidad de pérdida | `WindowsPushEventCollector.cs:81` (`ver.` query; `ag.` drops/FALLBACK) | patrón de cursor: doc 1–2 (RecordId/bookmark) | F32: filtro `EventRecordID > cursor` + drops contabilizados |
-| H3 | **Nivel 3 (Warning) excluido** en base e incremental de System/Application, mientras el forense sí lo lee → cobertura inconsistente y pérdidas (p.ej. warnings de servicio) | `WindowsEventCollector.cs:183` y `IncrementalWindowsEventCollector.cs:48` (`Level=1 or Level=2`) vs `WindowsForensicEventCollector.cs:52` (`Level=1 or 2 or 3`) (`ver.`) | docs 6–8 (`Level <= 3` XPath oficial; Warning=3) | F32: `Level <= 3` en base+incremental |
+| H2 | **Push con query `"*"` sin filtro temporal/RecordId**: escaneo completo del canal cada ciclo; sin cursor no hay contabilidad de pérdida | `WindowsPushEventCollector.cs:81` (`ver.` query; `ag.` drops/FALLBACK) | docs 27–28 (bookmark y lectura inversa) | F32: filtro `EventRecordID > cursor` + drops contabilizados → **corregido en Fase 32** (`50c8173`: `ReadLatestRecordId` con lectura inversa siembra `*[System[(EventRecordID > N)]]` antes de `watcher.Enabled`, cobertura `Suscripción activa desde RecordId N`, huecos de RecordId y descartes del ring en mensaje y evidencia de `WINDOWS_PUSH_EVENT_COVERAGE`, `StopWatchers` limpia cursor y contadores; test `Phase32PushCursorAccountsDropsAndRecordIdGaps`) |
+| H3 | **Nivel 3 (Warning) excluido** en base e incremental de System/Application, mientras el forense sí lo lee → cobertura inconsistente y pérdidas (p.ej. warnings de servicio) | `WindowsEventCollector.cs:183` y `IncrementalWindowsEventCollector.cs:48` (`Level=1 or Level=2`) vs `WindowsForensicEventCollector.cs:52` (`Level=1 or 2 or 3`) (`ver.`) | docs 6–8 (`Level <= 3` XPath oficial; Warning=3) | F32: `Level <= 3` en base+incremental → **corregido en Fase 32** (`50c8173`: base no-Security e incremental Application/LocalSessionManager/RemoteConnectionManager/RdpCoreTS pasan a `Level=1 or Level=2 or Level=3` — System se mantiene por EventID; test `Phase32EventQueriesCarryWarningAndHighValueIds`) |
 | H4 | **Take(12) ocurre ANTES de calibrar**: el correlador corta a 12 y luego `Calibrate`/historial verificado opera sólo sobre esos 12; un candidato real en el puesto 13 jamás recibe ajuste | `RootCauseCorrelator.cs:82` → `DiagnosticWorkflow.cs:25,33` (`ver.`) | — | F34: mover recorte a post-calibración (o ampliar pool) |
 | H5 | **~30 de ~39 candidatos sin guía oficial**: `ToCandidate` sólo adjunta URL si `GuidanceId != null`; KB TSplus/MS existentes quedan sin usar → causa mostrada sin fuente oficial | `RootCauseCorrelator.cs:428-441` (`ag.`) | docs 1, 17–19 (KBs y guías TSplus disponibles) | F33: mapear GuidanceId en top candidatos |
 | H6 | **Dependencias**: tabla filtrada por ~16 marcadores de texto silencia dependientes de terceros; profundidad no visible en reporte → no se "muestran correctamente las dependencias" | `ServiceDependencyGraphCollector.cs` filtro (`ag.`); evidencia `Profundidad` existe en `:283` (`ver.` parcial) | MS `sc enumdepend` (doc. sc, referencia oficial de dependencias) | F34: mostrar terceros + profundidad en informe |
 | H7 | **Servicio (modo continuo) no colecta Schannel, cambios ni dependencias** — esos collectors sólo corren en GUI/CLI | `TdmWorker.cs:171,419,680` vs `DiagnosticExecutionService.cs:71` (`ag.`) | — | F33: alinear sets de collectors GUI vs servicio |
 | H8 | **Sin contadores de rendimiento MS y métricas reales sólo en ciclo heavy**: falta `Available MBytes`, `% Committed Bytes In Use`, CPU % dedicado con histéresis de ventana | `SystemResourceCollector.cs:115-128` WMI-only (`ver. parcial`); `ag.` ciclos | docs 9–11 | F33: colector de contadores MS en ciclo normal |
-| H9 | **IDs de alto valor ausentes**: 7022/7026 (cadena de arranque), 4648, 4778/4779 (reconexión de sesión), 4732, W32Time 1/36/37, DNS 4013/4015 — ninguna query los incluye | `IncrementalWindowsEventCollector.cs:47-66`, `WindowsLogonHealthCollector.cs:33` (`ver.` ausencia; `ag.` detalle) | docs 1, 2, 12–15 (4624/4740/4778/4648 oficiales; 7022/7026 → ver §Brecha) | F32: añadir IDs con doc oficial primero |
+| H9 | **IDs de alto valor ausentes**: 7022/7026 (cadena de arranque), 4648, 4778/4779 (reconexión de sesión), 4732, W32Time 1/36/37, DNS 4013/4015 — ninguna query los incluye | `IncrementalWindowsEventCollector.cs:47-66`, `WindowsLogonHealthCollector.cs:33` (`ver.` ausencia; `ag.` detalle) | docs 12–15, 29–36, 38 (4648/4732/4771/4776/4778/4779, DNS 4013/4015, Kernel-Power 41, 7022, 7026); W32Time → §Brecha | F32: añadir IDs con doc oficial primero → **corregido en Fase 32** (`50c8173`: 4648/4732/4778/4779 en base+incremental+`IsRelevant`+`WindowsLogonHealthCollector` con evidencia propia — `EXPLICIT_CREDENTIAL_LOGON`/`LOCAL_GROUP_MEMBERSHIP_CHANGE` elevan a Advertencia, `SESSION_RECONNECTION`/`SESSION_DISCONNECTION` Informativo vía `HasDedicatedSecurityEvidence` —, 7022 en System incremental, canal `DNS Server` 4013/4015 con `OptionalRole` ("No aplica; canal de rol no instalado" sin evento de pérdida); W32Time 1/36/37 queda en §Brecha; test `Phase32EventQueriesCarryWarningAndHighValueIds`) |
 | H10 | **Detección de desfase de reloj sin productor** (rama `WINDOWS_TIME_SYNC_FAILURE` declarada, ningún colector la emite) + `TimeCreated` re-evaluado al leer → timestamps inventados si el reloj corre | rama dead (`ag.`) | MS doc de niveles/tiempo (doc 6; fecha ISO: docs previas `standard-date-and-time-format-strings`) | F35: productor W32Time o eliminar rama |
-| H11 | **Avisos SCM incompletos**: sin 7036 (transición de servicio), auto-start retrasado no leído, rama "Trigger" muerta, sin lectura de `failure`/recovery de servicios | `ag.` (M5) | docs 3–4 (`sc failure`, `start= delayed-auto`) | F32/F33 |
+| H11 | **Avisos SCM incompletos**: sin 7036 (transición de servicio), auto-start retrasado no leído, rama "Trigger" muerta, sin lectura de `failure`/recovery de servicios | `ag.` (M5) | docs 3–5, 37, 39–41 (`sc failure`, `sc.exe config`, `sc failureflag`, 7036, trigger events, delayed-auto, `QueryServiceConfig2`) | F32/F33 → **corregido en Fase 32** (`50c8173`: 7036 como `SERVICE_STATE_TRANSITION` sólo incremental con evidencia Servicio/Estado, `ReadStartMode` con niveles 3/8 de `QueryServiceConfig2W` → `Automático (retrasado)`/`Trigger` con consumidor único `IsAutoStart` (×4 sitios, `ShouldWarnWhenStopped` incluido), rama Trigger viva en presentadores, `ReadRecovery` niveles 2+4 → evidencia `Recuperación` vía `FormatRecoveryActions`; test `Phase32ServiceStartModesAndRecoveryReadScm`) |
 | H12 | **El analizador de cobertura no penaliza `WINDOWS_EVENT_COVERAGE`/push caído** → cobertura global sobreestimada | `DiagnosticCoverageAnalyzer.cs` (`ag.`) | — | F34 |
 
 ---
@@ -132,7 +147,7 @@ Además, el monitoreo 24/7 no tiene recuperación declarada (C5) y la ventana de
 | M-11 | Heurísticas de substrings blandos (`MissionServiceMarkers`) → FP potencial | (`ag.`) | `ag.` |
 | M-12 | Igualdad de `Fuente` (exacta) vs `StartsWith` inconsistente entre módulos | (`ag.`) | `ag.` |
 | M-13 | El mismo evento Windows llega con 4 identidades distintas (fuente/canal/RecordId) sin colapso → duplicidad en agrupación | (`ag.`) | `ag.` |
-| M-14 | Trim (`Take`) **antes** de dedup consume el presupuesto de eventos con duplicados | (`ag.`) | `ag.` |
+| M-14 | Trim (`Take`) **antes** de dedup consume el presupuesto de eventos con duplicados | (`ag.`) | **CERRADO (F32, `50c8173`)**: `IdentityIncidentPromoter.Promote` + `Deduplicate` se ejecutan antes del trim en `DiagnosticEngine` (seguro: los cursores ya se persistieron en recolección), `rawEventCount` sigue midiendo el crudo y `strictEvents` opera sobre la lista saneada; test `Phase32DedupPrecedesVolumeTrim` |
 | M-15 | Política de auditoría "desconocida" reportada como sana | (`ag.`) | `ag.` |
 | M-16 | Canary escribe eventos pese al mandato read-only de diagnóstico | (`ag.`) | `ag.` |
 | M-17 | Identidad de evento rota en colectores secundarios (mismos campos distintos) | (`ag.`) | `ag.` |
@@ -185,8 +200,8 @@ Además, el monitoreo 24/7 no tiene recuperación declarada (C5) y la ventana de
 ## Brecha documental oficial (requisito del cliente)
 
 - **Sin documentación oficial de Microsoft** (sólo Q&A/comunidad): **7031, 7034, 1149, 1002, 1026**. Ya se usan en queries actuales (`IncrementalWindowsEventCollector.cs:47`, `WindowsEventCollector.cs:207`, `WindowsForensicEventCollector.cs:229-230,260`, `CrashEventCollector.cs:22`). **Regla de remediación**: usarlos como *señal* está bien, pero **no** citarlos como base de recomendación en el informe; para recomendaciones citar sólo IDs con doc oficial (docs 1, 2, 12–15) o consultas por nivel (docs 6–7).
-- **7026**: la referencia oficial (system-log-event-id-7000-7026, enlazada desde Q&A oficial) se circunscribe a drivers → usar como contexto, no como prueba de dependencias. ⚠️ pendiente de fetch.
-- **Pendientes de verificación** (añadir a la tabla §Base documental antes de citarlos en F32): 7022, 4771, 4776, 4732, Kernel-Power 41, W32Time 1/36/37, DNS 4013/4015.
+- **7026**: la referencia oficial (doc 38, `system-log-event-id-7000-7026`) se circunscribe a drivers → usar como contexto, no como prueba de dependencias. ✅ verificada (F32).
+- **Pendientes de verificación**: **W32Time 1/36/37** — sin documentación oficial de Microsoft (sólo Q&A/comunidad) → no citarlos como base de remediación. Los demás pendientes de F32 (7022, 4771, 4776, 4732, Kernel-Power 41, DNS 4013/4015) fueron verificados y añadidos a §Base documental (docs 29–37).
 - **TSplus**: docs 17–19 cubren logs, licencia y rehosting; para puertos/web-server (`hb.log`, `hb.exe.config`) falta verificar la página oficial correspondiente antes de citarla.
 
 ---
@@ -209,6 +224,6 @@ Gates obligatorios por fase (en orden): `dotnet build TDM.sln -c Release --no-re
 
 ## Estado
 
-- **Hallazgos abiertos**: 49 (0 C · 12 H · 21 M · 16 L).
-- **Cerrados**: 7 — C1 (F29, `e434104`), C2 · C3 · M-19 (F30, `2da0be6`), C4 · C5 · L-08 (F31, `a830356`).
-- **Remediación**: plan F29–F35 aprobado por el usuario; F29–F31 completadas con gates verdes; F32 (H2, H3, H9, H11) pendiente de inicio.
+- **Hallazgos abiertos**: 44 (0 C · 8 H · 20 M · 16 L).
+- **Cerrados**: 12 — C1 (F29, `e434104`), C2 · C3 · M-19 (F30, `2da0be6`), C4 · C5 · L-08 (F31, `a830356`), H2 · H3 · H9 · H11 · M-14 (F32, `50c8173`).
+- **Remediación**: plan F29–F35 aprobado por el usuario; F29–F32 completadas con gates verdes; F33 (H1, H5, H7, H8, M-04) pendiente de inicio.
