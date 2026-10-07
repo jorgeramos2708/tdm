@@ -83,7 +83,9 @@ public static partial class RootCauseCorrelator
                 .ThenBy(x => x.Draft.CausalRole == "IMPACTO_DIRECTO_SIN_CAUSA_DEL_PARO")
                 .ThenBy(x => x.Draft.Confidence)
                 .ThenByDescending(x => x.Draft.IncidentTime ?? DateTimeOffset.MinValue)
-                .Take(12)
+                // F34 (H4): sin recorte previo. Calibrate y el historial verificado operan
+                // sobre el pool completo (un candidato real en el puesto 13+ también recibe
+                // ajuste); el corte a 8 es sólo de presentación en DiagnosticWorkflow.
                 .Select((x, index) => ToCandidate(x.Draft, index + 1))
                 .ToList();
             return ranked;
@@ -489,5 +491,33 @@ public static partial class RootCauseCorrelator
             draft.IncidentTime,
             draft.OriginCategory == "INDETERMINADO" ? OriginFromLayer(draft.Layer) : draft.OriginCategory,
             draft.CausalRole);
+    }
+
+    /// <summary>
+    /// F34 (H4/H5): garantiza que el podio final conserve la fuente oficial cuando existe
+    /// una guia aplicable. Calibrate reordena y reasigna posiciones, por lo que un candidato
+    /// bruto fuera del top-3 puede ascender a los tres primeros sin la guia que ToCandidate
+    /// adjunta solo a las posiciones 1-3 del ranking inicial.
+    /// </summary>
+    public static IReadOnlyList<RootCauseCandidate> ApplyTopThreeGuidance(IReadOnlyList<RootCauseCandidate> candidates)
+    {
+        List<RootCauseCandidate>? patched = null;
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var candidate = candidates[i];
+            if (candidate.Posicion > 3 || candidate.UrlOficial is not null) continue;
+            var guidanceId = FallbackGuidanceId(candidate.Id);
+            if (guidanceId is null) continue;
+            var guidance = OfficialKnowledgeBase.Get(guidanceId);
+            if (guidance is null) continue;
+            patched ??= candidates.ToList();
+            patched[i] = candidate with
+            {
+                SolucionSugerida = guidance.SolucionSugerida,
+                FuenteOficial = $"{guidance.Vendor} - {guidance.Titulo}",
+                UrlOficial = guidance.Url
+            };
+        }
+        return patched ?? candidates;
     }
 }

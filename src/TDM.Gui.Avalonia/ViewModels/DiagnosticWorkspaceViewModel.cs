@@ -634,7 +634,7 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
     {
         var targets = new List<string>();
 
-        var services = report.Eventos
+        var servicesAll = report.Eventos
             .Where(e => e.Tipo.Equals("SERVICE_STATE", StringComparison.OrdinalIgnoreCase))
             .Select(e => new
             {
@@ -645,12 +645,15 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
             .GroupBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
             .Select(g => (Name: g.Key, Level: g.Max(x => DashboardRules.OperationalStateLevel(x.State)), State: g.Last().State))
             .OrderByDescending(x => x.Level)
-            .Take(6)
             .ToList();
+        // F34 (M-03): el total se calcula antes del Take para declarar el truncado.
+        var services = servicesAll.Take(6).ToList();
         foreach (var service in services)
             targets.Add($"Servicio: {DashboardRules.SanitizeVisibleText(service.Name)} — {DashboardRules.LocalizeOperationalText(service.State)}");
+        if (servicesAll.Count > services.Count)
+            targets.Add($"Servicio: mostrando {services.Count} de {servicesAll.Count}; {servicesAll.Count - services.Count} servicio(s) más sin mostrar.");
 
-        var dependencies = report.Eventos
+        var dependenciesAll = report.Eventos
             .Where(e => e.Tipo is "SERVICE_DEPENDENCY_STATE" or "TSPLUS_WINDOWS_FUNCTIONAL_DEPENDENCY_STATE")
             .Select(e => new
             {
@@ -663,22 +666,27 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
             .GroupBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
             .Select(g => (Name: g.Key, Level: g.Max(x => DashboardRules.OperationalStateLevel(x.State)), State: g.Last().State))
             .OrderByDescending(x => x.Level)
-            .Take(5)
             .ToList();
+        var dependencies = dependenciesAll.Take(5).ToList();
         foreach (var dependency in dependencies)
             targets.Add($"Dependencia: {DashboardRules.SanitizeVisibleText(dependency.Name)} — {DashboardRules.LocalizeOperationalText(dependency.State)}");
+        if (dependenciesAll.Count > dependencies.Count)
+            targets.Add($"Dependencia: mostrando {dependencies.Count} de {dependenciesAll.Count}; {dependenciesAll.Count - dependencies.Count} dependencia(s) más sin mostrar.");
 
-        var processes = report.Eventos
+        var processesAll = report.Eventos
             .Where(e => e.Tipo is "APPLICATION_CRASH" or "DOTNET_UNHANDLED_EXCEPTION" or "WER_REPORT"
                 or "TSPLUS_HTML5_JVM_CRASH" or "TSPLUS_CRASH_LOOP_PATTERN")
             .Select(e => DashboardRules.SanitizeVisibleText(e.Componente))
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(6);
+            .ToList();
+        var processes = processesAll.Take(6).ToList();
         foreach (var process in processes)
             targets.Add($"Proceso: {process} — crash/reinicio en la ventana");
+        if (processesAll.Count > processes.Count)
+            targets.Add($"Proceso: mostrando {processes.Count} de {processesAll.Count}; {processesAll.Count - processes.Count} proceso(s) más sin mostrar.");
 
-        var sessions = report.Eventos
+        var sessionsAll = report.Eventos
             .Where(e => e.Tipo is "USER_LOGON_FAILURE" or "USER_NLA_PASSWORD_FAILURE" or "ACCOUNT_LOCKOUT"
                 or "KERBEROS_PREAUTH_FAILURE" or "WINDOWS_CREDENTIAL_VALIDATION_FAILURE")
             .Select(e =>
@@ -693,9 +701,12 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
             .Where(x => x.Identity.Length > 0)
             .GroupBy(x => x.Identity, StringComparer.OrdinalIgnoreCase)
             .Select(g => (Identity: g.Key, Tipo: g.First().Tipo, Count: g.Count()))
-            .Take(5);
+            .ToList();
+        var sessions = sessionsAll.Take(5).ToList();
         foreach (var session in sessions)
             targets.Add($"Sesión/usuario: {session.Identity} — {session.Tipo} ({session.Count} vez/veces)");
+        if (sessionsAll.Count > sessions.Count)
+            targets.Add($"Sesión/usuario: mostrando {sessions.Count} de {sessionsAll.Count}; {sessionsAll.Count - sessions.Count} identidad(es) más sin mostrar.");
 
         return targets;
     }
@@ -739,7 +750,12 @@ public partial class DiagnosticWorkspaceViewModel : ObservableObject, IDisposabl
             if (cause.Evidencia.Count > 0)
             {
                 sb.AppendLine("Evidencia:");
-                foreach (var evidence in cause.Evidencia.Take(4))
+                // F34 (M-18): la evidencia de impacto/paro se lista primero para que el
+                // corte a 4 no la oculte por orden de inserción.
+                foreach (var evidence in cause.Evidencia
+                    .OrderByDescending(x => x.Clave.Contains("Causa del paro demostrada", StringComparison.OrdinalIgnoreCase)
+                                         || x.Clave.Contains("Alcance potencial", StringComparison.OrdinalIgnoreCase))
+                    .Take(4))
                     sb.AppendLine($"• {evidence.Clave}: {DashboardRules.SanitizeVisibleText(evidence.Valor)}");
                 if (cause.Evidencia.Count > 4)
                     sb.AppendLine($"• … y {cause.Evidencia.Count - 4} evidencia(s) más (ver reporte exportado)");

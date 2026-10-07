@@ -408,7 +408,20 @@ public static async Task<ReportExportResult> ExportAsync(
             {
                 sb.Append("<table><tr><th>Función</th><th>Módulo</th><th>Estado</th><th>Confianza</th><th>Lectura</th></tr>");
                 foreach (var item in impactAssessment.Impactos)
+                {
                     sb.Append($"<tr><td>{H(item.Funcion)}</td><td>{H(item.Modulo)}</td><td>{H(item.Estado.ToString())}</td><td>{H(item.Confianza.ToString())}</td><td>{H(item.Resumen)}</td></tr>");
+                    // F34 (M-18): la evidencia de impacto creada por FunctionalImpactAnalyzer
+                    // ("Alcance potencial (sesiones observadas)", "Causa del paro demostrada")
+                    // se renderiza explícitamente; antes quedaba sólo en el JSON.
+                    if (item.Evidencia is { Count: > 0 })
+                    {
+                        var evidenceText = string.Join(" / ", item.Evidencia
+                            .Where(x => !string.IsNullOrWhiteSpace(x.Valor))
+                            .Select(x => $"{x.Clave}: {CompactForReport(x.Valor, 90)}"));
+                        if (!string.IsNullOrWhiteSpace(evidenceText))
+                            sb.Append($"<tr><td colspan='5' class='muted'>Evidencia: {H(evidenceText)}</td></tr>");
+                    }
+                }
                 sb.Append("</table>");
             }
             sb.Append("<p class='muted'>TDM separa impacto observado de causa raíz: una falla de un componente complementario no implica por sí sola indisponibilidad global de Remote Access.</p></div>");
@@ -591,6 +604,23 @@ public static async Task<ReportExportResult> ExportAsync(
             if (affectedProcesses.Count > 40)
                 sb.Append($"<p class='muted'>Mostrando 40 de {affectedProcesses.Count} procesos; el JSON conserva todos los eventos de caída.</p>");
             sb.Append("<p class='muted'>Sección construida con los eventos de caída/reinicio de proceso de la ventana; la atribución de causa raíz vive en su propia sección.</p></div>");
+        }
+
+        // F34 (M-20): hallazgos TSPLUS-PROCESS-MODULE-MISSING con consumidor visible en el
+        // informe; antes sólo aparecían en la tabla genérica de hallazgos y los procesos
+        // afectados por módulos ausentes (sin crash en la ventana) no se mostraban.
+        var moduleMissing = report.Hallazgos
+            .Where(f => f.Id.StartsWith("TSPLUS-PROCESS-MODULE-MISSING-", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (moduleMissing.Count > 0)
+        {
+            sb.Append("<div class='card'><h2>Procesos TSplus con módulos ausentes</h2><table><tr><th>Proceso</th><th>Módulo ausente</th><th>Severidad</th><th>Detalle</th></tr>");
+            foreach (var finding in moduleMissing)
+            {
+                string V(string key) => finding.Evidencia?.FirstOrDefault(x => x.Clave == key)?.Valor ?? "N/D";
+                sb.Append($"<tr><td>{H(V("Proceso") != "N/D" ? V("Proceso") : finding.Componente)}</td><td>{H(V("Módulo ausente"))}</td><td>{H(finding.Severidad.ToString())}</td><td>{H(finding.Resumen)}</td></tr>");
+            }
+            sb.Append("</table><p class='muted'>Módulo referenciado/cargado que ya no existe en disco: anticipa fallos de arranque o de carga aunque el proceso siga vivo por ahora. El detalle completo también figura en Hallazgos.</p></div>");
         }
 
         var crashLoops = report.Eventos.Where(e => e.Tipo == "TSPLUS_CRASH_LOOP_PATTERN").OrderByDescending(e => e.Timestamp).ToList();
@@ -957,24 +987,29 @@ public static async Task<ReportExportResult> ExportAsync(
         }
         if (scmDependencies.Count > 0 || scmDependents.Count > 0)
         {
-            var shownDependencies = scmDependencies.Where(IsRelevantDependencyRow).ToList();
-            var shownDependents = scmDependents.Where(IsRelevantDependencyRow).ToList();
-            sb.Append("<h3>Relaciones reales del Service Control Manager</h3><table><tr><th>Servicio</th><th>Relación</th><th>Servicio relacionado</th><th>Estado</th></tr>");
+            // F34 (H6): sin filtro de ~16 marcadores que silenciaba dependientes de terceros
+            // (sc enumdepend lista todos los servicios que dependen de uno dado, doc oficial);
+            // los relevantes a TSplus/RDP se muestran primero y la profundidad SCM queda
+            // visible por fila (evidencia "Profundidad" del collector).
+            var shownDependencies = scmDependencies.OrderByDescending(IsRelevantDependencyRow).ToList();
+            var shownDependents = scmDependents.OrderByDescending(IsRelevantDependencyRow).ToList();
+            sb.Append("<h3>Relaciones reales del Service Control Manager</h3><table><tr><th>Servicio</th><th>Relación</th><th>Servicio relacionado</th><th>Estado</th><th>Profundidad</th></tr>");
             foreach (var dep in shownDependencies.Take(120))
             {
                 string V(string key) => dep.Evidencia?.FirstOrDefault(x => x.Clave == key)?.Valor ?? "N/D";
-                sb.Append($"<tr><td>{H(V("Servicio") != "N/D" ? V("Servicio") : V("Servicio origen"))}</td><td>depende de</td><td>{H(V("Dependencia"))}</td><td>{H(V("Estado dependencia") != "N/D" ? V("Estado dependencia") : V("Estado"))}</td></tr>");
+                sb.Append($"<tr><td>{H(V("Servicio") != "N/D" ? V("Servicio") : V("Servicio origen"))}</td><td>depende de</td><td>{H(V("Dependencia"))}</td><td>{H(V("Estado dependencia") != "N/D" ? V("Estado dependencia") : V("Estado"))}</td><td>{H(V("Profundidad"))}</td></tr>");
             }
             foreach (var dep in shownDependents.Take(60))
             {
                 string V(string key) => dep.Evidencia?.FirstOrDefault(x => x.Clave == key)?.Valor ?? "N/D";
-                sb.Append($"<tr><td>{H(V("Dependiente"))}</td><td>depende de</td><td>{H(V("Servicio"))}</td><td>{H(V("Estado dependiente"))}</td></tr>");
+                // DependentServices (sc enumdepend) son dependientes directos: profundidad 1.
+                sb.Append($"<tr><td>{H(V("Dependiente"))}</td><td>depende de</td><td>{H(V("Servicio"))}</td><td>{H(V("Estado dependiente"))}</td><td>1 (directa)</td></tr>");
             }
             sb.Append("</table>");
             var hiddenDependencies = Math.Max(0, shownDependencies.Count - 120);
             var hiddenDependents = Math.Max(0, shownDependents.Count - 60);
             if (hiddenDependencies > 0 || hiddenDependents > 0)
-                sb.Append($"<p class='muted'>La tabla muestra hasta 120 dependencias y 60 dependientes; {hiddenDependencies + hiddenDependents} relación(es) adicional(es) no visibles. El JSON conserva todas las relaciones recopiladas ({scmDependencies.Count + scmDependents.Count}).</p>");
+                sb.Append($"<p class='muted'>La tabla muestra hasta 120 dependencias y 60 dependientes (primero los relevantes a TSplus/RDP; incluye servicios de terceros); {hiddenDependencies + hiddenDependents} relación(es) adicional(es) no visibles. El JSON conserva todas las relaciones recopiladas ({scmDependencies.Count + scmDependents.Count}).</p>");
         }
         sb.Append("</div>");
 
@@ -1052,7 +1087,14 @@ public static async Task<ReportExportResult> ExportAsync(
                 sb.Append($"<h3 id='{causeAnchor}' class='anchor-target'><a class='anchor-link' href='#{causeAnchor}'>{(isPrimary ? "[PRINCIPAL] " : string.Empty)}#{c.Posicion} \u2020 {H(c.Componente)}</a></h3><p><span class='badge'>{H(c.Confianza.ToString())}</span><span class='badge muted'>ranking {c.Puntaje}/100</span><span class='badge'>{H(c.Capa.ToString())}</span><span class='badge'>{H(c.Producto.ToString())}</span><span class='badge'>Origen {H(c.OrigenClasificado)}</span></p>");
                 if (c.HoraIncidente.HasValue) sb.Append($"<p><strong>Hora incidente:</strong> {c.HoraIncidente.Value.ToLocalTime():dd/MM/yyyy HH:mm:ss}</p>");
                 sb.Append($"<p>{H(c.Resumen)}</p><p><strong>Por qué:</strong> {H(c.Explicacion)}</p><ul>");
-                var shownEvidence = c.Evidencia.Take(24).ToList();
+                // F34 (M-18): la evidencia de impacto/paro ("Causa del paro demostrada",
+                // "Alcance potencial (sesiones observadas)") se prioriza antes del corte a
+                // 24 para que el informe nunca la oculte por orden de inserción.
+                var shownEvidence = c.Evidencia
+                    .OrderByDescending(x => x.Clave.Contains("Causa del paro demostrada", StringComparison.OrdinalIgnoreCase)
+                                         || x.Clave.Contains("Alcance potencial", StringComparison.OrdinalIgnoreCase))
+                    .Take(24)
+                    .ToList();
                 foreach (var e in shownEvidence) sb.Append($"<li><strong>{H(e.Clave)}:</strong> {H(e.Valor)}</li>");
                 if (c.Evidencia.Count > shownEvidence.Count)
                     sb.Append($"<li class='muted'>… y {c.Evidencia.Count - shownEvidence.Count} evidencia(s) más (colección completa en JSON).</li>");
@@ -1143,19 +1185,28 @@ sb.Append("<div class='card'><h2>Hallazgos</h2>");
         var criticalCoverageIncomplete = report.CoberturaDiagnostica?.Fuentes.Any(
             x => x.Critica && x.Estado is not "Disponible" and not "No aplica") == true;
 
+        // F34 (M-02): un titular SALUDABLE no puede convivir con hallazgos Error/Crítico.
+        // La rama SinImpactoObservado antes omitía el chequeo de severidad que el camino
+        // sin impacto ya aplicaba; NO EVALUADO (cobertura incompleta) sigue teniendo
+        // prioridad sobre la advertencia por hallazgos.
+        var hasErrorFindings = report.Hallazgos.Any(x => x.Severidad >= DiagnosticSeverity.Error);
+
         if (report.ImpactoFuncional is { } impact)
         {
             return impact.EstadoGeneral switch
             {
                 FunctionalImpactState.Interrumpido => "ERROR",
                 FunctionalImpactState.Degradado => "ADVERTENCIA",
-                FunctionalImpactState.SinImpactoObservado => criticalCoverageIncomplete ? "NO EVALUADO" : "SALUDABLE",
+                FunctionalImpactState.SinImpactoObservado =>
+                    criticalCoverageIncomplete ? "NO EVALUADO"
+                    : hasErrorFindings ? "ADVERTENCIA"
+                    : "SALUDABLE",
                 _ => cause is null ? "NO EVALUADO" : InvestigationStateForReport(cause)
             };
         }
 
         if (cause is not null) return InvestigationStateForReport(cause);
-        if (report.Hallazgos.Any(x => x.Severidad >= DiagnosticSeverity.Error)) return "ADVERTENCIA";
+        if (hasErrorFindings) return "ADVERTENCIA";
         return criticalCoverageIncomplete ? "NO EVALUADO" : "SALUDABLE";
     }
 

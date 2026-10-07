@@ -225,7 +225,15 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("Phase33ServiceMonitorHeavyCycleClosesCollectorGap", Phase33ServiceMonitorHeavyCycleClosesCollectorGap),
     ("Phase33TsplusLogsDisabledByDefaultSurfacesAsStateEvent", Phase33TsplusLogsDisabledByDefaultSurfacesAsStateEvent),
     ("Phase33TopThreeCandidatesCarryOfficialGuidance", Phase33TopThreeCandidatesCarryOfficialGuidance),
-    ("Phase33LightResourceCyclePublishesDocNineCounters", Phase33LightResourceCyclePublishesDocNineCounters)
+    ("Phase33LightResourceCyclePublishesDocNineCounters", Phase33LightResourceCyclePublishesDocNineCounters),
+    ("Phase34CalibrationPoolKeepsFullRanking", Phase34CalibrationPoolKeepsFullRanking),
+    ("Phase34DependencyTableShowsThirdPartiesAndDepth", Phase34DependencyTableShowsThirdPartiesAndDepth),
+    ("Phase34CoveragePenalizesEventAndPushOutages", Phase34CoveragePenalizesEventAndPushOutages),
+    ("Phase34DriftCountsAreDeclaredNotCapped", Phase34DriftCountsAreDeclaredNotCapped),
+    ("Phase34ExecutiveStateIsNotSaludableWithErrorFindings", Phase34ExecutiveStateIsNotSaludableWithErrorFindings),
+    ("Phase34ReviewTargetsDeclareTruncation", Phase34ReviewTargetsDeclareTruncation),
+    ("Phase34ImpactEvidenceRendersInExport", Phase34ImpactEvidenceRendersInExport),
+    ("Phase34ModuleMissingFindingsRenderProcessesSection", Phase34ModuleMissingFindingsRenderProcessesSection)
 };
 
 var failed = 0;
@@ -3236,8 +3244,8 @@ static async Task ExportFooterReportsHiddenDependencyRows()
                 ], Producto: TsplusProduct.RemoteAccess));
         var result = await ReportExporter.ExportAsync(Report(many, now), dir, CancellationToken.None);
         var html = await File.ReadAllTextAsync(result.HtmlPath);
-        True(html.Contains("hasta 120 dependencias y 60 dependientes; 5 relación(es) adicional(es) no visibles", StringComparison.Ordinal),
-            "Con 125 filas relevantes el pie no informó las 5 ocultas realmente no mostradas.");
+        True(html.Contains("hasta 120 dependencias y 60 dependientes (primero los relevantes a TSplus/RDP; incluye servicios de terceros); 5 relación(es) adicional(es) no visibles", StringComparison.Ordinal),
+            "Con 125 filas el pie no informó las 5 ocultas realmente no mostradas.");
 
         var quiet = new List<DiagnosticEvent>();
         for (var i = 0; i < 200; i++)
@@ -3252,8 +3260,10 @@ static async Task ExportFooterReportsHiddenDependencyRows()
                 ]));
         var quietResult = await ReportExporter.ExportAsync(Report(quiet, now), quietDir, CancellationToken.None);
         var quietHtml = await File.ReadAllTextAsync(quietResult.HtmlPath);
-        False(quietHtml.Contains("hasta 120 dependencias y 60 dependientes", StringComparison.Ordinal),
-            "Con 200 filas irrelevantes (0 mostradas) el pie afirmó que había relaciones ocultas.");
+        True(quietHtml.Contains("interno-0", StringComparison.Ordinal),
+            "F34 (H6): una fila sin marcadores de relevancia volvio a quedar silenciada.");
+        True(quietHtml.Contains("80 relación(es) adicional(es) no visibles", StringComparison.Ordinal),
+            "F34 (H6): con 200 filas mostrando 120, el pie no declaro las 80 ocultas.");
     }
     finally { TryDelete(dir); TryDelete(quietDir); }
 }
@@ -6281,6 +6291,298 @@ static async Task Phase33LightResourceCyclePublishesDocNineCounters()
     var store = File.ReadAllText(Path.Combine(root!, "src", "TDM.Persistence", "ObservabilityStore.cs"));
     True(store.Contains("MemoryPercentCommittedBytesInUse", StringComparison.Ordinal),
         "La muestra de observabilidad no consume el contador commited (H8).");
+}
+
+static Task Phase34CalibrationPoolKeepsFullRanking()
+{
+    // H4: el correlador no corta a 12 antes de calibrar y el podio post-calibracion
+    // conserva la fuente oficial aunque un candidato ascienda desde una posicion bruta mayor.
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizo TDM.sln; gate H4 F34 no ejecutable.");
+    var correlator = File.ReadAllText(Path.Combine(root!, "src", "TDM.Correlation", "RootCauseCorrelator.cs"));
+    False(correlator.Contains(".Take(12)", StringComparison.Ordinal),
+        "El correlador volvio a cortar el pool a 12 candidatos antes de calibrar (H4).");
+    True(correlator.Contains("ApplyTopThreeGuidance", StringComparison.Ordinal),
+        "Falta el helper de guia para el podio post-calibracion (H4/H5).");
+    var workflow = File.ReadAllText(Path.Combine(root!, "src", "TDM.Application", "DiagnosticWorkflow.cs"));
+    var apply = workflow.IndexOf("ApplyTopThreeGuidance", StringComparison.Ordinal);
+    var cut = workflow.IndexOf("calibrated.Take(8)", StringComparison.Ordinal);
+    True(apply >= 0 && cut > apply,
+        "La guia del podio debe aplicarse sobre la lista calibrada antes del Take(8) de presentacion (H4).");
+
+    var displaced = new RootCauseCandidate(2, "ROOT-TSPLUS-SERVICE-STOPPED-WEBPORTAL",
+        "TSplus Web Portal", DiagnosticLayer.Tsplus, 90, ConfidenceLevel.Alta,
+        "servicio detenido", "explicacion", []);
+    var patched = RootCauseCorrelator.ApplyTopThreeGuidance([displaced]);
+    NotNull(patched[0].UrlOficial, "Un candidato promovido al podio sin guia no la recibio (H4).");
+    True(patched[0].UrlOficial!.StartsWith("https://", StringComparison.Ordinal),
+        "La guia del podio no quedo con URL oficial (H4).");
+
+    var below = new RootCauseCandidate(4, "ROOT-TSPLUS-SERVICE-STOPPED-WEBPORTAL",
+        "TSplus Web Portal", DiagnosticLayer.Tsplus, 90, ConfidenceLevel.Alta,
+        "servicio detenido", "explicacion", []);
+    var untouched = RootCauseCorrelator.ApplyTopThreeGuidance([below]);
+    True(string.IsNullOrWhiteSpace(untouched[0].UrlOficial),
+        "Un candidato fuera del podio no debe recibir guia automatica (H4).");
+    return Task.CompletedTask;
+}
+
+static async Task Phase34DependencyTableShowsThirdPartiesAndDepth()
+{
+    // H6: la tabla SCM muestra terceros y la profundidad por fila (sc enumdepend, doc oficial).
+    var dir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var dep = new DiagnosticEvent(now, "Service Control Manager", "TermService",
+            DiagnosticLayer.Windows, DiagnosticSeverity.Informativo, "SERVICE_DEPENDENCY_STATE", "dependencia",
+            Evidencia:
+            [
+                new EvidenceItem("Servicio origen", "TermService"),
+                new EvidenceItem("Dependencia", "ContosoVendorAgent"),
+                new EvidenceItem("Estado dependencia", "Running"),
+                new EvidenceItem("Profundidad", "2")
+            ]);
+        var dependent = new DiagnosticEvent(now, "Service Control Manager", "TermService",
+            DiagnosticLayer.Windows, DiagnosticSeverity.Informativo, "SERVICE_DEPENDENT_STATE", "dependiente",
+            Evidencia:
+            [
+                new EvidenceItem("Servicio", "TermService"),
+                new EvidenceItem("Dependiente", "ContosoBackupSvc"),
+                new EvidenceItem("Estado dependiente", "Running")
+            ]);
+        var result = await ReportExporter.ExportAsync(Report([dep, dependent], now), dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("<th>Profundidad</th>", StringComparison.Ordinal),
+            "La tabla de relaciones no expone la profundidad SCM (H6).");
+        True(html.Contains("ContosoVendorAgent", StringComparison.Ordinal),
+            "Una dependencia de terceros sin marcadores siguio silenciada (H6).");
+        True(html.Contains("ContosoBackupSvc", StringComparison.Ordinal),
+            "Un dependiente de terceros sin marcadores siguio silenciado (H6).");
+        True(html.Contains("1 (directa)", StringComparison.Ordinal),
+            "La profundidad directa de los dependientes no se declara (H6).");
+        var root = FindRepoRoot();
+        NotNull(root, "No se localizo TDM.sln; gate H6 F34 no ejecutable.");
+        var exporter = File.ReadAllText(Path.Combine(root!, "src", "TDM.Reporting", "ReportExporter.cs"));
+        False(exporter.Contains(".Where(IsRelevantDependencyRow)", StringComparison.Ordinal),
+            "El filtro de ~16 marcadores volvio a silenciar filas de terceros (H6).");
+    }
+    finally { TryDelete(dir); }
+}
+
+static Task Phase34CoveragePenalizesEventAndPushOutages()
+{
+    // H12: la lectura base y la suscripcion push penalizan el score cuando fallan.
+    var now = DateTimeOffset.Now;
+    var eventCoverage = new DiagnosticEvent(now, "TDM", "Cobertura de eventos Windows",
+        DiagnosticLayer.Windows, DiagnosticSeverity.Advertencia, "WINDOWS_EVENT_COVERAGE", "cobertura base",
+        Evidencia:
+        [
+            new EvidenceItem("Security", "Sin permisos de lectura"),
+            new EvidenceItem("System", "Disponible; relevantes=5; examinados=5")
+        ]);
+    var pushCoverage = new DiagnosticEvent(now, "TDM", "Push Event Subscription",
+        DiagnosticLayer.Windows, DiagnosticSeverity.Informativo, "WINDOWS_PUSH_EVENT_COVERAGE", "push",
+        Evidencia:
+        [
+            new EvidenceItem("Security", "Suscripción activa desde RecordId 10"),
+            new EvidenceItem("System", "Sin permisos: denegado"),
+            new EvidenceItem("Descartados por buffer lleno", "3"),
+            new EvidenceItem("Huecos de RecordId", "1")
+        ]);
+    var blocked = DiagnosticCoverageAnalyzer.Analyze(Report([eventCoverage, pushCoverage], now));
+    Equal("Bloqueada", blocked.Fuentes.Single(x => x.Fuente == "Eventos Windows (lectura base)").Estado,
+        "La lectura base bloqueada no penalizo la cobertura (H12).");
+    True(blocked.Fuentes.Single(x => x.Fuente == "Eventos Windows (lectura base)").Critica,
+        "La lectura base debe declararse fuente critica (H12).");
+    Equal("Parcial", blocked.Fuentes.Single(x => x.Fuente == "Suscripción push de eventos Windows").Estado,
+        "Un push con canal caido y descartes no quedo Parcial (H12).");
+    True(blocked.Limitaciones.Any(l => l.StartsWith("La lectura base de eventos Windows", StringComparison.Ordinal)),
+        "La lectura base parcial/bloqueada no dejo limitacion declarada (H12).");
+    True(blocked.Limitaciones.Any(l => l.StartsWith("La suscripción push del Event Log", StringComparison.Ordinal)),
+        "El push degradado no dejo limitacion declarada (H12).");
+
+    var down = pushCoverage with
+    {
+        Evidencia =
+        [
+            new EvidenceItem("Security", "Sin permisos: denegado"),
+            new EvidenceItem("System", "Canal no disponible en este SO"),
+            new EvidenceItem("Descartados por buffer lleno", "0"),
+            new EvidenceItem("Huecos de RecordId", "0")
+        ]
+    };
+    var dead = DiagnosticCoverageAnalyzer.Analyze(Report([eventCoverage, down], now));
+    Equal("No disponible", dead.Fuentes.Single(x => x.Fuente == "Suscripción push de eventos Windows").Estado,
+        "Un push sin ningun canal suscrito no quedo No disponible (H12).");
+
+    var plain = DiagnosticCoverageAnalyzer.Analyze(Report([], now));
+    False(plain.Fuentes.Any(x => x.Fuente == "Eventos Windows (lectura base)"),
+        "Sin evento WINDOWS_EVENT_COVERAGE no debe anadirse la fuente base (H12).");
+    False(plain.Fuentes.Any(x => x.Fuente == "Suscripción push de eventos Windows"),
+        "Sin evento WINDOWS_PUSH_EVENT_COVERAGE no debe anadirse la fuente push (H12).");
+    True(plain.Score > blocked.Score,
+        "Los fallos de lectura base/push no penalizaron el score global (H12).");
+    return Task.CompletedTask;
+}
+
+static Task Phase34DriftCountsAreDeclaredNotCapped()
+{
+    // M-01: los conteos del drift usan listas completas; el Take(8) solo acota el texto.
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizo TDM.sln; gate M-01 F34 no ejecutable.");
+    var src = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.TSplus", "TsplusConfigurationDriftCollector.cs"));
+    False(src.Contains("added = added.Take(8).ToList()", StringComparison.Ordinal),
+        "El Take(8) volvio a cortar la lista de agregados antes de contar (M-01).");
+    False(src.Contains("kv.Key).Take(8).ToList()", StringComparison.Ordinal),
+        "El Take(8) volvio a cortar la lista de modificados antes de contar (M-01).");
+    False(src.Contains("baseline.Registry.Keys, StringComparer.OrdinalIgnoreCase).Take(8)", StringComparison.Ordinal),
+        "El Take(8) volvio a cortar los valores de registro antes de contar (M-01).");
+    True(src.Contains("CappedJoin(added, ShortName)", StringComparison.Ordinal),
+        "El texto visible de agregados no usa el corte declarado (M-01).");
+    True(src.Contains("(+{values.Count - shown.Count} más)", StringComparison.Ordinal),
+        "El corte visible no declara el contador de restantes (M-01).");
+    True(src.Contains("({added.Count + removed.Count + changed.Count})", StringComparison.Ordinal),
+        "El mensaje del hallazgo no cuenta sobre las listas completas (M-01).");
+    True(src.Contains("CappedJoin(regAdded", StringComparison.Ordinal),
+        "Los valores de registro visibles no usan el corte declarado (M-01).");
+    return Task.CompletedTask;
+}
+
+static async Task Phase34ExecutiveStateIsNotSaludableWithErrorFindings()
+{
+    // M-02: SALUDABLE no convive con hallazgos Error cuando el impacto es SinImpactoObservado.
+    var dirOk = TempDir();
+    var dirWarn = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var errorFinding = new DiagnosticFinding("TEST-ERROR-FINDING", "TSplus Web Portal",
+            DiagnosticSeverity.Error, "Hallazgo Error de prueba", "Solucion de prueba",
+            [], ConfidenceLevel.Alta, Capa: DiagnosticLayer.Tsplus);
+        var impact = new FunctionalImpactAssessment(FunctionalImpactState.SinImpactoObservado,
+            "Sin impacto funcional confirmado.", []);
+
+        var healthy = await ReportExporter.ExportAsync(
+            Report([], now) with { ImpactoFuncional = impact }, dirOk, CancellationToken.None);
+        var healthyHtml = await File.ReadAllTextAsync(healthy.HtmlPath);
+        True(healthyHtml.Contains("<div class='quick-label'>ESTADO</div><div class='quick-value state-ok'>SALUDABLE</div>", StringComparison.Ordinal),
+            "precondicion: sin hallazgos Error el titular del ESTADO debe ser SALUDABLE (M-02).");
+
+        var warned = await ReportExporter.ExportAsync(
+            Report([], now, [errorFinding]) with { ImpactoFuncional = impact }, dirWarn, CancellationToken.None);
+        var warnHtml = await File.ReadAllTextAsync(warned.HtmlPath);
+        False(warnHtml.Contains("<div class='quick-label'>ESTADO</div><div class='quick-value state-ok'>SALUDABLE</div>", StringComparison.Ordinal),
+            "Un titular SALUDABLE convivio con hallazgos Error (M-02).");
+        True(warnHtml.Contains("<div class='quick-label'>ESTADO</div><div class='quick-value state-warn'>ADVERTENCIA</div>", StringComparison.Ordinal),
+            "Con hallazgos Error y cobertura completa el titular no quedo en ADVERTENCIA (M-02).");
+    }
+    finally { TryDelete(dirOk); TryDelete(dirWarn); }
+}
+
+static Task Phase34ReviewTargetsDeclareTruncation()
+{
+    // M-03: los items de revision truncados declaran el contador de restantes.
+    var now = DateTimeOffset.Now;
+    var events = new List<DiagnosticEvent>();
+    for (var i = 1; i <= 7; i++)
+        events.Add(new DiagnosticEvent(now, "Service Control Manager", $"Svc{i}",
+            DiagnosticLayer.Windows, DiagnosticSeverity.Advertencia, "SERVICE_STATE", "detenido",
+            Evidencia:
+            [
+                new EvidenceItem("Servicio", $"Svc{i}"),
+                new EvidenceItem("Estado presentación", "Stopped")
+            ]));
+    for (var i = 1; i <= 6; i++)
+        events.Add(new DiagnosticEvent(now, "TSplus", $"Dep{i}",
+            DiagnosticLayer.Tsplus, DiagnosticSeverity.Advertencia, "SERVICE_DEPENDENCY_STATE", "dependencia caida",
+            Evidencia:
+            [
+                new EvidenceItem("Servicio", $"Root{i}"),
+                new EvidenceItem("Dependencia", $"Child{i}"),
+                new EvidenceItem("Estado dependencia", "Stopped")
+            ]));
+    for (var i = 1; i <= 7; i++)
+        events.Add(new DiagnosticEvent(now, "AppCrash", $"proc{i}",
+            DiagnosticLayer.Tsplus, DiagnosticSeverity.Error, "APPLICATION_CRASH", "crash"));
+
+    var summary = DiagnosticWorkspaceViewModel.BuildSummary(Report(events, now));
+    True(summary.Contains("Servicio: mostrando 6 de 7; 1 servicio(s) más sin mostrar.", StringComparison.Ordinal),
+        "Servicios truncados sin contador de restantes (M-03).");
+    True(summary.Contains("Dependencia: mostrando 5 de 6; 1 dependencia(s) más sin mostrar.", StringComparison.Ordinal),
+        "Dependencias truncadas sin contador de restantes (M-03).");
+    True(summary.Contains("Proceso: mostrando 6 de 7; 1 proceso(s) más sin mostrar.", StringComparison.Ordinal),
+        "Procesos truncados sin contador de restantes (M-03).");
+    return Task.CompletedTask;
+}
+
+static async Task Phase34ImpactEvidenceRendersInExport()
+{
+    // M-18: la evidencia de impacto/paro se renderiza en el export y no se pierde por corte.
+    var dir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var item = new FunctionalImpactItem("Web / HTML5", "TSplus Web Portal",
+            FunctionalImpactState.Interrumpido, "El servicio Web Portal esta detenido.",
+            ConfidenceLevel.Alta,
+            [
+                new EvidenceItem("Alcance potencial (sesiones observadas)", "3"),
+                new EvidenceItem("Causa del paro demostrada", "No")
+            ]);
+        var impact = new FunctionalImpactAssessment(FunctionalImpactState.Interrumpido,
+            "Impacto web demostrado.", [item]);
+
+        var evidence = new List<EvidenceItem>();
+        for (var i = 1; i <= 29; i++) evidence.Add(new EvidenceItem($"Evidencia {i:D2}", $"valor {i}"));
+        evidence.Add(new EvidenceItem("Alcance potencial (sesiones observadas)", "9 sesiones"));
+        var cause = new RootCauseCandidate(1, "ROOT-TEST-CAUSE", "TSplus Web Portal", DiagnosticLayer.Tsplus,
+            90, ConfidenceLevel.Alta, "resumen", "explicacion", evidence);
+
+        var report = Report([], now) with
+        {
+            ImpactoFuncional = impact,
+            CausasRaiz = [cause],
+            CausaRaizPrincipal = cause
+        };
+        var result = await ReportExporter.ExportAsync(report, dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("Alcance potencial (sesiones observadas): 3", StringComparison.Ordinal),
+            "La evidencia de alcance de impacto no se renderiza en la tabla de impacto (M-18).");
+        True(html.Contains("Causa del paro demostrada: No", StringComparison.Ordinal),
+            "La evidencia de causa no demostrada no se renderiza en la tabla de impacto (M-18).");
+        True(html.Contains("Alcance potencial (sesiones observadas):</strong> 9 sesiones", StringComparison.Ordinal),
+            "La evidencia de impacto del candidato se perdio tras el corte de 24 (M-18).");
+    }
+    finally { TryDelete(dir); }
+}
+
+static async Task Phase34ModuleMissingFindingsRenderProcessesSection()
+{
+    // M-20: los hallazgos TSPLUS-PROCESS-MODULE-MISSING tienen consumidor en el informe.
+    var dir = TempDir();
+    try
+    {
+        var now = DateTimeOffset.Now;
+        var finding = new DiagnosticFinding("TSPLUS-PROCESS-MODULE-MISSING-tsplusd-core.dll",
+            "tsplusd", DiagnosticSeverity.Error,
+            "Un proceso TSplus referencia un modulo que ya no existe en disco: C:\\wsession\\core.dll",
+            "Verifique reinstalacion, antivirus/cuarentena o limpieza de disco.",
+            [
+                new EvidenceItem("Proceso", "tsplusd (PID 4242)"),
+                new EvidenceItem("Módulo ausente", "C:\\wsession\\core.dll")
+            ],
+            ConfidenceLevel.Alta, Capa: DiagnosticLayer.Tsplus);
+        var result = await ReportExporter.ExportAsync(Report([], now, [finding]), dir, CancellationToken.None);
+        var html = await File.ReadAllTextAsync(result.HtmlPath);
+        True(html.Contains("<h2>Procesos TSplus con módulos ausentes</h2>", StringComparison.Ordinal),
+            "Los hallazgos TSPLUS-PROCESS-MODULE-MISSING no tienen consumidor en el informe (M-20).");
+        True(html.Contains("tsplusd (PID 4242)", StringComparison.Ordinal),
+            "El proceso afectado por modulo ausente no se muestra (M-20).");
+        True(html.Contains("C:\\wsession\\core.dll", StringComparison.Ordinal),
+            "El modulo ausente no se muestra en el informe (M-20).");
+    }
+    finally { TryDelete(dir); }
 }
 
 static string? FindRepoRoot()

@@ -107,14 +107,16 @@ public sealed class TsplusConfigurationDriftCollector : IReadOnlyCollector
                 else
                     added.Add(path);
             }
-            added = added.Take(8).ToList();
+            // F34 (M-01): listas completas para los conteos del hallazgo (antes el Take(8)
+            // corría antes de contar y el total quedaba capado a 24); el corte a 8 sólo
+            // acota el texto visible vía CappedJoin, que añade el contador de restantes.
             var removed = baseline.Hashes.Keys
                 .Except(current.Keys, StringComparer.OrdinalIgnoreCase)
                 .Where(k => !unreadable.Contains(k, StringComparer.OrdinalIgnoreCase))
-                .Take(8).ToList();
+                .ToList();
             var changed = current
                 .Where(kv => baseline.Hashes.TryGetValue(kv.Key, out var previous) && !previous.Equals(kv.Value, StringComparison.OrdinalIgnoreCase))
-                .Select(kv => kv.Key).Take(8).ToList();
+                .Select(kv => kv.Key).ToList();
             if (newlyTracked.Count > 0)
                 evidence.Add(new EvidenceItem("Incorporados al seguimiento", string.Join(" | ", newlyTracked.Take(8).Select(ShortName))));
 
@@ -137,20 +139,21 @@ public sealed class TsplusConfigurationDriftCollector : IReadOnlyCollector
             var regChanged = new List<string>();
             if (baseline.Registry is not null)
             {
-                regAdded = registry.Keys.Except(baseline.Registry.Keys, StringComparer.OrdinalIgnoreCase).Take(8).ToList();
-                regRemoved = baseline.Registry.Keys.Except(registry.Keys, StringComparer.OrdinalIgnoreCase).Take(8).ToList();
+                // F34 (M-01): igual que archivos, conteos completos y texto acotado.
+                regAdded = registry.Keys.Except(baseline.Registry.Keys, StringComparer.OrdinalIgnoreCase).ToList();
+                regRemoved = baseline.Registry.Keys.Except(registry.Keys, StringComparer.OrdinalIgnoreCase).ToList();
                 regChanged = registry
                     .Where(kv => baseline.Registry.TryGetValue(kv.Key, out var prev) && !prev.Equals(kv.Value, StringComparison.OrdinalIgnoreCase))
-                    .Select(kv => kv.Key).Take(8).ToList();
+                    .Select(kv => kv.Key).ToList();
             }
 
             if (added.Count + removed.Count + changed.Count > 0)
             {
                 var driftEvidence = new List<EvidenceItem>(evidence)
                 {
-                    new("Archivos agregados", added.Count == 0 ? "Ninguno" : string.Join(" | ", added.Select(ShortName))),
-                    new("Archivos eliminados", removed.Count == 0 ? "Ninguno" : string.Join(" | ", removed.Select(ShortName))),
-                    new("Archivos modificados", changed.Count == 0 ? "Ninguno" : string.Join(" | ", changed.Select(ShortName))),
+                    new("Archivos agregados", CappedJoin(added, ShortName)),
+                    new("Archivos eliminados", CappedJoin(removed, ShortName)),
+                    new("Archivos modificados", CappedJoin(changed, ShortName)),
                     new("Cambios semánticos (claves)", semanticChanges.Count == 0 ? "Ninguno" : TsplusConfigSemanticDiff.Summarize(semanticChanges)),
                     new("Horas de cambio (UTC)", ChangeTimesEvidence(added, changed)),
                     new("Registro TSplus", registryNote + (baseline.Registry is null ? "; línea base inicializada" : ""))
@@ -182,9 +185,9 @@ public sealed class TsplusConfigurationDriftCollector : IReadOnlyCollector
                     DiagnosticSeverity.Advertencia,
                     $"Se detectaron cambios en valores del registro de TSplus ({regAdded.Count + regRemoved.Count + regChanged.Count}).",
                     "El registro conserva buena parte de la configuración efectiva de TSplus. Solo se comparan rutas y huellas, nunca contenidos. Valide si hubo actualización o edición (AdminTool/regedit) antes de atribuir el incidente a otra capa.",
-                    [new EvidenceItem("Valores agregados", regAdded.Count == 0 ? "Ninguno" : string.Join(" | ", regAdded)),
-                     new EvidenceItem("Valores eliminados", regRemoved.Count == 0 ? "Ninguno" : string.Join(" | ", regRemoved)),
-                     new EvidenceItem("Valores modificados", regChanged.Count == 0 ? "Ninguno" : string.Join(" | ", regChanged)),
+                    [new EvidenceItem("Valores agregados", CappedJoin(regAdded, static x => x)),
+                     new EvidenceItem("Valores eliminados", CappedJoin(regRemoved, static x => x)),
+                     new EvidenceItem("Valores modificados", CappedJoin(regChanged, static x => x)),
                      new EvidenceItem("Nota", registryNote)],
                     ConfidenceLevel.Media,
                     Capa: DiagnosticLayer.Tsplus));
@@ -304,17 +307,31 @@ public sealed class TsplusConfigurationDriftCollector : IReadOnlyCollector
     private static string ChangeTimesEvidence(IReadOnlyList<string> added, IReadOnlyList<string> changed)
     {
         var parts = new List<string>();
-        foreach (var path in changed)
+        // F34 (M-01): muestreo acotado para la evidencia de horas; el conteo real vive en
+        // el mensaje del hallazgo, que usa las listas completas.
+        foreach (var path in changed.Take(8))
         {
             try { parts.Add($"{ShortName(path)}|{File.GetLastWriteTimeUtc(path):O}"); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
-        foreach (var path in added)
+        foreach (var path in added.Take(8))
         {
             try { parts.Add($"{ShortName(path)}|{new FileInfo(path).CreationTimeUtc:O}"); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
         return parts.Count == 0 ? "Ninguna determinable" : string.Join("; ", parts);
+    }
+
+    /// <summary>
+    /// F34 (M-01): une hasta 8 valores para la evidencia visible y declara el resto con
+    /// "(+N más)" para que un listado acotado no se lea como total.
+    /// </summary>
+    private static string CappedJoin(IReadOnlyList<string> values, Func<string, string> display)
+    {
+        if (values.Count == 0) return "Ninguno";
+        var shown = values.Take(8).ToList();
+        var text = string.Join(" | ", shown.Select(display));
+        return values.Count > shown.Count ? $"{text} (+{values.Count - shown.Count} más)" : text;
     }
 
     /// <summary>

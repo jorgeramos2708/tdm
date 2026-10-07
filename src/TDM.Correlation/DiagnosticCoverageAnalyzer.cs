@@ -13,6 +13,11 @@ public static class DiagnosticCoverageAnalyzer
         var limitations = new List<string>();
 
         AddWindowsForensic(report, sources, limitations);
+        // F34 (H12): la lectura base de eventos Windows y la suscripción push penalizan el
+        // score cuando quedaron parciales/bloqueadas; antes ambos se ignoraban y la
+        // cobertura global quedaba sobreestimada.
+        AddWindowsEventCoverage(report, sources, limitations);
+        AddWindowsPushCoverage(report, sources, limitations);
         AddWindowsCompatibilityProbeCoverage(report, sources, limitations);
         AddSecurityLog(report, sources, limitations);
         AddPresence(report, sources, "RDP / estado y listener", "RDP_STATE", true,
@@ -136,6 +141,51 @@ public static class DiagnosticCoverageAnalyzer
             $"Canales disponibles={available}; no disponibles={unavailable.Count}; no aplicables={notApplicable.Count}; bloqueados/no legibles={blocked.Count}.", true));
         if (blocked.Count > 0) limitations.Add("Uno o más canales Windows no pudieron leerse por permisos/error; una ausencia de evento en ellos no descarta la hipótesis.");
         if (discoveryUnavailable) limitations.Add("No se pudo inventariar dinámicamente canales adicionales de Event Viewer relacionados con TSplus/RDP/AppLocker/Code Integrity.");
+    }
+
+    // F34 (H12): la lectura base (WINDOWS_EVENT_COVERAGE) entra al score; un canal
+    // parcial/bloqueado deja la fuente en Parcial/Bloqueada en vez de no contarse.
+    private static void AddWindowsEventCoverage(DiagnosticReport report, List<CoverageSourceAssessment> sources, List<string> limitations)
+    {
+        var coverage = report.Eventos.LastOrDefault(x => x.Tipo == "WINDOWS_EVENT_COVERAGE");
+        if (coverage?.Evidencia is not { Count: > 0 }) return;
+        var blocked = coverage.Evidencia.Count(x => IsBlocked(x.Valor));
+        var unavailable = coverage.Evidencia.Count(x => x.Valor.StartsWith("Canal no disponible", StringComparison.OrdinalIgnoreCase));
+        var partial = coverage.Evidencia.Count(x => x.Valor.StartsWith("Parcial", StringComparison.OrdinalIgnoreCase));
+        var status = blocked > 0 ? "Bloqueada" : unavailable > 0 || partial > 0 ? "Parcial" : "Disponible";
+        sources.Add(new("Eventos Windows (lectura base)", status,
+            $"Canales parciales={partial}; no disponibles={unavailable}; bloqueados/no legibles={blocked}.", true));
+        if (status != "Disponible")
+            limitations.Add("La lectura base de eventos Windows quedó parcial/bloqueada; la ausencia de eventos en esos canales no se interpreta como estado sano.");
+    }
+
+    // F34 (H12): la suscripción push (WINDOWS_PUSH_EVENT_COVERAGE) entra al score; canales
+    // caídos o eventos descartados dejan la fuente Parcial en vez de ignorarse. No es
+    // crítica: el muestreo base sigue leyendo, pero el realtime pierde peso.
+    private static void AddWindowsPushCoverage(DiagnosticReport report, List<CoverageSourceAssessment> sources, List<string> limitations)
+    {
+        var push = report.Eventos.LastOrDefault(x => x.Tipo == "WINDOWS_PUSH_EVENT_COVERAGE");
+        if (push?.Evidencia is not { Count: > 0 }) return;
+        static int IntEvidence(IReadOnlyList<EvidenceItem> items, string key)
+            => int.TryParse(items.FirstOrDefault(x => x.Clave == key)?.Valor, out var value) ? value : 0;
+        var dropped = IntEvidence(push.Evidencia, "Descartados por buffer lleno");
+        var gaps = IntEvidence(push.Evidencia, "Huecos de RecordId");
+        var channels = push.Evidencia
+            .Where(x => x.Clave is not ("Descartados por buffer lleno" or "Huecos de RecordId"))
+            .ToList();
+        var failed = channels.Count(x =>
+            x.Valor.Contains("Canal no disponible", StringComparison.OrdinalIgnoreCase) ||
+            x.Valor.StartsWith("Sin permisos", StringComparison.OrdinalIgnoreCase) ||
+            x.Valor.StartsWith("Error suscripción", StringComparison.OrdinalIgnoreCase));
+        var active = channels.Count(x => x.Valor.StartsWith("Suscripción", StringComparison.OrdinalIgnoreCase));
+        var status = channels.Count == 0 ? "No consultado"
+            : active == 0 && failed >= channels.Count ? "No disponible"
+            : failed > 0 || dropped > 0 || gaps > 0 ? "Parcial"
+            : "Disponible";
+        sources.Add(new("Suscripción push de eventos Windows", status,
+            $"Canales activos={active}/{channels.Count}; suscripciones fallidas={failed}; descartados por buffer lleno={dropped}; huecos de RecordId={gaps}.", false));
+        if (status != "Disponible")
+            limitations.Add("La suscripción push del Event Log perdió canales o eventos; el tiempo real TDM queda parcial y depende del muestreo por lectura base.");
     }
 
 

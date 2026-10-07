@@ -29,7 +29,12 @@ public static class DiagnosticWorkflow
         // Sin historial el ranking usa solo evidencia actual: null no cambia ningún comportamiento previo.
         if (verifiedHitRates is { Count: > 0 })
             calibrated = VerifiedHistoryCalibrator.ApplyVerifiedHistory(calibrated, verifiedHitRates).ToList();
-        // P14: recorte final post-calibración (la pre-selección amplia de 12 ya ocurrió en el correlador).
+        // F34 (H4/H5): tras la reordenación de Calibrate, el podio final (puestos 1-3)
+        // conserva la fuente oficial aunque el candidato haya ascendido desde una posición
+        // bruta mayor a 3 (ToCandidate sólo cubre el ranking inicial).
+        calibrated = RootCauseCorrelator.ApplyTopThreeGuidance(calibrated);
+        // P14: recorte final post-calibración (el pool completo se calibra; el Take(8) es
+        // sólo de presentación y FailurePatternAnalyzer sigue viendo la lista completa).
         var causes = calibrated.Take(8).ToList();
         // MEDIUM: el filtro de rol se aplica sobre la lista completa (antes del Take(8)); con ≥8
         // impactos directos saturando el top-8, el pool causal quedaba vacío y CausaRaizPrincipal
