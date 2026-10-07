@@ -47,7 +47,7 @@ public sealed class WindowsServiceCollector : IReadOnlyCollector
                 var complementary = product is TsplusProduct.AdvancedSecurity or TsplusProduct.ServerMonitoring or TsplusProduct.RemoteSupport or TsplusProduct.TwoFactorAuthentication;
                 var catalog = WindowsServiceCatalog.Find(name);
                 var startMode = WindowsServiceCatalog.ReadStartMode(name);
-                var autoStart = startMode.Equals("Automático", StringComparison.OrdinalIgnoreCase);
+                var autoStart = WindowsServiceCatalog.IsAutoStart(startMode);
                 var requiredNow = WindowsServiceCatalog.RequiredNow(
                     catalog?.RequiredWhenTsplus == true, context.Sistema.TsplusDetectado, tsplusRelated, complementary, autoStart);
                 var presentationState = WindowsServiceCatalog.PresentationState(status, startMode, requiredNow);
@@ -78,6 +78,8 @@ public sealed class WindowsServiceCollector : IReadOnlyCollector
                         new EvidenceItem("Estado", status.ToString()),
                         new EvidenceItem("Estado presentación", presentationState),
                         new EvidenceItem("Inicio", startMode),
+                        // H11 (F32): recuperación real declarada en el SCM (sc failure/failureflag).
+                        new EvidenceItem("Recuperación", WindowsServiceCatalog.ReadRecovery(name)),
                         new EvidenceItem("Proveedor", tsplusRelated ? "TSplus/relacionado" : "Windows"),
                         new EvidenceItem("Área", tsplusRelated ? "TSplus" : catalog?.Area ?? "Windows"),
                         new EvidenceItem("Rol", complementary ? "Complementario" : tsplusRelated ? "Remote Access / núcleo" : catalog?.Area ?? "Windows")

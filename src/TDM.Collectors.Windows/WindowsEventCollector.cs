@@ -179,8 +179,11 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
 
     public static string ResolveEventQuery(string log, string timeClause)
         => log.Equals("Security", StringComparison.OrdinalIgnoreCase)
-            ? $"*[System[(EventID=4625 or EventID=4740 or EventID=4771 or EventID=4776) and {timeClause}]]"
-            : $"*[System[(Level=1 or Level=2) and {timeClause}]]";
+            // H9 (F32): 4648/4732/4778/4779 — docs oficiales 4648/4732/4771/4776 (event-4732,
+            // event-4778; 4648 citado por event-4740) en línea con el incremental y LogonHealth.
+            ? $"*[System[(EventID=4625 or EventID=4740 or EventID=4771 or EventID=4776 or EventID=4648 or EventID=4732 or EventID=4778 or EventID=4779) and {timeClause}]]"
+            // H3 (F32): Warning=3 documentado (docs 6–8); el forense ya lo leía y la base no.
+            : $"*[System[(Level=1 or Level=2 or Level=3) and {timeClause}]]";
 
     public static int ResolveRelevantLimit(TimeSpan lookback, int? maxEvents)
     {
@@ -205,16 +208,23 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
         return tokens.Any(t => provider.Contains(t, StringComparison.OrdinalIgnoreCase))
             // P17: fallos de arranque SCM coherentes con IsCausalSignal y el canal incremental.
             || id is 41 or 51 or 55 or 1000 or 1001 or 1026 or 7000 or 7001 or 7009 or 7011 or 7023 or 7024 or 7031 or 7034
-            || (log.Equals("Security", StringComparison.OrdinalIgnoreCase) && id is 4625 or 4740 or 4771 or 4776);
+            || (log.Equals("Security", StringComparison.OrdinalIgnoreCase)
+                && id is 4625 or 4740 or 4771 or 4776 or 4648 or 4732 or 4778 or 4779);
     }
 
     // Fase 23: UserSessionProfileCollector emite estos mismos IDs con producto, usuario y
     // cobertura USER_AUTH_AUDIT_COVERAGE; el hallazgo genérico EVT-Security-* los duplicaba.
+    // F32 (H9): 4778/4779 pasan a la misma situación — WindowsLogonHealthCollector los cuenta
+    // como reconexiones/desconexiones con evidencia propia en WINDOWS_LOGON_COVERAGE.
     public static bool HasDedicatedSecurityEvidence(string log, int id)
-        => log.Equals("Security", StringComparison.OrdinalIgnoreCase) && id is 4625 or 4740 or 4771 or 4776;
+        => log.Equals("Security", StringComparison.OrdinalIgnoreCase) && id is 4625 or 4740 or 4771 or 4776 or 4778 or 4779;
 
     // MS event-4740 publica el lockout de cuenta con Level=0 y recomendación de alerta:
     // la auditoría de seguridad no puede presentarse como mero Informativo.
+    // F32 (H9): event-4648 y event-4732 publican igualmente recomendación de monitoreo
+    // con audit Level=0 — se elevan a Advertencia como el resto de la familia Security.
+    // 4778/4779 (dedicados a LogonHealth) quedan Informativo: su recuento ya llega como
+    // evidencia agregada y el incremental los emite con el mismo nivel.
     public static DiagnosticSeverity ResolveSeverity(string log, int id, int? level)
     {
         var severity = level switch
@@ -224,7 +234,9 @@ public sealed class WindowsEventCollector : IReadOnlyCollector
             3 => DiagnosticSeverity.Advertencia,
             _ => DiagnosticSeverity.Informativo
         };
-        if (severity == DiagnosticSeverity.Informativo && HasDedicatedSecurityEvidence(log, id))
+        if (severity == DiagnosticSeverity.Informativo
+            && log.Equals("Security", StringComparison.OrdinalIgnoreCase)
+            && id is 4625 or 4740 or 4771 or 4776 or 4648 or 4732)
             return DiagnosticSeverity.Advertencia;
         return severity;
     }

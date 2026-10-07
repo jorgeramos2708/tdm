@@ -177,6 +177,8 @@ public sealed class TsplusWindowsFunctionalDependencyCollector : IReadOnlyCollec
         if (status == ServiceControllerStatus.Running) return requiredRunning ? "Running · requerido" : "Running · condicional";
         if (requiredRunning) return $"{status} · requerido";
         if (startMode.Equals("Manual", StringComparison.OrdinalIgnoreCase)) return "Condicional · Bajo demanda (Manual)";
+        // H11 (F32): la rama Trigger ya no cae al default — el SCM la devuelve como "Trigger".
+        if (startMode.Equals("Trigger", StringComparison.OrdinalIgnoreCase)) return "Condicional · Bajo demanda (Trigger)";
         if (startMode.Equals("Deshabilitado", StringComparison.OrdinalIgnoreCase)) return "Condicional · Deshabilitado";
         return $"Condicional · {status}";
     }

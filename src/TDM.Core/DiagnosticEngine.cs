@@ -184,6 +184,13 @@ public sealed class DiagnosticEngine
         }
 
         var rawEventCount = events.Count;
+
+        // M-14 (F32): promoción de identidad y dedup ANTES del trim por volumen — los
+        // duplicados no consumen presupuesto de recorte y los cursores (wes/bookmarking-events)
+        // ya se persistieron en el collector, así que reordenar es seguro.
+        events = IdentityIncidentPromoter.Promote(events).ToList();
+        events = Deduplicate(events);
+
         if (events.Count > _policy.MaxRawEvents)
         {
             // Fase 23: los cursores de los collectors se persistieron antes de este trim
@@ -233,9 +240,6 @@ public sealed class DiagnosticEngine
                 ConfidenceLevel.Confirmada));
         }
 
-        events = IdentityIncidentPromoter.Promote(events).ToList();
-        var normalizedEvents = Deduplicate(events);
-
         totalWatch.Stop();
         var fin = DateTimeOffset.Now;
         // RC15 mantiene una ventana temporal estricta por ejecución. En GUI, la recolección base es 4 h y luego se refiltra en memoria.
@@ -244,7 +248,7 @@ public sealed class DiagnosticEngine
         // al periodo seleccionado que algún collector haya podido leer durante la ejecución.
         var periodoFin = context.HoraIncidente ?? fin;
         var periodoInicio = periodoFin - context.Lookback;
-        var strictEvents = normalizedEvents
+        var strictEvents = events
             .Where(e => e.Timestamp is DateTimeOffset eventTime
                 ? eventTime >= periodoInicio && eventTime <= periodoFin
                 : IsNonTemporalContext(e))

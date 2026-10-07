@@ -30,8 +30,13 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
     private static readonly List<EvidenceItem> SharedCoverage = new();
     private static bool _subscribed;
     // MEDIUM F25: canales con resultado definitivo de suscripción (activa o fallo conocido);
-    // sólo los fallos inesperados se reintentan en la próxima recolección.
+    // sólo los fallos inesperados se reintentarán en la próxima recolección.
     private static readonly HashSet<string> ResolvedChannels = new();
+    // H2 (F32): cursor por canal (query EventRecordID > N, doc wes/bookmarking-events) y
+    // contabilidad de pérdida: huecos de RecordId nunca entregados y descartes del ring buffer.
+    private static readonly Dictionary<string, long> LastRecordIds = new();
+    private static long SharedDropped;
+    private static long SharedGaps;
 
     public Task<CollectorResult> CollectAsync(DiagnosticContext context, CancellationToken cancellationToken = default)
     {
@@ -40,6 +45,8 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
         List<EvidenceItem> coverage;
         int subscribed;
         int drained;
+        long dropped;
+        long gaps;
 
         lock (SharedLock)
         {
@@ -52,13 +59,20 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
                 events.Add(SharedBuffer.Dequeue());
                 drained++;
             }
+            dropped = SharedDropped;
+            gaps = SharedGaps;
         }
 
         events.Add(new DiagnosticEvent(
             DateTimeOffset.Now, "TDM", "Push Event Subscription", DiagnosticLayer.Windows,
             DiagnosticSeverity.Informativo, "WINDOWS_PUSH_EVENT_COVERAGE",
-            $"Canales suscritos: {subscribed}/{PushChannels.Length}. Eventos en buffer: {drained}.",
-            Evidencia: coverage));
+            $"Canales suscritos: {subscribed}/{PushChannels.Length}. Eventos en buffer: {drained}. Descartados por buffer lleno: {dropped}. Huecos de RecordId: {gaps}.",
+            Evidencia:
+            [
+                .. coverage,
+                new EvidenceItem("Descartados por buffer lleno", dropped.ToString()),
+                new EvidenceItem("Huecos de RecordId", gaps.ToString())
+            ]));
 
         return Task.FromResult(new CollectorResult(findings, events));
     }
@@ -78,14 +92,21 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
             EventLogWatcher? watcher = null;
             try
             {
-                var query = new EventLogQuery(channelName, PathType.LogName, "*") { ReverseDirection = false };
+                // H2 (F32): sin cursor, "*" hacía que EvtSubscribe entregara el historial del
+                // canal desde su inicio (escaneo completo por suscripción). Con el último
+                // RecordId leído, la query sólo acepta eventos nuevos (wes/bookmarking-events)
+                // y deja constancia del punto de partida en la cobertura.
+                var latest = ReadLatestRecordId(channelName);
+                var xpath = latest is > 0 ? $"*[System[(EventRecordID > {latest.Value})]]" : "*";
+                var query = new EventLogQuery(channelName, PathType.LogName, xpath) { ReverseDirection = false };
                 watcher = new EventLogWatcher(query);
                 var channel = channelName;
                 watcher.EventRecordWritten += (s, e) => OnEventRecordWritten(e, channel);
+                if (latest is > 0) LastRecordIds[channelName] = latest.Value;
                 watcher.Enabled = true;
                 SharedWatchers.Add(watcher);
                 watcher = null;
-                SetCoverage(channelName, "Suscripción activa");
+                SetCoverage(channelName, latest is > 0 ? $"Suscripción activa desde RecordId {latest.Value}" : "Suscripción activa");
                 ResolvedChannels.Add(channelName);
             }
             catch (EventLogNotFoundException)
@@ -178,9 +199,26 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
 
             lock (SharedLock)
             {
+                // H2 (F32): contabilidad de pérdida por canal. Un salto de RecordId mayor
+                // que +1 significa eventos nunca entregados (hueco real: el watcher recibe
+                // todo el canal, la query sólo filtra por cursor); el ring descarta el más
+                // antiguo y se contabiliza aparte.
+                var recordId = record.RecordId ?? 0;
+                if (recordId > 0)
+                {
+                    var hasLast = LastRecordIds.TryGetValue(channelName, out var last);
+                    if (hasLast && recordId > last + 1)
+                        SharedGaps += recordId - last - 1;
+                    if (!hasLast || recordId > last)
+                        LastRecordIds[channelName] = recordId;
+                }
+
                 SharedBuffer.Enqueue(evt);
                 if (SharedBuffer.Count > MaxBufferSize)
+                {
                     SharedBuffer.Dequeue(); // Ring buffer
+                    SharedDropped++;
+                }
             }
         }
         catch (Exception ex)
@@ -196,6 +234,22 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
             ? DiagnosticLayer.Seguridad
             : channelName.Contains("TerminalServices", StringComparison.OrdinalIgnoreCase) ? DiagnosticLayer.Rdp
             : DiagnosticLayer.Windows;
+
+    /// <summary>
+    /// H2 (F32): último RecordId del canal para sembrar la query EventRecordID &gt; N.
+    /// Devuelve null si el canal está vacío o no es legible (la suscripción cae a "*").
+    /// </summary>
+    private static long? ReadLatestRecordId(string channelName)
+    {
+        try
+        {
+            var query = new EventLogQuery(channelName, PathType.LogName, "*") { ReverseDirection = true };
+            using var reader = new EventLogReader(query);
+            using var record = reader.ReadEvent();
+            return record?.RecordId;
+        }
+        catch { return null; }
+    }
 
     /// <summary>
     /// P0-fix: Safe enum conversion for EventTask/EventOpcode.
@@ -227,6 +281,9 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
             SharedBuffer.Clear();
             SharedCoverage.Clear();
             ResolvedChannels.Clear();
+            LastRecordIds.Clear();
+            SharedDropped = 0;
+            SharedGaps = 0;
             _subscribed = false;
         }
         foreach (var watcher in watchers)

@@ -26,11 +26,13 @@ public sealed class WindowsLogonHealthCollector : IReadOnlyCollector
         var events = new List<DiagnosticEvent>();
         var windowEnd = context.HoraIncidente ?? DateTimeOffset.Now;
         var windowStart = windowEnd - context.Lookback;
-        long success = 0, failed = 0, logoffs = 0, lockouts = 0, examined = 0;
+        long success = 0, failed = 0, logoffs = 0, lockouts = 0, explicitCreds = 0, reconnects = 0, disconnects = 0, examined = 0;
         var coverage = "Disponible";
         var coverageDetail = "Conteo completado dentro de la ventana.";
 
-        var xpath = $"*[System[(EventID=4624 or EventID=4625 or EventID=4634 or EventID=4740) and TimeCreated[@SystemTime>='{windowStart.UtcDateTime:O}']]]";
+        // H9 (F32): 4648/4778/4779 con doc oficial (event-4648, event-4778) — la ventana
+        // ahora también mide explícitos/reconexiones/desconexiones, no sólo autenticación.
+        var xpath = $"*[System[(EventID=4624 or EventID=4625 or EventID=4634 or EventID=4740 or EventID=4648 or EventID=4778 or EventID=4779) and TimeCreated[@SystemTime>='{windowStart.UtcDateTime:O}']]]";
         try
         {
             var query = new EventLogQuery("Security", PathType.LogName, xpath) { ReverseDirection = true };
@@ -50,6 +52,9 @@ public sealed class WindowsLogonHealthCollector : IReadOnlyCollector
                         case 4625: failed++; break;
                         case 4634: logoffs++; break;
                         case 4740: lockouts++; break;
+                        case 4648: explicitCreds++; break;
+                        case 4778: reconnects++; break;
+                        case 4779: disconnects++; break;
                     }
                 }
             }
@@ -74,7 +79,7 @@ public sealed class WindowsLogonHealthCollector : IReadOnlyCollector
             DateTimeOffset.Now, "TDM", "Autenticación Windows", DiagnosticLayer.Seguridad,
             coverage == "Disponible" ? DiagnosticSeverity.Informativo : DiagnosticSeverity.Advertencia,
             "WINDOWS_LOGON_COVERAGE",
-            $"Conteo medido de autenticación en ventana: {success} correctos, {failed} fallidos, {logoffs} cierres, {lockouts} bloqueos.",
+            $"Conteo medido de autenticación en ventana: {success} correctos, {failed} fallidos, {logoffs} cierres, {lockouts} bloqueos, {explicitCreds} con credenciales explícitas, {reconnects} reconexiones, {disconnects} desconexiones.",
             Evidencia:
             [
                 new EvidenceItem("Cobertura", coverage),
@@ -83,6 +88,9 @@ public sealed class WindowsLogonHealthCollector : IReadOnlyCollector
                 new EvidenceItem("Fallos (4625)", failed.ToString()),
                 new EvidenceItem("Cierres (4634)", logoffs.ToString()),
                 new EvidenceItem("Bloqueos (4740)", lockouts.ToString()),
+                new EvidenceItem("Credenciales explícitas (4648)", explicitCreds.ToString()),
+                new EvidenceItem("Reconexiones de sesión (4778)", reconnects.ToString()),
+                new EvidenceItem("Desconexiones de sesión (4779)", disconnects.ToString()),
                 new EvidenceItem("Registros examinados", examined.ToString())
             ]));
         return Task.FromResult(new CollectorResult(findings, events));

@@ -123,7 +123,7 @@ public sealed class ServiceDependencyGraphCollector : IReadOnlyCollector
             var catalog = WindowsServiceCatalog.Find(serviceName);
             var complementary = product is TsplusProduct.AdvancedSecurity or TsplusProduct.ServerMonitoring or TsplusProduct.RemoteSupport or TsplusProduct.TwoFactorAuthentication;
             var startMode = WindowsServiceCatalog.ReadStartMode(serviceName);
-            var autoStart = startMode.Equals("Automático", StringComparison.OrdinalIgnoreCase);
+            var autoStart = WindowsServiceCatalog.IsAutoStart(startMode);
             var requiredNow = WindowsServiceCatalog.RequiredNow(
                 catalog?.RequiredWhenTsplus == true, context.Sistema.TsplusDetectado, tsplus, complementary, autoStart);
             var presentationState = WindowsServiceCatalog.PresentationState(status, startMode, requiredNow);
@@ -271,7 +271,7 @@ public sealed class ServiceDependencyGraphCollector : IReadOnlyCollector
             var depCatalog = WindowsServiceCatalog.Find(dep);
             var depRequiredNow = WindowsServiceCatalog.RequiredNow(
                 depCatalog?.RequiredWhenTsplus == true, context.Sistema.TsplusDetectado, depTsplus, depComplementary,
-                depStartMode.Equals("Automático", StringComparison.OrdinalIgnoreCase));
+                WindowsServiceCatalog.IsAutoStart(depStartMode));
             var depSeverity = !state.HasValue
                 ? DiagnosticSeverity.Advertencia
                 : WindowsServiceCatalog.ShouldWarnWhenStopped(state.Value, depStartMode, depRequiredNow)

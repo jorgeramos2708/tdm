@@ -216,7 +216,11 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("LicenseErrorNeedsTimestampedSeverityInWindow", LicenseErrorNeedsTimestampedSeverityInWindow),
     ("PendingRebootCandidateScalesWithSessionSymptom", PendingRebootCandidateScalesWithSessionSymptom),
     ("PhantomRdpEtwCollectorRetiredAndRealSinkDeclaresCoverage", PhantomRdpEtwCollectorRetiredAndRealSinkDeclaresCoverage),
-    ("ServiceRecoveryIsDeclaredAndStalledHeartbeatSurfaces", ServiceRecoveryIsDeclaredAndStalledHeartbeatSurfaces)
+    ("ServiceRecoveryIsDeclaredAndStalledHeartbeatSurfaces", ServiceRecoveryIsDeclaredAndStalledHeartbeatSurfaces),
+    ("Phase32EventQueriesCarryWarningAndHighValueIds", Phase32EventQueriesCarryWarningAndHighValueIds),
+    ("Phase32PushCursorAccountsDropsAndRecordIdGaps", Phase32PushCursorAccountsDropsAndRecordIdGaps),
+    ("Phase32DedupPrecedesVolumeTrim", Phase32DedupPrecedesVolumeTrim),
+    ("Phase32ServiceStartModesAndRecoveryReadScm", Phase32ServiceStartModesAndRecoveryReadScm)
 };
 
 var failed = 0;
@@ -1369,9 +1373,13 @@ static Task SecurityLogTargetsAuditEventIdsAndAlignsDedupKeys()
     var system = WindowsEventCollector.ResolveEventQuery("System", time);
     True(system.Contains("Level=1 or Level=2", StringComparison.Ordinal) && system.Contains(time, StringComparison.Ordinal),
         "La consulta System dejó de filtrar errores/críticos dentro de la ventana.");
+    True(system.Contains("or Level=3", StringComparison.Ordinal),
+        "La consulta System no incluye Warning (Level=3) — H3 de la auditoría.");
     var application = WindowsEventCollector.ResolveEventQuery("Application", time);
     True(application.Contains("Level=1 or Level=2", StringComparison.Ordinal) && application.Contains(time, StringComparison.Ordinal),
         "La consulta Application dejó de filtrar errores/críticos dentro de la ventana.");
+    True(application.Contains("or Level=3", StringComparison.Ordinal),
+        "La consulta Application no incluye Warning (Level=3) — H3 de la auditoría.");
 
     var now = DateTimeOffset.Now;
     var baseEvent = new DiagnosticEvent(now, "Microsoft-Windows-Security-Auditing",
@@ -3918,6 +3926,14 @@ static async Task WindowsEventCollectorPinsSecurityAuditIdsEndToEnd()
         "El 4771 dejó de ser relevante en el canal Security.");
     True(WindowsEventCollector.IsRelevant("Microsoft-Windows-Security-Auditing", 4776, "Security"),
         "El 4776 dejó de ser relevante en el canal Security.");
+    True(WindowsEventCollector.IsRelevant("Microsoft-Windows-Security-Auditing", 4648, "Security"),
+        "El 4648 (logon con credenciales explícitas) dejó de ser relevante en Security.");
+    True(WindowsEventCollector.IsRelevant("Microsoft-Windows-Security-Auditing", 4732, "Security"),
+        "El 4732 (miembro añadido a grupo local) dejó de ser relevante en Security.");
+    True(WindowsEventCollector.IsRelevant("Microsoft-Windows-Security-Auditing", 4778, "Security"),
+        "El 4778 (reconexión de sesión) dejó de ser relevante en Security.");
+    True(WindowsEventCollector.IsRelevant("Microsoft-Windows-Security-Auditing", 4779, "Security"),
+        "El 4779 (desconexión de sesión) dejó de ser relevante en Security.");
     False(WindowsEventCollector.IsRelevant("Some Provider", 4625, "System"),
         "Un 4625 fuera de Security no debe pasar por la cláusula de auditoría.");
     False(WindowsEventCollector.IsRelevant("Microsoft-Windows-Security-Auditing", 4624, "Security"),
@@ -3940,7 +3956,7 @@ static async Task WindowsEventCollectorPinsSecurityAuditIdsEndToEnd()
     else
     {
         foreach (var ev in result.Eventos.Where(e => e.Evidencia?.Any(x => x.Clave == "Log" && x.Valor == "Security") == true))
-            True(ev.Codigo is "4625" or "4740" or "4771" or "4776",
+            True(ev.Codigo is "4625" or "4740" or "4771" or "4776" or "4648" or "4732" or "4778" or "4779",
                 $"El canal Security emitió un evento fuera del conjunto de auditoría: ID {ev.Codigo}.");
     }
 }
@@ -4697,10 +4713,24 @@ static Task SecurityAuditEventsEscalateWithoutDuplicateFindings()
         "El 4771 dejó de reconocerse como señal con collector dedicado.");
     True(WindowsEventCollector.HasDedicatedSecurityEvidence("Security", 4776),
         "El 4776 dejó de reconocerse como señal con collector dedicado.");
+    True(WindowsEventCollector.HasDedicatedSecurityEvidence("Security", 4778),
+        "El 4778 dejó de contarse como señal con collector dedicado (LogonHealth).");
+    True(WindowsEventCollector.HasDedicatedSecurityEvidence("Security", 4779),
+        "El 4779 dejó de contarse como señal con collector dedicado (LogonHealth).");
+    False(WindowsEventCollector.HasDedicatedSecurityEvidence("Security", 4648),
+        "El 4648 se trató como señal con collector dedicado y debe generar hallazgo EVT propio.");
+    False(WindowsEventCollector.HasDedicatedSecurityEvidence("Security", 4732),
+        "El 4732 se trató como señal con collector dedicado y debe generar hallazgo EVT propio.");
     False(WindowsEventCollector.HasDedicatedSecurityEvidence("Security", 4624),
         "El 4624 se trató como señal con collector dedicado.");
     False(WindowsEventCollector.HasDedicatedSecurityEvidence("System", 4740),
         "Un 4740 fuera de Security se trató como señal con collector dedicado.");
+    Equal(DiagnosticSeverity.Advertencia, WindowsEventCollector.ResolveSeverity("Security", 4648, 0),
+        "El 4648 (event-4648, recomendación de monitoreo con Level=0) siguió presentándose como Informativo.");
+    Equal(DiagnosticSeverity.Advertencia, WindowsEventCollector.ResolveSeverity("Security", 4732, 0),
+        "El 4732 (event-4732, recomendación de monitoreo con Level=0) siguió presentándose como Informativo.");
+    Equal(DiagnosticSeverity.Informativo, WindowsEventCollector.ResolveSeverity("Security", 4778, 0),
+        "El 4778 dejó de emitirse como Informativo: su recuento lo aporta LogonHealth.");
 
     var root = FindRepoRoot();
     NotNull(root, "No se localizó TDM.sln; gate de hallazgos Security no ejecutable.");
@@ -5877,6 +5907,188 @@ static Task PendingRebootCandidateScalesWithSessionSymptom()
     Equal(88, correlated!.Puntaje, "Con síntoma el reinicio pendiente no se elevó.");
     Equal(ConfidenceLevel.Alta, correlated.Confianza, "Con síntoma el reinicio pendiente no quedó en Alta.");
     True(correlated.HoraIncidente == symptom.Timestamp, "El síntoma no ancló la hora de incidente del reinicio pendiente.");
+    return Task.CompletedTask;
+}
+
+static async Task Phase32EventQueriesCarryWarningAndHighValueIds()
+{
+    // H3: Level=3 (Warning) en base e incremental; H9: IDs de alto valor con doc oficial.
+    var time = "TimeCreated[@SystemTime >= '2026-01-01T00:00:00Z']";
+    var security = WindowsEventCollector.ResolveEventQuery("Security", time);
+    True(security.Contains("EventID=4648 or EventID=4732 or EventID=4778 or EventID=4779", StringComparison.Ordinal),
+        "La consulta base Security no incluye 4648/4732/4778/4779 (H9).");
+    var system = WindowsEventCollector.ResolveEventQuery("System", time);
+    True(system.Contains("or Level=3", StringComparison.Ordinal),
+        "La consulta base System dejó de leer Warning (H3).");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de queries F32 no ejecutable.");
+    var incremental = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "IncrementalWindowsEventCollector.cs"));
+    True(incremental.Contains("\"Application\", \"*[System[(Level=1 or Level=2 or Level=3)]]\"", StringComparison.Ordinal),
+        "El incremental de Application no incluye Level=3 (H3).");
+    True(incremental.Contains("EventID=25 or Level=1 or Level=2 or Level=3", StringComparison.Ordinal),
+        "El incremental de LocalSessionManager no incluye Level=3 (H3).");
+    True(incremental.Contains("EventID=1149 or Level=1 or Level=2 or Level=3", StringComparison.Ordinal),
+        "El incremental de RemoteConnectionManager no incluye Level=3 (H3).");
+    True(incremental.Contains("EventID=4648 or EventID=4732 or EventID=4778 or EventID=4779", StringComparison.Ordinal),
+        "El incremental Security no incluye 4648/4732/4778/4779 (H9).");
+    True(incremental.Contains("EventID=7022", StringComparison.Ordinal),
+        "El incremental System no incluye 7022, cadena de arranque (H9).");
+    True(incremental.Contains("EventID=7036", StringComparison.Ordinal),
+        "El incremental System no incluye 7036, transición de servicio (H11).");
+    True(incremental.Contains("EventID=4013 or EventID=4015", StringComparison.Ordinal),
+        "El incremental no incluye el canal DNS Server con 4013/4015 (H9).");
+    True(incremental.Contains("OptionalRole: true", StringComparison.Ordinal),
+        "El canal de rol DNS Server no está marcado como opcional.");
+    True(incremental.Contains("No aplica; canal de rol no instalado", StringComparison.Ordinal),
+        "Un canal de rol ausente se declara pérdida de cobertura en vez de No aplica.");
+    True(incremental.Contains("SERVICE_STATE_TRANSITION", StringComparison.Ordinal),
+        "El 7036 no se clasifica como transición de servicio (H11).");
+
+    var logonHealth = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsLogonHealthCollector.cs"));
+    True(logonHealth.Contains("EventID=4648 or EventID=4778 or EventID=4779", StringComparison.Ordinal),
+        "LogonHealth no cuenta 4648/4778/4779 en su xpath (H9).");
+    True(logonHealth.Contains("Reconexiones de sesión (4778)", StringComparison.Ordinal),
+        "LogonHealth no declara la evidencia de reconexiones de sesión.");
+    True(logonHealth.Contains("Desconexiones de sesión (4779)", StringComparison.Ordinal),
+        "LogonHealth no declara la evidencia de desconexiones de sesión.");
+    True(logonHealth.Contains("Credenciales explícitas (4648)", StringComparison.Ordinal),
+        "LogonHealth no declara la evidencia de credenciales explícitas.");
+
+    var run = await new WindowsLogonHealthCollector().CollectAsync(Context(TimeSpan.FromHours(1)));
+    var coverage = run.Eventos.SingleOrDefault(e => e.Tipo == "WINDOWS_LOGON_COVERAGE");
+    NotNull(coverage, "LogonHealth no emitió WINDOWS_LOGON_COVERAGE.");
+    True(coverage!.Evidencia!.Any(x => x.Clave == "Reconexiones de sesión (4778)"),
+        "El evento de cobertura LogonHealth perdió el contador de reconexiones.");
+    True(coverage.Evidencia!.Any(x => x.Clave == "Desconexiones de sesión (4779)"),
+        "El evento de cobertura LogonHealth perdió el contador de desconexiones.");
+    True(coverage.Evidencia!.Any(x => x.Clave == "Credenciales explícitas (4648)"),
+        "El evento de cobertura LogonHealth perdió el contador de credenciales explícitas.");
+    True(coverage.Mensaje.Contains("reconexiones", StringComparison.OrdinalIgnoreCase),
+        "El mensaje de cobertura LogonHealth no informa reconexiones.");
+}
+
+static async Task Phase32PushCursorAccountsDropsAndRecordIdGaps()
+{
+    // H2: la suscripción push arranca con EventRecordID > cursor y contabiliza pérdida.
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate del push F32 no ejecutable.");
+    var push = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsPushEventCollector.cs"));
+    True(push.Contains("EventRecordID > ", StringComparison.Ordinal),
+        "La suscripción push no filtra por cursor EventRecordID (H2).");
+    True(push.Contains("ReadLatestRecordId", StringComparison.Ordinal),
+        "La suscripción push no lee el último RecordId para sembrar el cursor (H2).");
+    True(push.Contains("SharedDropped", StringComparison.Ordinal),
+        "El push collector no contabiliza descartes del ring buffer (H2).");
+    True(push.Contains("SharedGaps", StringComparison.Ordinal),
+        "El push collector no contabiliza huecos de RecordId (H2).");
+
+    try
+    {
+        WindowsPushEventCollector.StopWatchers();
+        var run = await new WindowsPushEventCollector().CollectAsync(Context(TimeSpan.FromHours(1)));
+        var coverage = run.Eventos.SingleOrDefault(e => e.Tipo == "WINDOWS_PUSH_EVENT_COVERAGE");
+        NotNull(coverage, "El push no emitió cobertura tras el cursor.");
+        True(coverage!.Mensaje.StartsWith("Canales suscritos: ", StringComparison.Ordinal),
+            "El primer segmento del mensaje push cambió de formato.");
+        True(coverage.Mensaje.Contains("Descartados por buffer lleno", StringComparison.Ordinal),
+            "El mensaje push no informa descartes por buffer lleno (H2).");
+        True(coverage.Mensaje.Contains("Huecos de RecordId", StringComparison.Ordinal),
+            "El mensaje push no informa huecos de RecordId (H2).");
+        True(coverage.Evidencia!.Any(x => x.Clave == "Descartados por buffer lleno"),
+            "La evidencia push no declara los descartes por buffer lleno.");
+        True(coverage.Evidencia!.Any(x => x.Clave == "Huecos de RecordId"),
+            "La evidencia push no declara los huecos de RecordId.");
+    }
+    finally
+    {
+        WindowsPushEventCollector.StopWatchers();
+    }
+}
+
+static async Task Phase32DedupPrecedesVolumeTrim()
+{
+    // M-14: los duplicados colapsan ANTES del trim — no consumen presupuesto ni declaran
+    // TDM-EVENT-VOLUME-LIMIT si tras dedup el volumen queda bajo el límite.
+    var now = DateTimeOffset.Now;
+    var coverage = new DiagnosticEvent(now, "TDM", "Cobertura de eventos Windows",
+        DiagnosticLayer.Windows, DiagnosticSeverity.Informativo, "WINDOWS_EVENT_COVERAGE",
+        "La lectura base de eventos Windows se completó dentro de los límites configurados.",
+        Evidencia: [new EvidenceItem("System", "Disponible; relevantes=1; examinados=1")]);
+
+    var payload = new List<DiagnosticEvent> { coverage };
+    for (var i = 0; i < 1_800; i++)
+    {
+        payload.Add(new DiagnosticEvent(now.AddSeconds(-i), "DupTest", "Comp", DiagnosticLayer.Windows,
+            DiagnosticSeverity.Informativo, "WINDOWS_EVENT", $"duplicado {i}", "777",
+            Evidencia: [new EvidenceItem("Log", "System"), new EvidenceItem("RecordId", "424242")]));
+    }
+    for (var i = 0; i < 50; i++)
+    {
+        payload.Add(new DiagnosticEvent(now, "Único", "Comp", DiagnosticLayer.Windows,
+            DiagnosticSeverity.Informativo, "WINDOWS_EVENT", $"único {i}", (30_000 + i).ToString(),
+            Evidencia: [new EvidenceItem("Log", "System"), new EvidenceItem("RecordId", (70_000 + i).ToString())]));
+    }
+
+    var report = await new DiagnosticEngine([new BatchCollector(payload)], TimeSpan.FromSeconds(2), 1_500)
+        .RunAsync(Context(TimeSpan.FromHours(1)));
+
+    False(report.Hallazgos.Any(f => f.Id == "TDM-EVENT-VOLUME-LIMIT"),
+        "Los duplicados consumieron el presupuesto de trim antes de deduplicar (M-14).");
+    var survivors = report.Eventos.Count(e => e.Evidencia?.Any(
+        x => x.Clave == "RecordId" && x.Valor == "424242") == true);
+    Equal(1, survivors, "El dedup previo al trim no colapsó los 1.800 duplicados en un evento.");
+    True(report.Eventos.Any(e => e.Tipo == "WINDOWS_EVENT_COVERAGE"),
+        "El evento de cobertura desapareció durante el procesamiento.");
+}
+
+static Task Phase32ServiceStartModesAndRecoveryReadScm()
+{
+    // H11: auto-start retrasado y Trigger legibles, rama Trigger viva y recuperación leída del SCM.
+    True(WindowsServiceCatalog.IsAutoStart("Automático"), "Automático dejó de ser auto-start.");
+    True(WindowsServiceCatalog.IsAutoStart("Automático (retrasado)"),
+        "El arranque retrasado dejó de contarse como auto-start.");
+    False(WindowsServiceCatalog.IsAutoStart("Manual"), "Manual se contó como auto-start.");
+    False(WindowsServiceCatalog.IsAutoStart("Trigger"), "Trigger se contó como auto-start.");
+    False(WindowsServiceCatalog.IsAutoStart("Deshabilitado"), "Deshabilitado se contó como auto-start.");
+
+    Equal("reinicio/5000 ms → reinicio/15000 ms → reinicio/60000 ms · reset 86400 s · también al detenerse por error",
+        WindowsServiceCatalog.FormatRecoveryActions(86400, [(1, 5000), (1, 15000), (1, 60000)], true),
+        "El formato de acciones de recuperación cambió (docs 3 y 5).");
+    Equal("Sin acciones de recuperación declaradas",
+        WindowsServiceCatalog.FormatRecoveryActions(0, [], false),
+        "Un servicio sin acciones de recuperación debe declararlo explícitamente.");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate H11 no ejecutable.");
+    var catalog = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsServiceCatalog.cs"));
+    True(catalog.Contains("QueryServiceConfig2W", StringComparison.Ordinal),
+        "El catálogo de servicios ya no lee el SCM con QueryServiceConfig2 (H11).");
+    True(catalog.Contains("ServiceConfigDelayedAutoStartInfo", StringComparison.Ordinal),
+        "El arranque retrasado ya no se lee con QueryServiceConfig2 nivel 3 (H11).");
+    True(catalog.Contains("ServiceConfigTriggerInfo", StringComparison.Ordinal),
+        "El arranque por trigger ya no se lee con QueryServiceConfig2 nivel 8 (H11).");
+    True(catalog.Contains("ServiceConfigFailureActions", StringComparison.Ordinal),
+        "La recuperación ya no se lee con QueryServiceConfig2 nivel 2 (H11).");
+    True(catalog.Contains("Automático (retrasado)", StringComparison.Ordinal),
+        "El modo retrasado no llega al informe con su propio rótulo.");
+    True(catalog.Contains("Bajo demanda (Trigger)", StringComparison.Ordinal),
+        "La presentación del servicio Trigger quedó muerta (H11).");
+
+    var service = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsServiceCollector.cs"));
+    True(service.Contains("EvidenceItem(\"Recuperación\"", StringComparison.Ordinal),
+        "El collector de servicios no declara la recuperación real del SCM (H11).");
+    True(service.Contains("WindowsServiceCatalog.IsAutoStart(startMode)", StringComparison.Ordinal),
+        "El collector de servicios no usa la regla compartida IsAutoStart.");
+
+    var graph = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "ServiceDependencyGraphCollector.cs"));
+    True(graph.Contains("WindowsServiceCatalog.IsAutoStart(startMode)", StringComparison.Ordinal)
+        && graph.Contains("WindowsServiceCatalog.IsAutoStart(depStartMode)", StringComparison.Ordinal),
+        "El grafo de dependencias no usa la regla compartida IsAutoStart.");
+
+    var functional = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "TsplusWindowsFunctionalDependencyCollector.cs"));
+    True(functional.Contains("Bajo demanda (Trigger)", StringComparison.Ordinal),
+        "La rama Trigger del dependiente funcional TSplus sigue muerta (H11).");
     return Task.CompletedTask;
 }
 

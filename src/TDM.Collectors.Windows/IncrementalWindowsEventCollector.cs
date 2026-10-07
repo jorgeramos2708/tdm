@@ -44,12 +44,14 @@ public sealed class IncrementalWindowsEventCollector : IReadOnlyCollector
     [
         // P17: incluye fallos de arranque SCM (7000/7001/7009/7011/7023/7024); coherente con
         // DiagnosticPrecisionAnalyzer.IsCausalSignal que ya los reconoce como causales.
-        new("System", "*[System[(EventID=7000 or EventID=7001 or EventID=7009 or EventID=7011 or EventID=7023 or EventID=7024 or EventID=7031 or EventID=7034 or EventID=7040 or EventID=7045 or EventID=41 or EventID=51 or EventID=55)]]", DiagnosticLayer.Windows),
-        new("Application", "*[System[(Level=1 or Level=2)]]", DiagnosticLayer.Windows),
-        new("Security", "*[System[(EventID=4625 or EventID=4740 or EventID=4771 or EventID=4776)]]", DiagnosticLayer.Seguridad),
-        new("Microsoft-Windows-TerminalServices-LocalSessionManager/Operational", "*[System[(EventID=21 or EventID=22 or EventID=23 or EventID=24 or EventID=25 or Level=1 or Level=2)]]", DiagnosticLayer.Rdp),
-        new("Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational", "*[System[(EventID=1149 or Level=1 or Level=2)]]", DiagnosticLayer.Rdp),
-        new("Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operational", "*[System[(Level=1 or Level=2)]]", DiagnosticLayer.Rdp),
+        new("System", "*[System[(EventID=7000 or EventID=7001 or EventID=7009 or EventID=7011 or EventID=7023 or EventID=7024 or EventID=7031 or EventID=7034 or EventID=7040 or EventID=7045 or EventID=41 or EventID=51 or EventID=55 or EventID=7022 or EventID=7036)]]", DiagnosticLayer.Windows),
+        // H3 (F32): añadir Level=3 (Warning) a los canales que sólo leían 1/2, en línea con
+        // los canales que ya lo hacían (PrintService, WMI…) y con el forense (docs 6–8).
+        new("Application", "*[System[(Level=1 or Level=2 or Level=3)]]", DiagnosticLayer.Windows),
+        new("Security", "*[System[(EventID=4625 or EventID=4740 or EventID=4771 or EventID=4776 or EventID=4648 or EventID=4732 or EventID=4778 or EventID=4779)]]", DiagnosticLayer.Seguridad),
+        new("Microsoft-Windows-TerminalServices-LocalSessionManager/Operational", "*[System[(EventID=21 or EventID=22 or EventID=23 or EventID=24 or EventID=25 or Level=1 or Level=2 or Level=3)]]", DiagnosticLayer.Rdp),
+        new("Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational", "*[System[(EventID=1149 or Level=1 or Level=2 or Level=3)]]", DiagnosticLayer.Rdp),
+        new("Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operational", "*[System[(Level=1 or Level=2 or Level=3)]]", DiagnosticLayer.Rdp),
         new("Microsoft-Windows-PrintService/Admin", "*[System[(Level=1 or Level=2 or Level=3)]]", DiagnosticLayer.Windows),
         new("Microsoft-Windows-WMI-Activity/Operational", "*[System[(Level=1 or Level=2 or Level=3)]]", DiagnosticLayer.Windows),
         new("Microsoft-Windows-Windows Defender/Operational", "*[System[(Level=1 or Level=2 or Level=3)]]", DiagnosticLayer.Seguridad),
@@ -63,7 +65,11 @@ public sealed class IncrementalWindowsEventCollector : IReadOnlyCollector
         new("Microsoft-Windows-CAPI2/Operational", "*[System[(Level=1 or Level=2 or Level=3)]]", DiagnosticLayer.Seguridad),
         new("Microsoft-Windows-CodeIntegrity/Operational", "*[System[(Level=1 or Level=2 or Level=3)]]", DiagnosticLayer.Seguridad),
         new("Microsoft-Windows-AppLocker/EXE and DLL", "*[System[(Level=1 or Level=2 or Level=3)]]", DiagnosticLayer.Seguridad),
-        new("Microsoft-Windows-AppLocker/MSI and Script", "*[System[(Level=1 or Level=2 or Level=3)]]", DiagnosticLayer.Seguridad)
+        new("Microsoft-Windows-AppLocker/MSI and Script", "*[System[(Level=1 or Level=2 or Level=3)]]", DiagnosticLayer.Seguridad),
+        // H9 (F32): 4013/4015 con doc oficial (KB2001093/KB969488). Canal de rol DNS Server:
+        // opcional porque sólo existe si está instalada la función DNS (ausente = "No aplica",
+        // no pérdida de cobertura).
+        new("DNS Server", "*[System[(EventID=4013 or EventID=4015)]]", DiagnosticLayer.Red, OptionalRole: true)
     ];
 
 public void Prime()
@@ -264,8 +270,17 @@ public void Prime()
             }
             catch (EventLogNotFoundException ex)
             {
-                coverage.Add(new EvidenceItem(channel.Name, "Canal no disponible"));
-                events.Add(CoverageLossEvent(channel, "Canal no disponible", ex.Message));
+                if (channel.OptionalRole)
+                {
+                    // H9 (F32): canal de rol — su ausencia es el caso normal en servidores sin
+                    // DNS Server. No es pérdida de cobertura ni genera evento de alerta.
+                    coverage.Add(new EvidenceItem(channel.Name, "No aplica; canal de rol no instalado"));
+                }
+                else
+                {
+                    coverage.Add(new EvidenceItem(channel.Name, "Canal no disponible"));
+                    events.Add(CoverageLossEvent(channel, "Canal no disponible", ex.Message));
+                }
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -369,6 +384,9 @@ public void Prime()
         if (type is "USER_LOGON_FAILURE" or "USER_NLA_PASSWORD_FAILURE" or "WINDOWS_CREDENTIAL_VALIDATION_FAILURE") severity = DiagnosticSeverity.Advertencia;
         if (type == "ACCOUNT_LOCKOUT") severity = DiagnosticSeverity.Advertencia;
         if (type == "KERBEROS_PREAUTH_FAILURE") severity = DiagnosticSeverity.Advertencia;
+        // H9 (F32): event-4648/event-4732 con recomendación de monitoreo (audit Level=0 →
+        // Informativo); misma elevación que la base (ResolveSeverity) para no subestimarlos.
+        if (type is "EXPLICIT_CREDENTIAL_LOGON" or "LOCAL_GROUP_MEMBERSHIP_CHANGE") severity = DiagnosticSeverity.Advertencia;
 
         var evidence = new List<EvidenceItem>
         {
@@ -428,6 +446,22 @@ public void Prime()
                 AddEvidence(evidence, "Código de falla", S("Status", "FailureCode"));
                 AddEvidence(evidence, "Tipo preautenticación", S("PreAuthType"));
             }
+            else if (record.Id == 4648)
+            {
+                AddEvidence(evidence, "Usuario", S("TargetUserName", "AccountName", "param1"));
+                AddEvidence(evidence, "Servidor de destino", S("TargetServerName", "ServerName", "param4"));
+            }
+            else if (record.Id == 4732)
+            {
+                AddEvidence(evidence, "Grupo", S("TargetUserName", "GroupName", "param1"));
+                AddEvidence(evidence, "Miembro", S("MemberName", "MemberSid", "param4"));
+            }
+            else if (record.Id is 4778 or 4779)
+            {
+                AddEvidence(evidence, "Usuario", S("TargetUserName", "AccountName", "param1"));
+                AddEvidence(evidence, "Estación", S("WorkstationName", "ClientName", "param2"));
+                AddEvidence(evidence, "Sesión", S("SessionID", "SessionId", "param3"));
+            }
         }
 
         string? serviceName = null;
@@ -451,6 +485,14 @@ public void Prime()
             var serviceData = ParseEventData(record);
             serviceName = FirstValue(serviceData, "ServiceName", "param1");
             AddEvidence(evidence, "Servicio", serviceName);
+        }
+        else if (type == "SERVICE_STATE_TRANSITION")
+        {
+            // H11 (F32): transición 7036 — param1 = servicio, param2 = estado ("running"/"stopped").
+            var serviceData = ParseEventData(record);
+            serviceName = FirstValue(serviceData, "ServiceName", "param1");
+            AddEvidence(evidence, "Servicio", serviceName);
+            AddEvidence(evidence, "Estado", FirstValue(serviceData, "ServiceState", "param2"));
         }
 
         string? application = null;
@@ -566,6 +608,10 @@ public void Prime()
         // invisible para ledger y para ROOT-SCM-SERVICE-FAILURE. Mismo mapeo que el forense.
         if (provider.Contains("Service Control Manager", StringComparison.OrdinalIgnoreCase) && id is 7000 or 7001 or 7009 or 7011 or 7023 or 7024)
             return "SERVICE_START_FAILURE";
+        // H11 (F32): 7036 sólo incremental (Level=4: informativo → evidencia de transición,
+        // sin hallazgo). En base haría flood de eventos EVT informativos en cada ciclo.
+        if (provider.Contains("Service Control Manager", StringComparison.OrdinalIgnoreCase) && id == 7036)
+            return "SERVICE_STATE_TRANSITION";
         if (channel.Equals("Application", StringComparison.OrdinalIgnoreCase))
         {
             if (provider.Contains("Application Error", StringComparison.OrdinalIgnoreCase) || id == 1000)
@@ -581,6 +627,10 @@ public void Prime()
             if (id == 4771) return "KERBEROS_PREAUTH_FAILURE";
             if (id == 4625) return "USER_LOGON_FAILURE";
             if (id == 4776) return "WINDOWS_CREDENTIAL_VALIDATION_FAILURE";
+            if (id == 4648) return "EXPLICIT_CREDENTIAL_LOGON";
+            if (id == 4732) return "LOCAL_GROUP_MEMBERSHIP_CHANGE";
+            if (id == 4778) return "SESSION_RECONNECTION";
+            if (id == 4779) return "SESSION_DISCONNECTION";
         }
         if (channel.Contains("LocalSessionManager", StringComparison.OrdinalIgnoreCase))
         {
@@ -775,5 +825,5 @@ public void Prime()
         catch { /* Ignore overall SCM query failures */ }
     }
 
-    private sealed record ChannelSpec(string Name, string Filter, DiagnosticLayer Layer);
+    private sealed record ChannelSpec(string Name, string Filter, DiagnosticLayer Layer, bool OptionalRole = false);
 }
