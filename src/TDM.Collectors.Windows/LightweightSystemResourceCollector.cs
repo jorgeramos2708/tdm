@@ -10,6 +10,14 @@ namespace TDM.Collectors.Windows;
 /// </summary>
 public sealed class LightweightSystemResourceCollector : IReadOnlyCollector
 {
+    private const double CpuWindowHysteresisPercent = 5d;
+
+    // F33 (H8): estado de la ventana de CPU con histéresis, fuera de la muestra para que el
+    // refresco no parpadee entre estados. El conteo de hallazgos RESOURCE-CPU-* sigue siendo
+    // exclusivo del SystemResourceCollector pesado (sin doble conteo de WarningFindings).
+    private static readonly object WindowSync = new();
+    private static bool _cpuWindowElevated;
+
     private readonly ResourceLoadGuard.Snapshot? _snapshot;
 
     public LightweightSystemResourceCollector(ResourceLoadGuard.Snapshot? snapshot = null) => _snapshot = snapshot;
@@ -37,6 +45,35 @@ public sealed class LightweightSystemResourceCollector : IReadOnlyCollector
         if (snap.MemoryTotalBytes.HasValue)
             evidence.Add(new(ResourceMetricKeys.MemoryTotalBytes, snap.MemoryTotalBytes.Value.ToString(CultureInfo.InvariantCulture)));
 
+        // F33 (H8): contadores de la guía oficial 9 (MEMORYSTATUSEX) publicados en el ciclo
+        // ligero: Available MBytes (ullAvailPhys) y % Committed Bytes In Use
+        // ((TotalPageFile - AvailPageFile) / TotalPageFile).
+        if (snap.MemoryAvailableBytes.HasValue)
+        {
+            evidence.Add(new("Available MBytes", $"{snap.MemoryAvailableBytes.Value / 1024d / 1024d:0} MB"));
+            evidence.Add(new(ResourceMetricKeys.MemoryAvailableBytes, snap.MemoryAvailableBytes.Value.ToString(CultureInfo.InvariantCulture)));
+        }
+        if (snap.MemoryCommittedPercent.HasValue)
+        {
+            evidence.Add(new("% Committed Bytes In Use", $"{snap.MemoryCommittedPercent.Value:0.0}%"));
+            evidence.Add(new(ResourceMetricKeys.MemoryPercentCommittedBytesInUse, snap.MemoryCommittedPercent.Value.ToString("0.###", CultureInfo.InvariantCulture)));
+        }
+
+        // F33 (H8): ventana de CPU con histéresis de 5 puntos sobre el delta de GetSystemTimes;
+        // se publica sólo como evidencia (sin findings nuevos).
+        var thresholds = context.ResourceThresholds ?? ResourceDetectionThresholds.Default;
+        bool windowElevated;
+        lock (WindowSync)
+        {
+            windowElevated = NextCpuWindow(_cpuWindowElevated, snap.CpuPercent, thresholds.CpuWarningPercent);
+            _cpuWindowElevated = windowElevated;
+        }
+        evidence.Add(new("Ventana de carga CPU", snap.CpuPercent.HasValue
+            ? windowElevated
+                ? $"Elevada (entrada ≥{thresholds.CpuWarningPercent:0}%, salida <{thresholds.CpuWarningPercent - CpuWindowHysteresisPercent:0}%)"
+                : $"Normal (sin cruce del umbral de aviso {thresholds.CpuWarningPercent:0}%)"
+            : "N/D (primera muestra; requiere dos capturas consecutivas)"));
+
         var evt = new DiagnosticEvent(
             snap.Timestamp,
             "TDM / API nativa Windows",
@@ -48,5 +85,18 @@ public sealed class LightweightSystemResourceCollector : IReadOnlyCollector
             Evidencia: evidence);
 
         return Task.FromResult(new CollectorResult([], [evt]));
+    }
+
+    /// <summary>
+    /// F33 (H8): evaluador puro de la ventana de CPU con histéresis de 5 puntos.
+    /// Sin muestra (null) conserva el estado anterior; la entrada se produce en
+    /// >= enterPercent y la salida sólo por debajo de enterPercent - 5.
+    /// </summary>
+    public static bool NextCpuWindow(bool previousElevated, double? cpuPercent, double enterPercent)
+    {
+        if (!cpuPercent.HasValue) return previousElevated;
+        return previousElevated
+            ? cpuPercent.Value >= enterPercent - CpuWindowHysteresisPercent
+            : cpuPercent.Value >= enterPercent;
     }
 }

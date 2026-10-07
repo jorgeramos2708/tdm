@@ -156,6 +156,13 @@ public static class CollectorCatalog
             collectors.Add(new ServiceDependencyDriftCollector());
             collectors.Add(new TsplusProcessDependencyCollector());
             collectors.Add(new RemoteAccessModuleCoverageCollector(calculateHashes: false));
+
+            // F33 (H7): alinea el ciclo heavy del servicio con el set GUI/CLI. Schannel,
+            // cambios de Windows y carga de dependencias sólo existían en CreateFull/CreateContinuous,
+            // por lo que el monitor 24/7 perdía evidencia causal de TLS, drift y faltantes de DLL.
+            collectors.Add(new SchannelEventCollector());
+            collectors.Add(new WindowsChangeEventCollector());
+            collectors.Add(new DependencyLoadEventCollector());
         }
         else
         {

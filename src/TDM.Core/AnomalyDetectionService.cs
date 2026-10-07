@@ -70,9 +70,9 @@ public sealed class AnomalyDetectionService : IDisposable
             CheckAndAdd(anomalies, _processDetector.Process($"process.ram.{kvp.Key}", kvp.Value, sample.Timestamp), $"process.ram.{kvp.Key}", $"Proceso {kvp.Key} RAM MB", sample.Timestamp);
         }
 
-        // TSplus métricas (si disponibles)
-        if (sample.ActiveSessions > 0)
-            CheckAndAdd(anomalies, _tsplusDetector.Process($"tsplus.sessions", sample.ActiveSessions, sample.Timestamp), "tsplus.sessions", "Sesiones TSplus activas", sample.Timestamp);
+        // TSplus métricas (si disponibles). F33 (H1): null = desconocido; nunca compite como 0.
+        if (sample.ActiveSessions is { } activeSessions && activeSessions > 0)
+            CheckAndAdd(anomalies, _tsplusDetector.Process($"tsplus.sessions", activeSessions, sample.Timestamp), "tsplus.sessions", "Sesiones TSplus activas", sample.Timestamp);
 
         return anomalies;
     }

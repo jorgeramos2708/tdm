@@ -28,7 +28,7 @@ public sealed record FederationNodeStatus(
     double AgeSeconds,
     double? CpuPercent,
     double? MemoryUsedPercent,
-    int ActiveSessions,
+    int? ActiveSessions,
     int Incidents,
     string? CausalOrigin,
     string? Originator,
@@ -239,8 +239,8 @@ public sealed class FederationStore
     }
 
     private static FederationNodeStatus Empty(FederationNode node, string connectivity, string health, string detail)
-        => new(node, connectivity, health, null, double.PositiveInfinity, null, null, 0, 0, null, null, 0,
-            new Dictionary<string, string>(), new Dictionary<string, string>(), detail);
+    => new(node, connectivity, health, null, double.PositiveInfinity, null, null, null, 0, null, null, 0,
+        new Dictionary<string, string>(), new Dictionary<string, string>(), detail);
 
     private static string ResolveWindowPath(string root)
     {

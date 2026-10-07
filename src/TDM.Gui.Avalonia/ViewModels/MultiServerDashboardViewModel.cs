@@ -37,7 +37,7 @@ public partial class MultiServerDashboardViewModel : ObservableObject
             x.Node.DisplayName, x.Node.Group, x.Node.Role, x.Connectivity, x.Health,
             x.CpuPercent.HasValue ? $"{x.CpuPercent.Value:0.0}%" : "N/D",
             x.MemoryUsedPercent.HasValue ? $"{x.MemoryUsedPercent.Value:0.0}%" : "N/D",
-            x.ActiveSessions.ToString(), x.Incidents.ToString(), x.Detail,
+            x.ActiveSessions?.ToString() ?? "N/D", x.Incidents.ToString(), x.Detail,
             x.Health.Equals("FALLA", StringComparison.OrdinalIgnoreCase) ? DashboardPalette.Error :
             IsOffline(x) ? DashboardPalette.Muted :
             IsDegraded(x) ? DashboardPalette.Warn : DashboardPalette.Good)).ToList();
@@ -73,7 +73,7 @@ public partial class MultiServerDashboardViewModel : ObservableObject
         {
             builder.Append($"• {DashboardRules.SanitizeVisibleText(node.Node.DisplayName)} — salud: {node.Health} · conectividad: {node.Connectivity}");
             if (node.CpuPercent.HasValue) builder.Append($" · CPU {node.CpuPercent.Value:0.0}%");
-            builder.Append($" · sesiones {node.ActiveSessions} · incidentes {node.Incidents}");
+            builder.Append($" · sesiones {node.ActiveSessions?.ToString() ?? "N/D"} · incidentes {node.Incidents}");
             builder.Append($" · última muestra hace {node.AgeSeconds:0} s");
             builder.Append($" · reloj {node.ClockFileDeltaSeconds:+0.0;-0.0} s");
             if (node.AgeSeconds >= thresholds.NodeOfflineSeconds) builder.Append(" [SIN DATOS]");

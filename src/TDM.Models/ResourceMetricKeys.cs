@@ -11,6 +11,9 @@ public static class ResourceMetricKeys
     public const string MemoryFreePercent = "Metric.Memory.FreePercent";
     public const string MemoryFreeBytes = "Metric.Memory.FreeBytes";
     public const string MemoryTotalBytes = "Metric.Memory.TotalBytes";
+    // F33 (H8): contadores de la guía oficial 9 (GlobalMemoryStatusEx / MEMORYSTATUSEX).
+    public const string MemoryAvailableBytes = "Metric.Memory.AvailableBytes";
+    public const string MemoryPercentCommittedBytesInUse = "Metric.Memory.PercentCommittedBytesInUse";
 
     public const string TcpEphemeralUsed = "Metric.Tcp.EphemeralUsed";
     public const string TcpEphemeralCapacity = "Metric.Tcp.EphemeralCapacity";

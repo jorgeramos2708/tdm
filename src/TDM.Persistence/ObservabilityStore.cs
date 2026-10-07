@@ -33,6 +33,9 @@ public sealed record ObservabilitySample
     public double? CpuPercent { get; init; }
     public double? MemoryFreePercent { get; init; }
     public double? MemoryTotalBytes { get; init; }
+    // F33 (H8): contadores de la guía oficial 9 (GlobalMemoryStatusEx); null = no evaluado.
+    public double? MemoryAvailableBytes { get; init; }
+    public double? MemoryCommittedPercent { get; init; }
     public IReadOnlyDictionary<string, double> ProcessRamMb { get; init; } = new Dictionary<string, double>();
     public IReadOnlyDictionary<string, double> ProcessHandles { get; init; } = new Dictionary<string, double>();
     public IReadOnlyDictionary<string, double> ProcessThreads { get; init; } = new Dictionary<string, double>();
@@ -41,8 +44,9 @@ public sealed record ObservabilitySample
     public double? TcpEphemeralUsagePercent { get; init; }
     public int TcpTimeWait { get; init; }
     public int TcpEstablished { get; init; }
-    public int ActiveSessions { get; init; }
-    public int DisconnectedSessions { get; init; }
+    // F33 (H1): null = desconocido. El 0 sólo se afirma cuando el inventario realmente evaluó.
+    public int? ActiveSessions { get; init; }
+    public int? DisconnectedSessions { get; init; }
     public string SessionCoverage { get; init; } = "No evaluado";
     public int LogonFailures { get; init; }
     public int NlaFailures { get; init; }
@@ -234,6 +238,8 @@ public sealed class ObservabilityStore
         var cpu = ParseCpu(resources);
         var memory = ParseMemory(resources);
         var memoryTotalBytes = MetricDouble(resources, ResourceMetricKeys.MemoryTotalBytes);
+        var memoryAvailableBytes = MetricDouble(resources, ResourceMetricKeys.MemoryAvailableBytes);
+        var memoryCommittedPercent = MetricDouble(resources, ResourceMetricKeys.MemoryPercentCommittedBytesInUse);
         var processRam = ParseProcessMetric(resources, "RamMb");
         var processHandles = ParseProcessMetric(resources, "Handles");
         var processThreads = ParseProcessMetric(resources, "Threads");
@@ -252,8 +258,8 @@ public sealed class ObservabilityStore
             : !string.Equals(sessionCoverageRaw?.Trim(), "Disponible", StringComparison.OrdinalIgnoreCase)
                 ? "Parcial"
                 : "Disponible";
-        var activeSessions = activeSessionsValue ?? 0;
-        var disconnectedSessions = disconnectedSessionsValue ?? 0;
+        var activeSessions = activeSessionsValue;
+        var disconnectedSessions = disconnectedSessionsValue;
         var logonFailures = report.Eventos.Count(e => e.Tipo.Equals("USER_LOGON_FAILURE", StringComparison.OrdinalIgnoreCase)
                                                      && DiagnosticEventCatalog.IsFunctionalIncident(e));
         var nlaFailures = report.Eventos.Count(e => (e.Tipo.Equals("USER_NLA_PASSWORD_FAILURE", StringComparison.OrdinalIgnoreCase)
@@ -287,6 +293,8 @@ public sealed class ObservabilityStore
             CpuPercent = cpu,
             MemoryFreePercent = memory,
             MemoryTotalBytes = memoryTotalBytes,
+            MemoryAvailableBytes = memoryAvailableBytes,
+            MemoryCommittedPercent = memoryCommittedPercent,
             ProcessRamMb = processRam,
             ProcessHandles = processHandles,
             ProcessThreads = processThreads,

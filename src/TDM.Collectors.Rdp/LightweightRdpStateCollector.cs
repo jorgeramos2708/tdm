@@ -57,6 +57,9 @@ public sealed class LightweightRdpStateCollector : IReadOnlyCollector
                 new EvidenceItem("Sesiones totales", snap.SessionsEvaluated ? snap.Sessions.Count.ToString() : "No evaluado"),
                 new EvidenceItem("Sesiones activas", snap.SessionsEvaluated ? active.ToString() : "No evaluado"),
                 new EvidenceItem("Sesiones desconectadas", snap.SessionsEvaluated ? disconnected.ToString() : "No evaluado"),
+                // F33 (H1): misma clave que el inventario full para que la cobertura de la muestra
+                // sea "Disponible" en ciclo ligero en vez de quedar en "Parcial" por omisión de la clave.
+                new EvidenceItem("Cobertura sesiones", snap.SessionsEvaluated ? "Disponible" : "No evaluado"),
                 new EvidenceItem("Identidades", "No recopiladas por monitor continuo")
             ]));
 

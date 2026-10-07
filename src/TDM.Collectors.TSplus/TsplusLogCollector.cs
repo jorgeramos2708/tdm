@@ -64,6 +64,32 @@ public sealed class TsplusLogCollector : IReadOnlyCollector
             $"Fuentes opcionales de diagnóstico Remote Access disponibles: {availableRemoteAccess}/{knownRemoteAccess} ({coverage}%). La ausencia de logs no se interpreta como falla porque TSplus puede tenerlos deshabilitados. El descubrimiento dinámico queda {(discoveryPartial ? "PARCIAL" : "DISPONIBLE")}.",
             Evidencia: coverageEvidence));
 
+        // F33 (M-04): operacionaliza el estado "TSPLUS_LOGS_NOT_ENABLED". Según la guía oficial
+        // TSplus (Advanced Features / Logs), los logs están deshabilitados POR DEFECTO y se
+        // habilitan desde AdminTool > Advanced > Logs (+ traza en C:\wsession\Trace). El informe
+        // debe distinguir "deshabilitado (default)" de "roto" (LOG_READ_ERROR / LOG_ACCESS_DENIED).
+        var requiredMissing = remoteAccessSources.Where(s => !s.FuenteOpcional && !s.Existe).ToList();
+        if (context.Sistema.TsplusDetectado && requiredMissing.Count > 0)
+        {
+            events.Add(new DiagnosticEvent(
+                DateTimeOffset.Now,
+                "TDM",
+                "Logs TSplus Remote Access",
+                DiagnosticLayer.Tsplus,
+                DiagnosticSeverity.Informativo,
+                DiagnosticEventTypes.TsplusLogsNotEnabled,
+                "Los logs obligatorios de TSplus Remote Access no están disponibles y, según la guía oficial, los logs están deshabilitados por defecto. TDM lo clasifica como DESHABILITADO POR DEFECTO (estado de configuración), no como log roto: habilitarlos no diagnostica por sí solo el incidente.",
+                Evidencia:
+                [
+                    new EvidenceItem("Estado", "Deshabilitado por defecto (default de TSplus)"),
+                    new EvidenceItem("Fuentes obligatorias no disponibles", string.Join(" | ", requiredMissing.Select(s => $"{s.Componente} → {s.Ruta}"))),
+                    new EvidenceItem("Cómo habilitar", "AdminTool > Advanced > Logs (guía oficial TSplus Advanced Features / Logs)"),
+                    new EvidenceItem("Traza complementaria", @"C:\wsession\Trace"),
+                    new EvidenceItem("No confundir con", "LOG_ACCESS_DENIED / LOG_READ_ERROR = log presente pero ilegible (estado roto)")
+                ],
+                Producto: TsplusProduct.RemoteAccess));
+        }
+
         var securitySource = sources.FirstOrDefault(s => s.Producto == TsplusProduct.AdvancedSecurity);
         if (securitySource is { Existe: true })
         {

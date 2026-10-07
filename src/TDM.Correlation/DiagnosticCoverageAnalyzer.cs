@@ -209,7 +209,13 @@ public static class DiagnosticCoverageAnalyzer
         var expectedAvailable = IntEvidence(e, "Fuentes esperadas disponibles");
         var expectedMissing = Math.Max(0, expected - expectedAvailable);
         var status = total == 0 ? "Parcial" : readFailures > 0 || discoveryPartial || expectedMissing > 0 ? "Parcial" : available == total ? "Disponible" : available > 0 ? "Parcial" : "No disponible";
-        sources.Add(new("Logs TSplus Remote Access", status, $"Fuentes conocidas/detectadas disponibles={available}/{total}; fuentes esperadas ausentes={expectedMissing}; errores de lectura/pérdida={readFailures}; descubrimiento={declared}. La ausencia de logs opcionales no se interpreta como falla.", true));
+        // F33 (M-04): si TSplus declara sus logs deshabilitados por defecto (doc oficial), el
+        // detalle lo dice explícitamente para no confundirlo con logs rotos o sin acceso.
+        var logsDisabled = report.Eventos.Any(x => x.Tipo == "TSPLUS_LOGS_NOT_ENABLED");
+        var disabledNote = logsDisabled
+            ? " Estado: DESHABILITADO POR DEFECTO según guía oficial TSplus (habilitable en AdminTool > Advanced > Logs); distinto de log roto/sin acceso."
+            : string.Empty;
+        sources.Add(new("Logs TSplus Remote Access", status, $"Fuentes conocidas/detectadas disponibles={available}/{total}; fuentes esperadas ausentes={expectedMissing}; errores de lectura/pérdida={readFailures}; descubrimiento={declared}. La ausencia de logs opcionales no se interpreta como falla.{disabledNote}", true));
         if (status != "Disponible") limitations.Add("Parte de los logs Remote Access no está disponible/habilitada o perdió acceso; TDM conserva la limitación sin declarar el módulo sano por ausencia de log.");
     }
 

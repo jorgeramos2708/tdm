@@ -220,7 +220,12 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("Phase32EventQueriesCarryWarningAndHighValueIds", Phase32EventQueriesCarryWarningAndHighValueIds),
     ("Phase32PushCursorAccountsDropsAndRecordIdGaps", Phase32PushCursorAccountsDropsAndRecordIdGaps),
     ("Phase32DedupPrecedesVolumeTrim", Phase32DedupPrecedesVolumeTrim),
-    ("Phase32ServiceStartModesAndRecoveryReadScm", Phase32ServiceStartModesAndRecoveryReadScm)
+    ("Phase32ServiceStartModesAndRecoveryReadScm", Phase32ServiceStartModesAndRecoveryReadScm),
+    ("Phase33LightSessionInventoryKeepsUnknownAsNoData", Phase33LightSessionInventoryKeepsUnknownAsNoData),
+    ("Phase33ServiceMonitorHeavyCycleClosesCollectorGap", Phase33ServiceMonitorHeavyCycleClosesCollectorGap),
+    ("Phase33TsplusLogsDisabledByDefaultSurfacesAsStateEvent", Phase33TsplusLogsDisabledByDefaultSurfacesAsStateEvent),
+    ("Phase33TopThreeCandidatesCarryOfficialGuidance", Phase33TopThreeCandidatesCarryOfficialGuidance),
+    ("Phase33LightResourceCyclePublishesDocNineCounters", Phase33LightResourceCyclePublishesDocNineCounters)
 };
 
 var failed = 0;
@@ -6090,6 +6095,192 @@ static Task Phase32ServiceStartModesAndRecoveryReadScm()
     True(functional.Contains("Bajo demanda (Trigger)", StringComparison.Ordinal),
         "La rama Trigger del dependiente funcional TSplus sigue muerta (H11).");
     return Task.CompletedTask;
+}
+
+static Task Phase33LightSessionInventoryKeepsUnknownAsNoData()
+{
+    // H1: null = desconocido en todo el camino; el ciclo ligero jamas devuelve un 0 inventado.
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizo TDM.sln; gate H1 F33 no ejecutable.");
+
+    var store = File.ReadAllText(Path.Combine(root!, "src", "TDM.Persistence", "ObservabilityStore.cs"));
+    True(store.Contains("public int? ActiveSessions", StringComparison.Ordinal),
+        "ObservabilityStore dejo de guardar ActiveSessions como nullable (H1).");
+    True(store.Contains("public int? DisconnectedSessions", StringComparison.Ordinal),
+        "ObservabilityStore dejo de guardar DisconnectedSessions como nullable (H1).");
+    False(store.Contains("ActiveSessions ?? 0", StringComparison.Ordinal),
+        "El 0 falso volvio a ObservabilityStore (H1).");
+    False(store.Contains("DisconnectedSessions ?? 0", StringComparison.Ordinal),
+        "El 0 falso volvio a ObservabilityStore en desconectadas (H1).");
+
+    var federation = File.ReadAllText(Path.Combine(root!, "src", "TDM.Persistence", "FederationStore.cs"));
+    True(federation.Contains("int? ActiveSessions", StringComparison.Ordinal),
+        "El estado federado volvio a inflar sesiones con 0 (H1).");
+
+    var sessionsVm = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "ViewModels", "SessionsDashboardViewModel.cs"));
+    True(sessionsVm.Contains("?? \"N/D\"", StringComparison.Ordinal),
+        "SessionsDashboard ya no distingue sin-dato de cero (H1).");
+    var supportVm = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "ViewModels", "SupportDashboardViewModel.cs"));
+    True(supportVm.Contains("sessionCountsKnown", StringComparison.Ordinal),
+        "SupportDashboard ya no guarda el conteo hasta que llega la muestra (H1).");
+    True(supportVm.Contains("Sin datos de sesiones", StringComparison.Ordinal),
+        "SupportDashboard perdio el estado vacio honesto (H1).");
+    var multiVm = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "ViewModels", "MultiServerDashboardViewModel.cs"));
+    True(multiVm.Contains("ActiveSessions?.ToString() ?? \"N/D\"", StringComparison.Ordinal),
+        "MultiServerDashboard ya no traduce null a N/D (H1).");
+
+    var rdpLight = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Rdp", "LightweightRdpStateCollector.cs"));
+    True(rdpLight.Contains("\"Cobertura sesiones\"", StringComparison.Ordinal),
+        "El inventario ligero dejo de declarar la cobertura de sesiones (H1).");
+
+    Equal("No evaluado", new ObservabilitySample().SessionCoverage,
+        "Una muestra sin inventario ya no arranca como No evaluado (H1).");
+    return Task.CompletedTask;
+}
+
+static Task Phase33ServiceMonitorHeavyCycleClosesCollectorGap()
+{
+    // H7: Schannel, cambios de Windows y carga de dependencias llegan al ciclo heavy del servicio.
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizo TDM.sln; gate H7 F33 no ejecutable.");
+    var catalog = File.ReadAllText(Path.Combine(root!, "src", "TDM.Application", "CollectorCatalog.cs"));
+    var start = catalog.IndexOf("public static List<IReadOnlyCollector> CreateServiceMonitor", StringComparison.Ordinal);
+    True(start >= 0, "CreateServiceMonitor desapareció del catalogo (H7).");
+    var body = catalog[start..];
+    True(body.Contains("if (includeHeavy)", StringComparison.Ordinal),
+        "El catalogo de servicio dejo de ramificar includeHeavy (H7).");
+    True(body.Contains("collectors.Add(new SchannelEventCollector());", StringComparison.Ordinal),
+        "SchannelEventCollector no entra al ciclo heavy del monitor 24/7 (H7).");
+    True(body.Contains("collectors.Add(new WindowsChangeEventCollector());", StringComparison.Ordinal),
+        "WindowsChangeEventCollector no entra al ciclo heavy del monitor 24/7 (H7).");
+    True(body.Contains("collectors.Add(new DependencyLoadEventCollector());", StringComparison.Ordinal),
+        "DependencyLoadEventCollector no entra al ciclo heavy del monitor 24/7 (H7).");
+    True(body.Contains("F33 (H7)", StringComparison.Ordinal),
+        "El cambio H7 perdio su marcador de auditoria.");
+    return Task.CompletedTask;
+}
+
+static Task Phase33TsplusLogsDisabledByDefaultSurfacesAsStateEvent()
+{
+    // M-04: deshabilitado por defecto (doc 17) se declara como estado, no como log roto.
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizo TDM.sln; gate M-04 F33 no ejecutable.");
+
+    var catalog = File.ReadAllText(Path.Combine(root!, "src", "TDM.Models", "DiagnosticEventCatalog.cs"));
+    True(catalog.Contains("TsplusLogsNotEnabled = \"TSPLUS_LOGS_NOT_ENABLED\"", StringComparison.Ordinal),
+        "Falta la constante TSPLUS_LOGS_NOT_ENABLED en el catalogo de eventos (M-04).");
+    True(catalog.Contains("\"TSPLUS_LOG_COVERAGE\", \"TSPLUS_LOGS_NOT_ENABLED\"", StringComparison.Ordinal),
+        "TSPLUS_LOGS_NOT_ENABLED no se declara en ReportCurrentState (M-04).");
+
+    var collector = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.TSplus", "TsplusLogCollector.cs"));
+    True(collector.Contains("DiagnosticEventTypes.TsplusLogsNotEnabled", StringComparison.Ordinal),
+        "TsplusLogCollector no emite el estado de logs deshabilitados (M-04).");
+    True(collector.Contains("\"Deshabilitado por defecto (default de TSplus)\"", StringComparison.Ordinal),
+        "El evento no distingue deshabilitado-por-defecto de log roto (M-04).");
+    True(collector.Contains("\"Fuentes obligatorias no disponibles\"", StringComparison.Ordinal),
+        "El evento no lista las fuentes obligatorias faltantes (M-04).");
+    True(collector.Contains("\"No confundir con\"", StringComparison.Ordinal),
+        "El evento no explica con que estados no debe confundirse (M-04).");
+
+    var analyzer = File.ReadAllText(Path.Combine(root!, "src", "TDM.Correlation", "DiagnosticCoverageAnalyzer.cs"));
+    True(analyzer.Contains("TSPLUS_LOGS_NOT_ENABLED", StringComparison.Ordinal),
+        "El analizador de cobertura ignora el estado de logs deshabilitados (M-04).");
+    True(analyzer.Contains("Estado: DESHABILITADO POR DEFECTO", StringComparison.Ordinal),
+        "La cobertura de logs no refleja el estado deshabilitado por defecto (M-04).");
+    return Task.CompletedTask;
+}
+
+static Task Phase33TopThreeCandidatesCarryOfficialGuidance()
+{
+    // H5: el top-3 nunca queda sin fuente oficial si existe una guia aplicable.
+    var now = DateTimeOffset.Now;
+    var webFinding = new DiagnosticFinding(
+        "TSPLUS-WEB-CONFIG-1",
+        "TSplus Web Portal",
+        DiagnosticSeverity.Advertencia,
+        "Configuracion web de TSplus anomala.",
+        "Hipotesis sin error HTML5 correlacionado.",
+        [],
+        ConfidenceLevel.Media,
+        Capa: DiagnosticLayer.Tsplus);
+    var ranked = RootCauseCorrelator.Analyze(Report([], now, [webFinding]));
+    var web = ranked.FirstOrDefault(c => c.Id == "ROOT-TSPLUS-WEB-CONFIG");
+    NotNull(web, "El candidato de configuracion web desapareció del ranking (H5).");
+    NotNull(web!.UrlOficial, "El top-3 quedo sin URL oficial pese a existir TSPLUS-WEB-PORT (H5).");
+    True(web.UrlOficial!.StartsWith("https://", StringComparison.Ordinal),
+        "La guia de respaldo del top-3 no apunta a una URL oficial https (H5).");
+    NotNull(web.FuenteOficial, "El top-3 quedo sin rotulo de fuente oficial (H5).");
+    NotNull(web.SolucionSugerida, "El top-3 quedo sin solucion sugerida oficial (H5).");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizo TDM.sln; gate H5 F33 no ejecutable.");
+    var correlator = File.ReadAllText(Path.Combine(root!, "src", "TDM.Correlation", "RootCauseCorrelator.cs"));
+    True(correlator.Contains("FallbackGuidanceId", StringComparison.Ordinal),
+        "Falta el mapa de respaldo FallbackGuidanceId (H5).");
+    True(correlator.Contains("position <= 3", StringComparison.Ordinal),
+        "El respaldo de guia no se limita al top-3 (H5).");
+
+    var kb = File.ReadAllText(Path.Combine(root!, "src", "TDM.KnowledgeBase", "OfficialKnowledgeBase.cs"));
+    True(kb.Contains("\"MS-SCM-START-TIMEOUT\"", StringComparison.Ordinal),
+        "Falta la KB MS-SCM-START-TIMEOUT (doc 1) (H5).");
+    True(kb.Contains("\"MS-EVENT-4624\"", StringComparison.Ordinal),
+        "Falta la KB MS-EVENT-4624 (doc 12) (H5).");
+    True(kb.Contains("\"MS-EVENT-4740\"", StringComparison.Ordinal),
+        "Falta la KB MS-EVENT-4740 (doc 13) (H5).");
+    True(kb.Contains("\"MS-EVENT-4771\"", StringComparison.Ordinal),
+        "Falta la KB MS-EVENT-4771 (doc 30) (H5).");
+    True(kb.Contains("service-not-start-events-7000-7011-time-out-error", StringComparison.Ordinal),
+        "La KB de SCM no usa la URL oficial del doc 1 (H5).");
+    True(kb.Contains("auditing/event-4624", StringComparison.Ordinal),
+        "La KB de 4624 no usa la URL oficial del doc 12 (H5).");
+    True(kb.Contains("auditing/event-4740", StringComparison.Ordinal),
+        "La KB de 4740 no usa la URL oficial del doc 13 (H5).");
+    True(kb.Contains("auditing/event-4771", StringComparison.Ordinal),
+        "La KB de 4771 no usa la URL oficial del doc 30 (H5).");
+    return Task.CompletedTask;
+}
+
+static async Task Phase33LightResourceCyclePublishesDocNineCounters()
+{
+    // H8: contadores de la guia oficial 9 en el ciclo ligero + histeresis pura de CPU.
+    False(LightweightSystemResourceCollector.NextCpuWindow(false, 69.9d, 70d),
+        "La ventana de CPU entro por debajo del umbral de aviso.");
+    True(LightweightSystemResourceCollector.NextCpuWindow(false, 70d, 70d),
+        "La ventana de CPU no entro al alcanzar el umbral de aviso.");
+    True(LightweightSystemResourceCollector.NextCpuWindow(true, 65d, 70d),
+        "La ventana de CPU salio dentro de la banda de histeresis de 5 puntos.");
+    False(LightweightSystemResourceCollector.NextCpuWindow(true, 64.9d, 70d),
+        "La ventana de CPU no salio por debajo de umbral-5.");
+    True(LightweightSystemResourceCollector.NextCpuWindow(true, null, 70d),
+        "Sin muestra la ventana de CPU perdio el estado anterior.");
+
+    var snapshot = new ResourceLoadGuard.Snapshot(
+        DateTimeOffset.Now, 42d, 55d, 16_000_000_000ul, false, true, "prueba",
+        4_000_000_000ul, 61.5d);
+    var result = await new LightweightSystemResourceCollector(snapshot)
+        .CollectAsync(Context(TimeSpan.FromHours(1)));
+    var evt = result.Eventos.Single();
+    Equal(0, result.Hallazgos.Count,
+        "El ciclo ligero no debe emitir findings nuevos de CPU (H8).");
+    True(evt.Evidencia!.Any(x => x.Clave == "Available MBytes" && x.Valor == "3815 MB"),
+        "No se publica el contador Available MBytes (doc 9) (H8).");
+    True(evt.Evidencia!.Any(x => x.Clave == "% Committed Bytes In Use" && x.Valor == "61.5%"),
+        "No se publica el contador % Committed Bytes In Use (doc 9) (H8).");
+    True(evt.Evidencia!.Any(x => x.Clave == ResourceMetricKeys.MemoryAvailableBytes && x.Valor == "4000000000"),
+        "No se publica la clave Metric.Memory.AvailableBytes (H8).");
+    True(evt.Evidencia!.Any(x => x.Clave == ResourceMetricKeys.MemoryPercentCommittedBytesInUse && x.Valor == "61.5"),
+        "No se publica la clave Metric.Memory.PercentCommittedBytesInUse (H8).");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizo TDM.sln; gate H8 F33 no ejecutable.");
+    var guard = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "ResourceLoadGuard.cs"));
+    True(guard.Contains("status.AvailPhys", StringComparison.Ordinal),
+        "El gobernador dejo de leer Available MBytes de ullAvailPhys (H8).");
+    True(guard.Contains("status.TotalPageFile - status.AvailPageFile", StringComparison.Ordinal),
+        "El gobernador dejo de calcular el commited de TotalPageFile-AvailPageFile (H8).");
+    var store = File.ReadAllText(Path.Combine(root!, "src", "TDM.Persistence", "ObservabilityStore.cs"));
+    True(store.Contains("MemoryPercentCommittedBytesInUse", StringComparison.Ordinal),
+        "La muestra de observabilidad no consume el contador commited (H8).");
 }
 
 static string? FindRepoRoot()

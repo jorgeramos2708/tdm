@@ -24,7 +24,7 @@ public partial class SessionsDashboardViewModel : ObservableObject
     {
         if (samples.Count == 0)
         {
-            ActiveValue = DisconnectedValue = "0";
+            ActiveValue = DisconnectedValue = "N/D";
             LogonFailures = NlaFailures = "No evaluado";
             Coverage = "No evaluado";
             SessionIncidents = Array.Empty<IncidentRow>();
@@ -39,8 +39,8 @@ public partial class SessionsDashboardViewModel : ObservableObject
         var sessionSample = DashboardRules.LastSessionSample(samples);
         var sessionSource = sessionSample ?? latest;
         var sessionsEvaluated = sessionSample != null;
-        ActiveValue = sessionSource.ActiveSessions.ToString();
-        DisconnectedValue = sessionSource.DisconnectedSessions.ToString();
+        ActiveValue = sessionSource.ActiveSessions?.ToString() ?? "N/D";
+        DisconnectedValue = sessionSource.DisconnectedSessions?.ToString() ?? "N/D";
         Coverage = sessionsEvaluated ? sessionSource.SessionCoverage : "No evaluado";
         LogonFailures = sessionsEvaluated ? sessionSource.LogonFailures.ToString() : "No evaluado";
         NlaFailures = sessionsEvaluated ? sessionSource.NlaFailures.ToString() : "No evaluado";

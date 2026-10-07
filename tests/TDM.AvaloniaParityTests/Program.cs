@@ -709,7 +709,8 @@ internal static class Program
             Equal("No evaluado", sessions.Coverage);
             Equal("No evaluado", sessions.LogonFailures);
             Equal("No evaluado", sessions.NlaFailures);
-            Equal("0", sessions.ActiveValue);
+            // F33 (H1): sin ventana de muestras las sesiones son desconocidas, no 0.
+            Equal("N/D", sessions.ActiveValue);
 
             var support = new SupportDashboardViewModel();
             support.Apply(Array.Empty<ObservabilitySample>());
@@ -909,7 +910,9 @@ internal static class Program
         {
             var support = new SupportDashboardViewModel(); support.Apply(Array.Empty<ObservabilitySample>()); Equal("N/D", support.ServiceValue);
             var perf = new PerformanceDashboardViewModel(); perf.Apply(Array.Empty<ObservabilitySample>()); Equal("N/D", perf.CpuValue);
-            var sessions = new SessionsDashboardViewModel(); sessions.Apply(Array.Empty<ObservabilitySample>()); Equal("0", sessions.ActiveValue);
+            var sessions = new SessionsDashboardViewModel(); sessions.Apply(Array.Empty<ObservabilitySample>());
+            // F33 (H1): sin muestra no hay sesiones conocidas; N/D en vez del 0 falso.
+            Equal("N/D", sessions.ActiveValue);
         });
 
         Run("CultureIsPinnedForDeterministicFormatting", () =>

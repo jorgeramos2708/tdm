@@ -29,12 +29,17 @@ public static class ResourceLoadGuard
         ulong? MemoryTotalBytes,
         bool ShouldDefer,
         bool AllowsIntensiveSampling,
-        string Summary);
+        string Summary,
+        // F33 (H8): contadores de la guía oficial 9 (MEMORYSTATUSEX) — Available MBytes
+        // (ullAvailPhys) y % Committed Bytes In Use ((TotalPageFile-AvailPageFile)/TotalPageFile).
+        ulong? MemoryAvailableBytes = null,
+        double? MemoryCommittedPercent = null);
 
     public static Snapshot Capture(ResourceDetectionThresholds? thresholds = null)
     {
         var memory = ReadMemory();
-        return BuildSnapshot(ReadCpuPercent(), memory.FreePercent, memory.TotalBytes, thresholds ?? ResourceDetectionThresholds.Default);
+        return BuildSnapshot(ReadCpuPercent(), memory.FreePercent, memory.TotalBytes, thresholds ?? ResourceDetectionThresholds.Default,
+            memory.AvailableBytes, memory.CommittedPercent);
     }
 
     /// <summary>
@@ -45,10 +50,12 @@ public static class ResourceLoadGuard
     public static Snapshot CaptureDisplay(ResourceDetectionThresholds? thresholds = null)
     {
         var memory = ReadMemory();
-        return BuildSnapshot(ReadDisplayCpuPercent(), memory.FreePercent, memory.TotalBytes, thresholds ?? ResourceDetectionThresholds.Default);
+        return BuildSnapshot(ReadDisplayCpuPercent(), memory.FreePercent, memory.TotalBytes, thresholds ?? ResourceDetectionThresholds.Default,
+            memory.AvailableBytes, memory.CommittedPercent);
     }
 
-    private static Snapshot BuildSnapshot(double? cpu, double? memoryFree, ulong? memoryTotalBytes, ResourceDetectionThresholds thresholds)
+    private static Snapshot BuildSnapshot(double? cpu, double? memoryFree, ulong? memoryTotalBytes, ResourceDetectionThresholds thresholds,
+        ulong? memoryAvailableBytes, double? memoryCommittedPercent)
     {
         // El monitor debe ceder ante un servidor bajo presión. Los umbrales provienen de la
         // configuración operativa (Fase 29, C1); con los valores por defecto el comportamiento
@@ -74,7 +81,7 @@ public static class ResourceLoadGuard
                 ? "cobertura de recursos parcial; muestreo intensivo deshabilitado"
                 : "recursos disponibles";
         return new Snapshot(DateTimeOffset.Now, cpu, memoryFree, memoryTotalBytes, shouldDefer, allowsIntensive,
-            $"{state} · {cpuText} · {memText}");
+            $"{state} · {cpuText} · {memText}", memoryAvailableBytes, memoryCommittedPercent);
     }
 
     private static double? ReadCpuPercent()
@@ -148,7 +155,7 @@ public static class ResourceLoadGuard
         catch { return null; }
     }
 
-    private static (double? FreePercent, ulong? TotalBytes) ReadMemory()
+    private static (double? FreePercent, ulong? TotalBytes, ulong? AvailableBytes, double? CommittedPercent) ReadMemory()
     {
         try
         {
@@ -156,10 +163,17 @@ public static class ResourceLoadGuard
             {
                 Length = (uint)Marshal.SizeOf<MemoryStatusEx>()
             };
-            if (!GlobalMemoryStatusEx(ref status)) return (null, null);
-            return (Math.Clamp(100d - status.MemoryLoad, 0d, 100d), status.TotalPhys > 0 ? status.TotalPhys : null);
+            if (!GlobalMemoryStatusEx(ref status)) return (null, null, null, null);
+            var freePercent = Math.Clamp(100d - status.MemoryLoad, 0d, 100d);
+            var totalBytes = status.TotalPhys > 0 ? status.TotalPhys : (ulong?)null;
+            var availableBytes = status.AvailPhys;
+            // % Committed Bytes In Use (Memory Targets doc 9): commited = TotalPageFile - AvailPageFile.
+            double? committedPercent = status.TotalPageFile > 0
+                ? Math.Clamp((status.TotalPageFile - status.AvailPageFile) * 100d / status.TotalPageFile, 0d, 100d)
+                : null;
+            return (freePercent, totalBytes, availableBytes, committedPercent);
         }
-        catch { return (null, null); }
+        catch { return (null, null, null, null); }
     }
 
     [StructLayout(LayoutKind.Sequential)]

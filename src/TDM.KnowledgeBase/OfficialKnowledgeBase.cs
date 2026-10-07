@@ -184,14 +184,47 @@ public static class OfficialKnowledgeBase
                 "https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/memory-consumption-between-identical-windows-server-environments",
                 "Windows Server / memoria"),
 
-            ["TSPLUS-LICENSE"] = new(
-                "TSPLUS-LICENSE",
-                "TSplus",
-                "Activating your license / Rehosting your license",
-                "Valida en la consola TSplus el estado de la licencia de Remote Access (activación y posible problema de activación) y la fecha de rehosting (cada 6 meses con soporte vigente). TDM sólo lee los eventos de log; no activa, no rehostea ni modifica la licencia.",
-                "https://docs.tsplus.net/tsplus/activating-your-license",
-                "TSplus Remote Access / licencia")
-        };
+["TSPLUS-LICENSE"] = new(
+"TSPLUS-LICENSE",
+"TSplus",
+"Activating your license / Rehosting your license",
+"Valida en la consola TSplus el estado de licencia de Remote Access (activación y posible problema de activación) y la fecha de rehosting (cada 6 meses con soporte vigente). TDM sólo lee los eventos de log; no activa, no rehostea ni modifica la licencia.",
+"https://docs.tsplus.net/tsplus/activating-your-license",
+"TSplus Remote Access / licencia"),
+
+// F33 (H5): fuentes oficiales para los candidatos de ranking que no traían GuidanceId.
+["MS-SCM-START-TIMEOUT"] = new(
+"MS-SCM-START-TIMEOUT",
+"Microsoft",
+"A service does not start, and events 7000 and 7011 are logged in Windows Server",
+"El Service Control Manager espera el tiempo del registro ServicesPipeTimeout antes de registrar 7000/7011. Microsoft recomienda aumentarlo con cuidado (por ejemplo 60000 ms en HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control) e investigar si el timeout es síntoma de otro problema. TDM sólo lee eventos; no modifica el registro ni reinicia servicios.",
+"https://learn.microsoft.com/en-us/troubleshoot/windows-server/system-management-components/service-not-start-events-7000-7011-time-out-error",
+"Windows Server / SCM / inicio de servicios"),
+
+["MS-EVENT-4624"] = new(
+"MS-EVENT-4624",
+"Microsoft",
+"4624(S) An account was successfully logged on",
+"El evento 4624 registra cada sesión de inicio de sesión creada en el equipo de destino. Usa Logon Type 10 (RemoteInteractive) para identificar inicios por Escritorio remoto/Terminal Services y correlaciona por Logon ID con eventos vecinos. TDM sólo lee esta evidencia; no autentica ni modifica cuentas.",
+"https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4624",
+"Windows / auditoría de inicio de sesión"),
+
+["MS-EVENT-4740"] = new(
+"MS-EVENT-4740",
+"Microsoft",
+"4740(S) A user account was locked out",
+"El evento 4740 se genera cada vez que una cuenta se bloquea. Revisa 'Account That Was Locked Out' y 'Caller Computer Name' para identificar desde qué equipo llegaron los intentos que provocaron el bloqueo; Microsoft recomienda alertar cuando Caller Computer Name no pertenece al dominio. TDM no desbloquea cuentas.",
+"https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4740",
+"Windows / bloqueo de cuentas"),
+
+["MS-EVENT-4771"] = new(
+"MS-EVENT-4771",
+"Microsoft",
+"4771(F) Kerberos pre-authentication failed",
+"El KDC no emite el TGT: causas documentadas son contraseña caducada (0x17), contraseña incorrecta (0x18) o problemas de smart card (0x10). Revisa Failure Code, Client Address y Pre-Authentication Type; una ráfaga de 0x18 en cuentas críticas puede indicar fuerza bruta. TDM sólo lee eventos; no cambia contraseñas ni cuentas.",
+"https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4771",
+"Windows / Kerberos")
+};
 
     public static OfficialGuidance? Get(string id) => Entries.TryGetValue(id, out var value) ? value : null;
 }

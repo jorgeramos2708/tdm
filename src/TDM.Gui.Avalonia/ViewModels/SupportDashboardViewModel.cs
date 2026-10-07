@@ -157,14 +157,17 @@ public partial class SupportDashboardViewModel : ObservableObject
         var sessionIncidents = incidents.Where(DashboardRules.IsSessionIncident).ToList();
         var sessionSample = DashboardRules.LastSessionSample(samples);
         var sessionsEvaluated = sessionSample != null;
-        SessionValue = sessionsEvaluated ? $"{sessionSample!.ActiveSessions + sessionSample.DisconnectedSessions}" : "N/D";
+        // F33 (H1): los conteos sólo se suman cuando el inventario los evaluó; si no hay dato
+        // se muestra N/D en vez de un 0 fabricado.
+        var sessionCountsKnown = sessionSample is { ActiveSessions: not null, DisconnectedSessions: not null };
+        SessionValue = sessionCountsKnown ? $"{sessionSample!.ActiveSessions + sessionSample.DisconnectedSessions}" : "N/D";
         SessionSummary = sessionIncidents.Count switch
         {
             0 => "Sin incidentes de sesión",
             1 => "1 incidente de sesión",
             _ => $"{sessionIncidents.Count} incidentes de sesión"
         };
-        SessionCounts = sessionsEvaluated
+        SessionCounts = sessionCountsKnown
             ? $"Activas: {sessionSample!.ActiveSessions} · Desconectadas: {sessionSample.DisconnectedSessions}"
             : "Sin datos de sesiones";
         SessionCoverage = $"Cobertura: {(sessionsEvaluated ? sessionSample!.SessionCoverage : "No evaluado")}";

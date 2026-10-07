@@ -427,9 +427,51 @@ public static partial class RootCauseCorrelator
         _ => "INDETERMINADO"
     };
 
+    // F33 (H5): mapeo de respaldo por familia de candidato; sólo resuelve KBs
+    // verificadas con documentación oficial (ver OfficialKnowledgeBase).
+    private static string? FallbackGuidanceId(string id) => id switch
+    {
+        // Servicios/SCM: paro, dependencia o fallo de arranque (doc oficial 1).
+        var value when value.StartsWith("ROOT-TSPLUS-SERVICE-STOPPED-", StringComparison.Ordinal)
+            || value.StartsWith("ROOT-SCM-SERVICE-FAILURE-", StringComparison.Ordinal)
+            || value.StartsWith("ROOT-SERVICE-DEPENDENCY-", StringComparison.Ordinal)
+            || value is "ROOT-TSPLUS-APS" => "MS-SCM-START-TIMEOUT",
+
+        // Identidad/auditoría: eventos oficiales 4624/4740/4771.
+        var value when value.StartsWith("ROOT-WINDOWS-ACCOUNT-LOCKOUT", StringComparison.Ordinal) => "MS-EVENT-4740",
+        var value when value.StartsWith("ROOT-WINDOWS-KERBEROS-PREAUTH", StringComparison.Ordinal) => "MS-EVENT-4771",
+        var value when value.StartsWith("ROOT-WINDOWS-REMOTE-LOGON", StringComparison.Ordinal) => "MS-EVENT-4624",
+
+        // Perfil de usuario, integridad de binarios e interferencia de seguridad.
+        "ROOT-WINDOWS-USER-PROFILE" => "MS-USER-PROFILE",
+        "ROOT-EXTERNAL-MODULE-TSPLUS-CRASH" => "MS-APP-CRASH",
+        "ROOT-EXTERNAL-SECURITY-INTERFERENCE" => "TSPLUS-ANTIVIRUS",
+        "ROOT-TSPLUS-INTEGRITY" => "TSPLUS-ANTIVIRUS",
+        var value when value.StartsWith("ROOT-TSPLUS-INSTALL-INTEGRITY", StringComparison.Ordinal) => "TSPLUS-ANTIVIRUS",
+
+        // Configuración TSplus: revisión de los logs oficiales y puerto web.
+        var value when value.StartsWith("ROOT-TSPLUS-APPLICATION-CONFIG", StringComparison.Ordinal)
+            || value.StartsWith("ROOT-TSPLUS-CONFIG-ARTIFACT", StringComparison.Ordinal)
+            || value.StartsWith("ROOT-TSPLUS-CONFIG-CHANGE", StringComparison.Ordinal) => "TSPLUS-LOGS",
+        "ROOT-TSPLUS-WEB-CONFIG" => "TSPLUS-WEB-PORT",
+        var value when value.StartsWith("ROOT-TSPLUS-FARM-CONFIG", StringComparison.Ordinal) => "TSPLUS-FARM-CONFIG",
+
+        // RDP/Windows: políticas y dependencias de Directorio (guía de resolución).
+        var value when value.StartsWith("ROOT-WINDOWS-RDP-DISABLED-POLICY", StringComparison.Ordinal)
+            || value is "ROOT-WINDOWS-RDS-ROLE-CONFLICT"
+                or "ROOT-WINDOWS-AD-RDP-DEPENDENCY"
+                or "ROOT-WINDOWS-RDP-SHELL-PIPELINE" => "MS-RDP-TERMSERVICE",
+
+        // NLA/CRED-VALIDATION y WINLOGON/REMOTEAPP no tienen guía oficial: null.
+        _ => null
+    };
+
     private static RootCauseCandidate ToCandidate(CandidateDraft draft, int position)
     {
-        var guidance = draft.GuidanceId is null ? null : OfficialKnowledgeBase.Get(draft.GuidanceId);
+        // F33 (H5): los tres primeros candidatos del ranking nunca quedan sin fuente
+        // oficial cuando existe una guía aplicable para su familia de causa.
+        var guidanceId = draft.GuidanceId ?? (position <= 3 ? FallbackGuidanceId(draft.Id) : null);
+        var guidance = guidanceId is null ? null : OfficialKnowledgeBase.Get(guidanceId);
         return new RootCauseCandidate(
             position,
             draft.Id,
