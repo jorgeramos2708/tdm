@@ -127,7 +127,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("IncidentClustersClipToAnalyzedWindow", IncidentClustersClipToAnalyzedWindow),
     ("StaleRemoteSymptomDoesNotConfirmCandidates", StaleRemoteSymptomDoesNotConfirmCandidates),
     ("AnalysisWindowClipIsWiredAcrossRcaFeeds", AnalysisWindowClipIsWiredAcrossRcaFeeds),
-    ("ExportDependencyRowsShowOriginServiceAndWarnOnNotEvaluated", ExportDependencyRowsShowOriginServiceAndWarnOnNotEvaluated),
+    ("ExportDependencyRowsShowOriginServiceAndGapOnNotEvaluated", ExportDependencyRowsShowOriginServiceAndGapOnNotEvaluated),
     ("ExportFooterReportsHiddenDependencyRows", ExportFooterReportsHiddenDependencyRows),
     ("ScmDriftBaselineSkipsFailedReads", ScmDriftBaselineSkipsFailedReads),
     ("TsplusSpanishLogLinesClassify", TsplusSpanishLogLinesClassify),
@@ -233,7 +233,13 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("Phase34ExecutiveStateIsNotSaludableWithErrorFindings", Phase34ExecutiveStateIsNotSaludableWithErrorFindings),
     ("Phase34ReviewTargetsDeclareTruncation", Phase34ReviewTargetsDeclareTruncation),
     ("Phase34ImpactEvidenceRendersInExport", Phase34ImpactEvidenceRendersInExport),
-    ("Phase34ModuleMissingFindingsRenderProcessesSection", Phase34ModuleMissingFindingsRenderProcessesSection)
+    ("Phase34ModuleMissingFindingsRenderProcessesSection", Phase34ModuleMissingFindingsRenderProcessesSection),
+    ("Phase35TimeSyncBranchAndTimestampsAreHonest", Phase35TimeSyncBranchAndTimestampsAreHonest),
+    ("Phase35PerformanceRecuentoIsCrossCheckedAgainstExport", Phase35PerformanceRecuentoIsCrossCheckedAgainstExport),
+    ("Phase35SyncRecuentoAndTensionsRunsAfterServiceAndGuiAppend", Phase35SyncRecuentoAndTensionsRunsAfterServiceAndGuiAppend),
+    ("Phase35NotEvaluatedSeparatesFromWarningBuckets", Phase35NotEvaluatedSeparatesFromWarningBuckets),
+    ("Phase35EmptySecurityWindowIsNotReportedHealthy", Phase35EmptySecurityWindowIsNotReportedHealthy),
+    ("Phase35MandateDeclaresCanaryWriteException", Phase35MandateDeclaresCanaryWriteException)
 };
 
 var failed = 0;
@@ -3189,7 +3195,7 @@ static Task AnalysisWindowClipIsWiredAcrossRcaFeeds()
     return Task.CompletedTask;
 }
 
-static async Task ExportDependencyRowsShowOriginServiceAndWarnOnNotEvaluated()
+static async Task ExportDependencyRowsShowOriginServiceAndGapOnNotEvaluated()
 {
     var dir = TempDir();
     try
@@ -3216,10 +3222,16 @@ static async Task ExportDependencyRowsShowOriginServiceAndWarnOnNotEvaluated()
             "La fila de dependencia a profundidad mostró N/D en lugar del servicio origen.");
         False(html.Contains("<td>N/D</td><td>depende de</td>", StringComparison.Ordinal),
             "El export mantuvo N/D en la columna Servicio de una relación real.");
-        True(html.Contains("<div class='dep warn'><strong>Web Portal</strong>", StringComparison.Ordinal),
-            "Un 'No evaluado' del mapa de dependencias se pintó como warn.");
+        // M-06 (F35): "No evaluado" es brecha de cobertura y va a la clase gris .gap;
+        // ya no comparte el bucket ámbar de "Advertencia".
+        True(html.Contains("<div class='dep gap'><strong>Web Portal</strong>", StringComparison.Ordinal),
+            "Un 'No evaluado' del mapa de dependencias dejó de pintarse como brecha (.gap).");
+        False(html.Contains("<div class='dep warn'><strong>Web Portal</strong>", StringComparison.Ordinal),
+            "Un 'No evaluado' del mapa de dependencias sigue compartiendo bucket con 'Advertencia'.");
         False(html.Contains("<div class='dep ok'><strong>Web Portal</strong>", StringComparison.Ordinal),
             "Un 'No evaluado' del mapa de dependencias quedó en verde.");
+        True(html.Contains(".gap{border-color:#8fa3b8}", StringComparison.Ordinal),
+            "La clase .gap del mapa de dependencias no tiene regla CSS propia.");
     }
     finally { TryDelete(dir); }
 }
@@ -4064,20 +4076,31 @@ static async Task RecentTransitionReadSkipsFilesOutsideWindow()
     names.Add("transitions-diagnostic-notadate.jsonl");
     names.Add("notes.txt");
 
-    var selected = LocalStateStore.SelectRecentTransitionFiles(names, now.AddHours(-2), now);
+    // La holgura de 1 día se ancla al inicio de la ventana, no al día de hoy: con la
+    // ventana cruzando la medianoche (entre 00:00 y 02:00 el inicio cae en el día
+    // anterior) el límite inferior baja un día. El test calcula el mismo límite que
+    // la regla en vez de asumir que siempre es "hoy - 1".
+    var from = now.AddHours(-2);
+    var minDate = from.LocalDateTime.Date.AddDays(-1);
+    var firstOutside = minDate.AddDays(-1);
+
+    var selected = LocalStateStore.SelectRecentTransitionFiles(names, from, now);
     True(selected.Contains($"transitions-{today:yyyy-MM-dd}.jsonl"),
         "El archivo de hoy quedó fuera de la selección.");
     True(selected.Contains($"transitions-{today.AddDays(-1):yyyy-MM-dd}.jsonl"),
         "El archivo de ayer (holgura de 1 día) debía conservarse.");
-    False(selected.Contains($"transitions-{today.AddDays(-2):yyyy-MM-dd}.jsonl"),
-        "Un archivo de hace 2 días no debe abrirse para una ventana de 2 horas.");
+    True(selected.Contains($"transitions-{minDate:yyyy-MM-dd}.jsonl"),
+        "El archivo del límite de la holgura debía conservarse.");
+    False(selected.Contains($"transitions-{firstOutside:yyyy-MM-dd}.jsonl"),
+        "Un archivo más allá de la holgura de 1 día no debe abrirse para una ventana de 2 horas.");
     False(selected.Contains($"transitions-{today.AddDays(-29):yyyy-MM-dd}.jsonl"),
         "La retención completa (30 días) volvió a leerse para una ventana corta.");
     True(selected.Any(x => x.Contains("notadate", StringComparison.Ordinal)),
         "Un nombre de archivo no reconocido debe conservarse por seguridad.");
     True(selected.Any(x => x.Contains("notes", StringComparison.Ordinal)),
         "Un archivo sin fecha en el nombre debe conservarse por seguridad.");
-    Equal(4, selected.Count, "La selección esperaba hoy + ayer + dos no reconocidos.");
+    Equal((today - minDate).Days + 1 + 2, selected.Count,
+        "La selección esperaba los días dentro de la holgura más los dos no reconocidos.");
 
     var root = TempDir();
     try
@@ -6583,6 +6606,173 @@ static async Task Phase34ModuleMissingFindingsRenderProcessesSection()
             "El modulo ausente no se muestra en el informe (M-20).");
     }
     finally { TryDelete(dir); }
+}
+
+static Task Phase35TimeSyncBranchAndTimestampsAreHonest()
+{
+    // H10: la rama WINDOWS_TIME_SYNC_FAILURE no tiene productor en ningún colector y
+    // la auditoría prohíbe inventar uno sin respaldo documental (§Brecha); el push no
+    // fabrica TimeCreated al leer.
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate H10 no ejecutable.");
+    var troubleshooter = File.ReadAllText(Path.Combine(root!, "src", "TDM.Correlation", "TsplusGuidedTroubleshooter.cs"));
+    False(troubleshooter.Contains("HasErrorType(\"WINDOWS_TIME_SYNC_FAILURE\"", StringComparison.Ordinal),
+        "H10: la rama muerta WINDOWS_TIME_SYNC_FAILURE sigue en la guía de 2FA/Tiempo (ningún colector la emite).");
+    True(troubleshooter.Contains("HasFinding(\"TSPLUS-2FA-TIME-SYNC-REVIEW\")", StringComparison.Ordinal),
+        "H10: se eliminó junto con la rama muerta la señal real TSPLUS-2FA-TIME-SYNC-REVIEW.");
+    True(troubleshooter.Contains("AnyErrorContaining(\"W32Time\"", StringComparison.Ordinal),
+        "H10: se eliminó junto con la rama muerta la detección W32Time con productor verificado.");
+    var push = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsPushEventCollector.cs"));
+    True(push.Contains("record.TimeCreated is not { } created", StringComparison.Ordinal),
+        "H10: el push sigue aceptando registros sin TimeCreated en vez de descartarlos.");
+    False(push.Contains("record.TimeCreated ?? DateTimeOffset.Now", StringComparison.Ordinal),
+        "H10: el push sigue fabricando el instante con la hora de lectura (DateTimeOffset.Now) si el registro no trae TimeCreated.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35PerformanceRecuentoIsCrossCheckedAgainstExport()
+{
+    // M-05: el analizador cruza el recuento de rendimiento contra las colecciones que
+    // exporta el informe; con números distintos declara la tensión y la sincronización
+    // final los iguala (medición del motor vs. colecciones finales).
+    var now = DateTimeOffset.Now;
+    var perf = new DiagnosticPerformanceAssessment(1200, 10, 1, 0, "WindowsEvent", 180, 50, 40, 3, 100, 120, "ok");
+    var finding = new DiagnosticFinding("TDM-INFO-PRUEBA", "Prueba", DiagnosticSeverity.Informativo, "d", "d", []);
+    var mismatched = Report([], now, [finding]) with { RendimientoDiagnostico = perf };
+
+    var tensions = ReportConsistencyAnalyzer.Analyze(mismatched);
+    True(tensions.Any(t => t.Contains("Recuento de hallazgos inconsistente", StringComparison.Ordinal)),
+        "M-05: el desajuste hallazgos (motor 3 vs informe 1) no generó tensión de recuento.");
+    True(tensions.Any(t => t.Contains("Recuento de observaciones inconsistente", StringComparison.Ordinal)),
+        "M-05: el desajuste observaciones (motor 40 vs informe 0) no generó tensión de recuento.");
+
+    var synced = DiagnosticWorkflow.SyncRecuentoAndTensions(mismatched);
+    NotNull(synced.RendimientoDiagnostico, "M-05: la sincronización descartó la medición de rendimiento.");
+    Equal(1, synced.RendimientoDiagnostico!.Hallazgos,
+        "M-05: la sincronización no igualó el recuento de hallazgos con el informe final.");
+    Equal(synced.Eventos.Count, synced.RendimientoDiagnostico.EventosNormalizados,
+        "M-05: la sincronización no igualó el recuento de observaciones con el informe final.");
+    False(synced.Tensiones.Any(t => t.Contains("Recuento", StringComparison.Ordinal)),
+        "M-05: tras sincronizar quedó una tensión de recuento obsoleta.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35SyncRecuentoAndTensionsRunsAfterServiceAndGuiAppend()
+{
+    // M-09: el servicio y la GUI añaden hallazgos DESPUÉS de Analyze (estabilidad,
+    // divergencia, latido); sin el cierre de sync la tensión TDM-CAUSE-UNSTABLE y los
+    // recuentos quedaban congelados en el snapshot previo a los apéndices.
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate M-09 no ejecutable.");
+    var worker = File.ReadAllText(Path.Combine(root!, "src", "TDM.Service", "TdmWorker.cs"));
+    True(worker.Split("DiagnosticWorkflow.SyncRecuentoAndTensions(report)").Length - 1 >= 2,
+        "M-09: el servicio debe cerrar recuento y tensiones en sus dos ciclos (normal y emergencia).");
+    var gui = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "Services", "DiagnosticExecutionService.cs"));
+    True(gui.Contains("DiagnosticWorkflow.SyncRecuentoAndTensions(report)", StringComparison.Ordinal),
+        "M-09: la GUI no cierra recuento y tensiones después de enriquecer el reporte.");
+
+    var now = DateTimeOffset.Now;
+    var principal = new RootCauseCandidate(1, "ROOT-TEST-UNSTABLE", "Windows / prueba", DiagnosticLayer.Windows, 96,
+        ConfidenceLevel.Alta, "Causa de prueba.", "Mecanismo de prueba.",
+        [new EvidenceItem("Evidencia primaria independiente", "Sí")],
+        Producto: TsplusProduct.RemoteAccess, HoraIncidente: now.AddMinutes(-2), OrigenClasificado: "WINDOWS");
+    var unstable = new DiagnosticFinding("TDM-CAUSE-UNSTABLE", "Estabilidad de causa", DiagnosticSeverity.Advertencia,
+        "La causa principal rotó entre muestras.", "Detalle de prueba.", [], Capa: DiagnosticLayer.Windows);
+    var perf = new DiagnosticPerformanceAssessment(10, 1, 0, 0, "test", 1, 0, 0, 0, 1, 1, "ok");
+    var appended = Report([], now, [unstable]) with
+    {
+        CausaRaizPrincipal = principal,
+        RendimientoDiagnostico = perf
+    };
+
+    var synced = DiagnosticWorkflow.SyncRecuentoAndTensions(appended);
+    True(synced.Tensiones.Any(t => t.Contains("historial inestable", StringComparison.OrdinalIgnoreCase)),
+        "M-09: la tensión TDM-CAUSE-UNSTABLE no se recalculó tras el apéndice posterior a Analyze.");
+    NotNull(synced.RendimientoDiagnostico, "M-09: la sincronización descartó la medición de rendimiento.");
+    Equal(1, synced.RendimientoDiagnostico!.Hallazgos,
+        "M-09: el recuento de rendimiento no se actualizó con el hallazgo añadido después del motor.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35NotEvaluatedSeparatesFromWarningBuckets()
+{
+    // M-06: "No evaluado" (brecha, gris) deja de compartir bucket con "Advertencia"
+    // (degradación, ámbar) y la falla explícita escala a rojo en la escala renumerada.
+    var now = DateTimeOffset.Now;
+    var sample = new ObservabilitySample
+    {
+        Timestamp = now,
+        SampleKind = "diagnostic",
+        ServiceStates = new Dictionary<string, string>
+        {
+            ["TermService"] = "Running",
+            ["TSplusGateway"] = "No evaluado",
+            ["RemoteSupportUnattended-Service"] = "Advertencia",
+            ["TSplusStopped"] = "Stopped"
+        }
+    };
+    var muted = Avalonia.Media.Color.FromRgb(143, 163, 184);
+    var warn = Avalonia.Media.Color.FromRgb(255, 209, 102);
+    var error = Avalonia.Media.Color.FromRgb(255, 138, 61);
+
+    // Panel preventivo: pinta según el nivel de la escala (2 brecha / 3 revisión / 4 falla).
+    var preventive = new PreventiveDashboardViewModel();
+    preventive.Apply([sample]);
+    var gapRow = preventive.StabilityRows.Single(x => x.Name.Contains("TSplusGateway", StringComparison.Ordinal));
+    var warnRow = preventive.StabilityRows.Single(x => x.Name.Contains("RemoteSupportUnattended-Service", StringComparison.Ordinal));
+    var errorRow = preventive.StabilityRows.Single(x => x.Name.Contains("TSplusStopped", StringComparison.Ordinal));
+    Equal(muted, ((Avalonia.Media.SolidColorBrush)gapRow.Accent).Color,
+        "M-06: 'No evaluado' se pintó como degradación en vez de brecha (gris).");
+    Equal(warn, ((Avalonia.Media.SolidColorBrush)warnRow.Accent).Color,
+        "M-06: 'Advertencia' dejó de pintarse como revisión (ámbar).");
+    Equal(error, ((Avalonia.Media.SolidColorBrush)errorRow.Accent).Color,
+        "M-06: una falla explícita dejó de pintarse en rojo.");
+
+    // Tabla de servicios: mismo par con etiquetas y acentos propios.
+    var services = new ServicesDashboardViewModel();
+    services.Apply([sample]);
+    var noEvalRow = services.Services.Single(x => x.Status == "No evaluado");
+    var revisarRow = services.Services.Single(x => x.Status == "Revisar");
+    Equal(muted, ((Avalonia.Media.SolidColorBrush)noEvalRow.Accent).Color,
+        "M-06: la tabla de servicios pintó 'No evaluado' con el acento de advertencia.");
+    Equal(warn, ((Avalonia.Media.SolidColorBrush)revisarRow.Accent).Color,
+        "M-06: la tabla de servicios dejó de pintar 'Advertencia' como revisión.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35EmptySecurityWindowIsNotReportedHealthy()
+{
+    // M-15: 0 registros en la ventana Security no prueba política de auditoría sana;
+    // los tres tramos (colector de logon, colector de perfil y analizador de cobertura)
+    // deben declarar la brecha en vez de "Disponible".
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate M-15 no ejecutable.");
+    var logon = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsLogonHealthCollector.cs"));
+    True(logon.Contains("coverage == \"Disponible\" && examined == 0", StringComparison.Ordinal),
+        "M-15: una ventana Security vacía sigue reportándose como cobertura Disponible.");
+    var session = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Rdp", "UserSessionProfileCollector.cs"));
+    True(session.Contains("recordsRead == 0 && status == \"Disponible\"", StringComparison.Ordinal),
+        "M-15: 0 eventos Security examinados sin error siguen reportando 'Disponible'.");
+    True(session.Contains("no se reporta como disponible", StringComparison.Ordinal),
+        "M-15: el estado vacío no declara la política de auditoría como desconocida.");
+    var coverage = File.ReadAllText(Path.Combine(root!, "src", "TDM.Correlation", "DiagnosticCoverageAnalyzer.cs"));
+    True(coverage.Contains("raw.Contains(\"No evaluado\", StringComparison.OrdinalIgnoreCase)", StringComparison.Ordinal),
+        "M-15: la cobertura no tiene rama explícita para 'No evaluado' (el texto de brecha contiene la palabra 'disponible').");
+    return Task.CompletedTask;
+}
+
+static Task Phase35MandateDeclaresCanaryWriteException()
+{
+    // M-16: el único borrador de escritura de TDM (evento canario) se declara en el
+    // mandato de solo lectura en vez de quedar fuera de la promesa.
+    var narrative = DiagnosticNarrativeBuilder.Build(Report([], DateTimeOffset.Now));
+    True(narrative.Contains("solo lectura sobre Windows/TSplus", StringComparison.Ordinal),
+        "M-16: el mandato de solo lectura desapareció de la narrativa.");
+    True(narrative.Contains("TDM Canary", StringComparison.Ordinal),
+        "M-16: la excepción del evento canario no se declara en el mandato de solo lectura.");
+    True(narrative.Contains("Única excepción de escritura", StringComparison.Ordinal),
+        "M-16: la escritura del canario no queda acotada como única excepción.");
+    return Task.CompletedTask;
 }
 
 static string? FindRepoRoot()

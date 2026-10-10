@@ -480,7 +480,12 @@ public static class TsplusGuidedTroubleshooter
 
         if (component.Equals("Tiempo / TOTP", StringComparison.OrdinalIgnoreCase))
         {
-            var timeError = x.HasFinding("TSPLUS-2FA-TIME-SYNC-REVIEW") || x.HasErrorType("WINDOWS_TIME_SYNC_FAILURE", "WINDOWS_TIME_SERVICE_ERROR") || x.AnyErrorContaining("W32Time", "Microsoft-Windows-Time-Service", "clock drift", "desfase de reloj", "time synchronization failed");
+            // H10 (F35): se elimina la rama muerta WINDOWS_TIME_SYNC_FAILURE /
+            // WINDOWS_TIME_SERVICE_ERROR: ningún colector la emite y la auditoría prohíbe
+            // crear un productor nuevo sin respaldo documental (§Brecha). La señal real
+            // sigue siendo AnyErrorContaining("W32Time"...) o el finding de cobertura
+            // TSPLUS-2FA-TIME-SYNC-REVIEW, que sí tienen productor verificado.
+            var timeError = x.HasFinding("TSPLUS-2FA-TIME-SYNC-REVIEW") || x.AnyErrorContaining("W32Time", "Microsoft-Windows-Time-Service", "clock drift", "desfase de reloj", "time synchronization failed");
             return Build(TsplusProduct.TwoFactorAuthentication, component,
                 timeError ? GuidedResolutionState.Error : GuidedResolutionState.NoEvaluado,
                 timeError ? DiagnosticSeverity.Error : DiagnosticSeverity.Informativo,

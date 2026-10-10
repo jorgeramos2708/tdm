@@ -210,7 +210,14 @@ public static class DiagnosticCoverageAnalyzer
             limitations.Add("Sin Security Log legible no puede confirmarse/descartarse completamente NLA/4625, bloqueos 4740, Kerberos 4771, validación 4776 ni estados de contraseña.");
             return;
         }
-        var status = IsBlocked(raw) ? "Bloqueada" : raw.Contains("No disponible", StringComparison.OrdinalIgnoreCase) ? "No disponible" : raw.Contains("Disponible", StringComparison.OrdinalIgnoreCase) ? "Disponible" : "Parcial";
+        // M-15 (F35): rama explícita de "No evaluado" ANTES del Contains("Disponible"):
+        // el texto de brecha declara "no se reporta como disponible" y esa palabra
+        // habría clasificado una política de auditoría desconocida como sana.
+        var status = IsBlocked(raw) ? "Bloqueada"
+            : raw.Contains("No disponible", StringComparison.OrdinalIgnoreCase) ? "No disponible"
+            : raw.Contains("No evaluado", StringComparison.OrdinalIgnoreCase) ? "No evaluado"
+            : raw.Contains("Disponible", StringComparison.OrdinalIgnoreCase) ? "Disponible"
+            : "Parcial";
         sources.Add(new("Security Log / autenticación", status, raw, true));
         if (status != "Disponible") limitations.Add("Cobertura de autenticación/NLA/Kerberos limitada: " + raw);
     }

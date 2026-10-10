@@ -131,25 +131,28 @@ internal static class DashboardRules
         // generar acciones preventivas sólo por no estar Running.
         if (ContainsAny(value, "Complementario", "No requerido", "Bajo demanda")) return 1;
 
+        // F35 (M-06): escala renumerada para separar lo que no se midió de lo que está
+        // degradado. 0 vacío · 1 sano/neutro · 2 brecha de cobertura (no hay medición) ·
+        // 3 degradación o revisión (hay señal) · 4 falla explícita. Antes "No evaluado"
+        // y "Advertencia" compartían bucket y ensuciaban la semántica del scoring.
+        if (ContainsAny(value, "No evaluado", "Unknown", "N/D", "Parcial", "No localizado")) return 2;
+
         // Una dependencia condicional detenida merece contexto/revisión, pero no
-        // equivale a una dependencia requerida caída.
+        // equivale a una dependencia requerida caída: nunca alcanza el nivel 4.
         if (ContainsAny(value, "Condicional"))
         {
-            if (ContainsAny(value, "No evaluado", "Unknown", "N/D", "Parcial", "Advertencia")) return 2;
             if (ContainsAny(value, "Running", "Operativo", "Saludable", "OK", "Deshabilitado")) return 1;
-            return 2;
+            return 3;
         }
 
-        // Cobertura incompleta o transición: requiere revisión, no se etiqueta como caída.
-        if (ContainsAny(value, "Paused", "Pending", "Degradado", "Parcial", "No localizado", "Unknown", "No evaluado", "N/D", "Advertencia")) return 2;
-
         // Sólo una falla explícita de un elemento requerido/operativo cuenta como caída.
-        if (ContainsAny(value, "Stopped", "Failed", "Error", "Crítico", "Critico", "No operativo", "Listening=No", "Gateway=No", "Activos=0")) return 3;
+        if (ContainsAny(value, "Stopped", "Failed", "Error", "Crítico", "Critico", "No operativo", "Listening=No", "Gateway=No", "Activos=0")) return 4;
 
         if (ContainsAny(value, "Running", "En ejecución", "Operativo", "Saludable", "Listening=Sí", "Gateway=Sí", "OK")) return 1;
 
-        // Un estado no reconocido conserva incertidumbre en vez de asumir salud o falla.
-        return 2;
+        // Advertencia, degradación o texto no reconocido: requiere revisión sin
+        // declarar caída (el desconocido conserva incertidumbre en vez de asumir salud).
+        return 3;
     }
 
     public static bool IsRunningState(string? state)
@@ -233,9 +236,11 @@ internal static class DashboardRules
     public static IBrush StateBrush(string state)
         => OperationalStateLevel(state) switch
         {
-            >= 3 => DashboardPalette.Error,
-            2 => DashboardPalette.Warn,
+            >= 4 => DashboardPalette.Error,
+            3 => DashboardPalette.Warn,
             1 => DashboardPalette.Good,
+            // 0 vacío y 2 brecha de cobertura: gris en vez de naranja (M-06), para que
+            // "No evaluado" no se pinte como degradación.
             _ => DashboardPalette.Muted
         };
 

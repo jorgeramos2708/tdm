@@ -462,6 +462,13 @@ public sealed class UserSessionProfileCollector : IReadOnlyCollector
         catch (EventLogException ex) { status = "No legible: " + ex.Message; }
         catch { status = "No determinado"; }
 
+        // M-15 (F35): 0 registros examinados sin error de lectura sólo prueba que no se
+        // leyó nada: la política de auditoría de inicio de sesión puede estar
+        // deshabilitada o ser desconocida. No se reporta "Disponible" para no
+        // presentar un vacío como salud confirmada.
+        if (recordsRead == 0 && status == "Disponible")
+            status = "No evaluado: 0 eventos Security examinados; política de auditoría de inicio de sesión deshabilitada o desconocida (no se reporta como disponible).";
+
         events.AddRange(authEvents);
         var failures = authEvents.Where(e => e.Tipo == "USER_LOGON_FAILURE").ToList();
         var successes = authEvents.Count(e => e.Tipo == "USER_LOGON_SUCCESS");

@@ -38,6 +38,15 @@ public static class ReportConsistencyAnalyzer
             tensions.Add($"Calidad diagnóstica baja ({report.PrecisionDiagnostica.Score}/100) con causa propuesta: valide manualmente antes de actuar.");
         if (report.Hallazgos.Any(f => f.Id.Equals("TDM-CAUSE-UNSTABLE", StringComparison.OrdinalIgnoreCase)) && principal is not null)
             tensions.Add("La causa principal tiene historial inestable entre muestras: tómese como hipótesis, no como veredicto.");
+        // M-05 (F35): cruce recuento-vs-export. La medición de rendimiento se toma en el
+        // motor, antes de los enriquecimientos posteriores; si sus números no igualan las
+        // colecciones finales que exporta el informe, el técnico ve dos recuentos
+        // contradictorios en la misma pieza y debe saber cuál manda (el del informe).
+        var perf = report.RendimientoDiagnostico;
+        if (perf is not null && perf.Hallazgos != report.Hallazgos.Count)
+            tensions.Add($"Recuento de hallazgos inconsistente: la medición de rendimiento declara {perf.Hallazgos} y el informe exporta {report.Hallazgos.Count}; manda el recuento final del informe.");
+        if (perf is not null && perf.EventosNormalizados != report.Eventos.Count)
+            tensions.Add($"Recuento de observaciones inconsistente: la medición de rendimiento declara {perf.EventosNormalizados} y el informe exporta {report.Eventos.Count}; manda el recuento final del informe.");
         return tensions;
     }
 }

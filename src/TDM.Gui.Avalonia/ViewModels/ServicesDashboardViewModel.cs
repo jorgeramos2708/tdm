@@ -78,7 +78,9 @@ public partial class ServicesDashboardViewModel : ObservableObject
         if (value.Contains("No evaluado", StringComparison.OrdinalIgnoreCase) ||
             value.Contains("Unknown", StringComparison.OrdinalIgnoreCase) ||
             value.Contains("N/D", StringComparison.OrdinalIgnoreCase))
-            return ("No evaluado", DashboardPalette.Warn);
+            // F35 (M-06): brecha de cobertura en gris; antes compartía el acento de
+            // "Advertencia" y ensuciaba el ranking de la tabla.
+            return ("No evaluado", DashboardPalette.Muted);
         if (value.Contains("Bajo demanda", StringComparison.OrdinalIgnoreCase))
             return ("Bajo demanda", DashboardPalette.Good);
         if (value.Contains("No requerido", StringComparison.OrdinalIgnoreCase) ||
@@ -94,7 +96,8 @@ public partial class ServicesDashboardViewModel : ObservableObject
         if (value.Contains("Parcial", StringComparison.OrdinalIgnoreCase) || value.Contains("Advertencia", StringComparison.OrdinalIgnoreCase) ||
             value.Contains("Pending", StringComparison.OrdinalIgnoreCase) || value.Contains("Paused", StringComparison.OrdinalIgnoreCase))
             return ("Revisar", DashboardPalette.Warn);
-        return ("No evaluado", DashboardPalette.Warn);
+        // Estado no reconocido: etiqueta "No evaluado" en gris (brecha), no ámbar.
+        return ("No evaluado", DashboardPalette.Muted);
     }
 
     private static string ClassifyDependencyOrigin(string name)

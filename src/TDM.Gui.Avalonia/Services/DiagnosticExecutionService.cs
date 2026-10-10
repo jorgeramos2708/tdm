@@ -200,6 +200,12 @@ public async Task<DiagnosticReport> RunAsync(string period, CancellationToken ct
             baselineRootPath: monitorRoot,
             preRecordedResult: preRecordedResult).ConfigureAwait(false);
 
+        // F35 (M-05/M-09): el recuento de rendimiento se tomó en el motor y después
+        // llegaron hallazgos (divergencia, latido) y observaciones de estado. Se
+        // sincroniza con las colecciones finales del informe y se recalculan las
+        // tensiones para que los números y textos de coherencia midan el reporte final.
+        report = DiagnosticWorkflow.SyncRecuentoAndTensions(report);
+
         // El diagnóstico completo contiene las métricas pesadas (procesos y discos).
         // Persistir una muestra de observabilidad permite que Rendimiento las muestre
         // inmediatamente y que sobrevivan a los refrescos visuales de 5 segundos.

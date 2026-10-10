@@ -166,6 +166,12 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
             if (e.EventRecord is null || e.EventException is not null) return;
 
             var record = e.EventRecord;
+            // H10 (F35): un registro sin TimeCreated no tiene instante verificable: se
+            // descarta en vez de fabricar DateTimeOffset.Now con la hora de la ingesta,
+            // que contradiría el contenido del evento y la ventana analizada; las
+            // ausencias reales ya las declara el salto de RecordId (SharedGaps).
+            if (record.TimeCreated is not { } created)
+                return;
             DiagnosticLayer layer = GetLayer(channelName);
 
             var severity = record.Level switch
@@ -184,7 +190,7 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
             var providerName = record.ProviderName ?? "Unknown";
 
             var evt = new DiagnosticEvent(
-                record.TimeCreated ?? DateTimeOffset.Now,
+                created,
                 "EventLog Push",
                 providerName,
                 layer,

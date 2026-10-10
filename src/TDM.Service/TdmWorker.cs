@@ -309,6 +309,14 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
                             report, TdmProductInfo.Version, stoppingToken, channel: "service-monitor", rootPath: _root,
                             preRecordedResult: preRecordedResult).ConfigureAwait(false);
 
+                        // F35 (M-05/M-09): el recuento de rendimiento se tomó en el motor y
+                        // después llegaron hallazgos y observaciones post-análisis
+                        // (estabilidad, divergencia, integración de estado). Se sincroniza
+                        // con las colecciones finales que exporta el informe y se
+                        // recalculan las tensiones para que no quede un recuento obsoleto
+                        // ni una tensión calculada sobre un snapshot previo.
+                        report = DiagnosticWorkflow.SyncRecuentoAndTensions(report);
+
                         var processMetrics = CaptureSelfMetrics();
                         var runtime = new ObservabilityRuntimeState
                         {
@@ -457,6 +465,9 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
         report = await StateReportIntegrator.RecordAndEnrichAsync(
             report, TdmProductInfo.Version, ct, channel: "service-monitor", rootPath: _root,
             preRecordedResult: preRecordedResult).ConfigureAwait(false);
+        // F35 (M-05/M-09): espejo del ciclo normal: recuento de rendimiento y tensiones
+        // se sincronizan con el reporte final después del enriquecimiento.
+        report = DiagnosticWorkflow.SyncRecuentoAndTensions(report);
         var processMetrics = CaptureSelfMetrics();
         var runtime = new ObservabilityRuntimeState
         {

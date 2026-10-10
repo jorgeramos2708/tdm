@@ -385,7 +385,7 @@ public static class DiagnosticNarrativeBuilder
             sb.AppendLine("  - Cobertura forense incompleta: al menos una fuente no pudo leerse por permisos/error. TDM no la interpreta como sana ni descartada.");
         sb.AppendLine("  - Un módulo Windows listado como 'faulting module' identifica el punto de manifestación, no necesariamente la causa técnica.");
         sb.AppendLine("  - TDM no evalúa licencias, no activa productos y no usa el estado de licencia para decidir una causa raíz.");
-        sb.AppendLine("  - TDM es de solo lectura sobre Windows/TSplus: no reinicia servicios ni modifica Registro, firewall, archivos de producto, impresoras o configuración TSplus. El historial de RC18.4 se guarda únicamente en archivos propios de TDM.");
+        sb.AppendLine("  - TDM es de solo lectura sobre Windows/TSplus: no reinicia servicios ni modifica Registro, firewall, archivos de producto, impresoras o configuración TSplus. Única excepción de escritura: el evento canario «TDM Canary» (Information, como máximo uno cada 10 min, para auto-verificar el canal Application; puede marcarse para ignorarlo). El historial de RC18.4 se guarda únicamente en archivos propios de TDM.");
         return sb.ToString();
     }
 

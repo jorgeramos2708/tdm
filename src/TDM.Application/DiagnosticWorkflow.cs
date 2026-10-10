@@ -94,4 +94,29 @@ public static class DiagnosticWorkflow
             ResolucionesGuiadas = TsplusGuidedTroubleshooter.AnalyzeAll(report)
         };
     }
+
+    /// <summary>
+    /// F35 (M-05/M-09): cierra el pipeline DESPUÉS de los enriquecimientos post-motor
+    /// (hallazgos y observaciones añadidos por estabilidad, divergencia, latido, clústeres
+    /// o integración de estado). Sincroniza el recuento de rendimiento con las colecciones
+    /// finales que se exportan y recalcula las tensiones para que sus números midan el
+    /// reporte terminado, no el snapshot previo a los apéndices.
+    /// </summary>
+    public static DiagnosticReport SyncRecuentoAndTensions(DiagnosticReport report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        if (report.RendimientoDiagnostico is { } perf &&
+            (perf.Hallazgos != report.Hallazgos.Count || perf.EventosNormalizados != report.Eventos.Count))
+        {
+            report = report with
+            {
+                RendimientoDiagnostico = perf with
+                {
+                    Hallazgos = report.Hallazgos.Count,
+                    EventosNormalizados = report.Eventos.Count
+                }
+            };
+        }
+        return report with { Tensiones = ReportConsistencyAnalyzer.Analyze(report) };
+    }
 }

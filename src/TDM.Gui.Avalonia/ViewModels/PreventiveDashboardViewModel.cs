@@ -375,7 +375,8 @@ public partial class PreventiveDashboardViewModel : ObservableObject
             .Select(x => new SignalRow(
                 $"{prefix}: {DashboardRules.CompactModuleName(x.Key)}",
                 DashboardRules.LocalizeOperationalText(x.Value),
-                x.Level >= 3 ? DashboardPalette.Error : DashboardPalette.Warn))
+                // F35 (M-06): 4 falla en rojo · 3 degradación en ámbar · 2 brecha en gris.
+                x.Level >= 4 ? DashboardPalette.Error : x.Level == 3 ? DashboardPalette.Warn : DashboardPalette.Muted))
             .Take(10)
             .ToList();
     }
@@ -421,7 +422,7 @@ public partial class PreventiveDashboardViewModel : ObservableObject
             if (changes < 2) continue;
 
             var peak = levels.Count == 0 ? 0 : levels.Max();
-            var accent = peak >= 3 || changes >= 4 ? DashboardPalette.Error : DashboardPalette.Warn;
+            var accent = peak >= 4 || changes >= 4 ? DashboardPalette.Error : DashboardPalette.Warn;
             var kind = dependency ? "Dependencia inestable" : "Servicio inestable";
             result.Add(new SignalRow(
                 $"{kind}: {DashboardRules.CompactModuleName(name)}",
@@ -547,8 +548,10 @@ public partial class PreventiveDashboardViewModel : ObservableObject
         SupportThresholds thresholds)
     {
         var score = 0;
-        var serviceCritical = latest.ServiceStates?.Count(x => DashboardRules.OperationalStateLevel(x.Value) >= 3) ?? 0;
-        var dependencyCritical = latest.DependencyStates?.Count(x => DashboardRules.OperationalStateLevel(x.Value) >= 3) ?? 0;
+        // F35 (M-06): crítico = falla explícita (nivel 4); brechas y degradaciones
+        // (niveles 2/3) puntúan vía issues.Count sin inflar el peso de caídas.
+        var serviceCritical = latest.ServiceStates?.Count(x => DashboardRules.OperationalStateLevel(x.Value) >= 4) ?? 0;
+        var dependencyCritical = latest.DependencyStates?.Count(x => DashboardRules.OperationalStateLevel(x.Value) >= 4) ?? 0;
 
         score += Math.Min(25, serviceCritical * 15 + Math.Max(0, serviceIssues.Count - serviceCritical) * 6);
         score += Math.Min(25, dependencyCritical * 15 + Math.Max(0, dependencyIssues.Count - dependencyCritical) * 6);

@@ -72,6 +72,16 @@ public sealed class WindowsLogonHealthCollector : IReadOnlyCollector
             coverage = "No evaluado"; coverageDetail = "No legible: " + ex.Message;
         }
 
+        // M-15 (F35): 0 registros en la ventana no prueba que la política de auditoría
+        // esté sana, sólo que no se leyó nada. Se declara "No evaluado" en vez de
+        // "Disponible" para que un vacío no se presente como salud confirmada (la
+        // ternaria de severidad pasa a Advertencia con el mismo texto de cobertura).
+        if (coverage == "Disponible" && examined == 0)
+        {
+            coverage = "No evaluado";
+            coverageDetail = "0 registros en la ventana: no se puede distinguir «sin novedades» de una política de auditoría de inicio de sesión deshabilitada o desconocida.";
+        }
+
         if (coverage == "Disponible")
             findings.AddRange(EvaluateCounts(success, failed, lockouts, windowEnd));
 

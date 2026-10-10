@@ -65,10 +65,12 @@ public partial class SupportDashboardViewModel : ObservableObject
 
         var healthyServices = serviceLevels.Count(x => x.Value == 1);
         var healthyDependencies = dependencyLevels.Count(x => x.Value == 1);
-        var reviewServices = serviceLevels.Count(x => x.Value is 0 or 2);
-        var reviewDependencies = dependencyLevels.Count(x => x.Value is 0 or 2);
-        var stoppedServices = serviceLevels.Count(x => x.Value >= 3);
-        var stoppedDependencies = dependencyLevels.Count(x => x.Value >= 3);
+        // F35 (M-06): 2 = brecha de cobertura y 3 = degradación/revisión se leen como
+        // "revisar"; sólo el nivel 4 (falla explícita) cuenta como detenido.
+        var reviewServices = serviceLevels.Count(x => x.Value is 0 or 2 or 3);
+        var reviewDependencies = dependencyLevels.Count(x => x.Value is 0 or 2 or 3);
+        var stoppedServices = serviceLevels.Count(x => x.Value >= 4);
+        var stoppedDependencies = dependencyLevels.Count(x => x.Value >= 4);
 
         var total = services.Count + dependencies.Count;
         var healthy = healthyServices + healthyDependencies;
@@ -77,17 +79,17 @@ public partial class SupportDashboardViewModel : ObservableObject
         var affected = review + stopped;
 
         var stoppedNames = services
-            .Where(x => DashboardRules.OperationalStateLevel(x.Value) >= 3)
+            .Where(x => DashboardRules.OperationalStateLevel(x.Value) >= 4)
             .Select(x => $"Servicio {DashboardRules.SanitizeVisibleText(x.Key)} ({DescribeState(x.Value)})")
             .Concat(dependencies
-                .Where(x => DashboardRules.OperationalStateLevel(x.Value) >= 3)
+                .Where(x => DashboardRules.OperationalStateLevel(x.Value) >= 4)
                 .Select(x => $"Dependencia {DashboardRules.SanitizeVisibleText(x.Key)} ({DescribeState(x.Value)})"))
             .ToList();
         var reviewNames = services
-            .Where(x => DashboardRules.OperationalStateLevel(x.Value) is 0 or 2)
+            .Where(x => DashboardRules.OperationalStateLevel(x.Value) is 0 or 2 or 3)
             .Select(x => $"Servicio {DashboardRules.SanitizeVisibleText(x.Key)} ({DescribeState(x.Value)})")
             .Concat(dependencies
-                .Where(x => DashboardRules.OperationalStateLevel(x.Value) is 0 or 2)
+                .Where(x => DashboardRules.OperationalStateLevel(x.Value) is 0 or 2 or 3)
                 .Select(x => $"Dependencia {DashboardRules.SanitizeVisibleText(x.Key)} ({DescribeState(x.Value)})"))
             .ToList();
 
