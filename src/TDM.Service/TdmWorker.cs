@@ -97,6 +97,11 @@ foreach (var check in depResult.Checks)
 
         Directory.CreateDirectory(_root);
         var heartbeatStore = new ServiceHeartbeatStore(_root);
+        // M-21 (F35): el arranque lee el latido PREVIO antes de que el write de STARTING lo
+        // sobrescriba: un latido rancio declara el hueco de caída del servicio en el primer
+        // ciclo, en vez de leer la ventana como «sin novedad» (antes sólo la GUI lo declaraba).
+        var previousHeartbeat = await heartbeatStore.ReadAsync(CancellationToken.None).ConfigureAwait(false);
+        var startupDowntime = ServiceHeartbeatStore.StalledFinding(previousHeartbeat, DateTimeOffset.Now);
         var observabilityStore = new ObservabilityStore(_root);
         var settingsStore = new SupportMonitoringSettingsStore(_root);
         var ledger = new IncidentLedger(_root);
@@ -303,6 +308,14 @@ _logger.LogInformation("TDM.Service {Version} iniciado. Root={Root}", TdmProduct
                         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                         {
                             _logger.LogWarning(ex, "Comprobación de divergencia de raíz no disponible");
+                        }
+
+                        // M-21 (F35): el hueco de caída detectado al arrancar se declara una vez,
+                        // en el primer ciclo con informe completo.
+                        if (startupDowntime is not null)
+                        {
+                            report = report with { Hallazgos = [.. report.Hallazgos, startupDowntime] };
+                            startupDowntime = null;
                         }
 
                         report = await StateReportIntegrator.RecordAndEnrichAsync(

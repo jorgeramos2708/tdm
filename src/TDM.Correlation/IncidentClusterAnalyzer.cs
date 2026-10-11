@@ -209,23 +209,14 @@ public static class IncidentClusterAnalyzer
     /// </summary>
     private static string? IdentityKey(DiagnosticEvent e)
     {
-        string? Value(string key)
-        {
-            var lookup = EvidenceKeyNormalizer.TryGetValue(key, out var nk) ? nk : key;
-            return e.Evidencia?.FirstOrDefault(x =>
-            {
-                var stored = EvidenceKeyNormalizer.TryGetValue(x.Clave, out var sk) ? sk : x.Clave;
-                return stored.Equals(lookup, StringComparison.OrdinalIgnoreCase);
-            })?.Valor;
-        }
         var parts = new[]
         {
-            Value("User"),
-            Value("Host"),
-            Value("Service"),
-            Value("Application"),
-            Value("FaultingModule"),
-            Value("ExceptionType") ?? e.Codigo
+            IdentityValue(e, "User"),
+            IdentityValue(e, "Host"),
+            IdentityValue(e, "Service"),
+            IdentityValue(e, "Application"),
+            IdentityValue(e, "FaultingModule"),
+            IdentityValue(e, "ExceptionType") ?? e.Codigo
         }
         .Where(x => !string.IsNullOrWhiteSpace(x) && !x.Equals("N/D", StringComparison.OrdinalIgnoreCase))
         .Select(x => x!.Trim().ToUpperInvariant())
@@ -233,13 +224,36 @@ public static class IncidentClusterAnalyzer
         return parts.Count == 0 ? null : string.Join("|", parts);
     }
 
+    private static string? IdentityValue(DiagnosticEvent e, string key)
+    {
+        var lookup = EvidenceKeyNormalizer.TryGetValue(key, out var nk) ? nk : key;
+        return e.Evidencia?.FirstOrDefault(x =>
+        {
+            var stored = EvidenceKeyNormalizer.TryGetValue(x.Clave, out var sk) ? sk : x.Clave;
+            return stored.Equals(lookup, StringComparison.OrdinalIgnoreCase);
+        })?.Valor;
+    }
+
+    private static bool IsKnownIdentityValue(string? value)
+        => !string.IsNullOrWhiteSpace(value) && !value.Equals("N/D", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
     /// Dos señales tienen identidad distinta y conocida: aunque compartan dominio y ventana,
-    /// pertenecen a incidentes distintos. La comparación es por intersección de tokens para no
-    /// fragmentar cuando una señal trae evidencia parcial (p. ej. servicio sí, usuario no).
+    /// pertenecen a incidentes distintos. M-08 (F35): un usuario u host conocidos y distintos
+    /// separan los incidentes de inmediato; antes la intersección de tokens los fusionaba
+    /// (ALICE|HOST1 y BOB|HOST1 compartían HOST1). La comparación por intersección se
+    /// conserva como fallback para evidencia parcial (p. ej. servicio sí, usuario no).
     /// </summary>
     private static bool DistinctIdentity(DiagnosticEvent a, DiagnosticEvent b)
     {
+        foreach (var slot in new[] { "User", "Host" })
+        {
+            var va = IdentityValue(a, slot);
+            var vb = IdentityValue(b, slot);
+            if (IsKnownIdentityValue(va) && IsKnownIdentityValue(vb)
+                && !va!.Trim().Equals(vb!.Trim(), StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
         var ka = IdentityKey(a);
         var kb = IdentityKey(b);
         if (ka is null || kb is null) return false;

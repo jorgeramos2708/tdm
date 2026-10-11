@@ -206,7 +206,7 @@ public static partial class RootCauseCorrelator
             var related = report.Eventos
                 .Where(e => e.Timestamp.HasValue && e.Severidad != DiagnosticSeverity.Informativo)
                 .Where(e => IsNearAnalysisEnd(report, e, TimeSpan.FromMinutes(15)))
-                .Where(e => !e.Fuente.Equals("TDM", StringComparison.OrdinalIgnoreCase))
+                .Where(e => !IsTdmSource(e))
                 .Where(e => !string.IsNullOrWhiteSpace(fileName) &&
                             ($"{e.Mensaje} {e.Archivo} {e.Componente}").Contains(fileName!, StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(e => e.Timestamp)

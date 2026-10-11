@@ -54,6 +54,10 @@ public sealed class DependencyLoadEventCollector(string logName = "Application")
                         new("Log", logName),
                         new("Provider", provider),
                         new("Event ID", record.Id.ToString()),
+                        // M-17 (F35): RecordId en la evidencia para que la identidad dedup
+                        // (EVT|Log|Fuente|Codigo|RecordId) colapse con la lectura base/forense
+                        // del mismo registro en vez de caer a FALLBACK.
+                        new("RecordId", record.RecordId?.ToString() ?? "N/D"),
                         new("Relacionado explícitamente con TSplus", touchesTsplus ? "Sí" : "No")
                     };
                     if (!string.IsNullOrWhiteSpace(dependency)) evidence.Add(new("Dependencia detectada", dependency));

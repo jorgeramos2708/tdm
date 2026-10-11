@@ -278,16 +278,19 @@ public sealed class RdpEventCollector : IReadOnlyCollector
 
                 var severity = ClassifySeverity(channel, record.Id, record.Level, message);
 
+                // M-17 (F35): Fuente=provider y "Canal" en la evidencia repiten la clave de
+                // identidad de la lectura base/forense del mismo registro; antes Fuente=channel
+                // sin "Canal" producía EVT||channel|... y el mismo evento no colapsaba.
                 output.Add(new DiagnosticEvent(
                     timestamp,
-                    channel,
+                    record.ProviderName ?? channel,
                     "Remote Desktop Services",
                     DiagnosticLayer.Rdp,
                     severity,
                     ClassifyType(channel, record.Id),
                     message,
                     record.Id.ToString(),
-                    Evidencia: BuildEvidence(record),
+                    Evidencia: BuildEvidence(record, channel),
                     Producto: TsplusProduct.RemoteAccess));
                 read++;
             }
@@ -312,10 +315,11 @@ public sealed class RdpEventCollector : IReadOnlyCollector
     }
 
 
-    private static IReadOnlyList<EvidenceItem> BuildEvidence(EventRecord record)
+    private static IReadOnlyList<EvidenceItem> BuildEvidence(EventRecord record, string channel)
     {
         var evidence = new List<EvidenceItem>
         {
+            new("Canal", channel),
             new("Provider", record.ProviderName ?? "N/D"),
             new("RecordId", record.RecordId?.ToString() ?? "N/D")
         };

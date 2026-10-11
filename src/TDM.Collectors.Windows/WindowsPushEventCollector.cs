@@ -189,9 +189,13 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
             string opcodeStr = SafeEnumToString(typeof(System.Diagnostics.Eventing.Reader.EventOpcode), record.Opcode, "Opcode");
             var providerName = record.ProviderName ?? "Unknown";
 
+            // M-13 (F35): Fuente=provider y evidencia con Canal+RecordId repiten la clave de
+            // identidad de la lectura base/forense/incremental del mismo registro
+            // (EVT|Canal|Fuente|Codigo|RecordId); antes la fuente propia del push sin RecordId
+            // caía a FALLBACK y el mismo evento tenía hasta cuatro identidades distintas.
             var evt = new DiagnosticEvent(
                 created,
-                "EventLog Push",
+                providerName,
                 providerName,
                 layer,
                 severity,
@@ -199,7 +203,13 @@ public sealed class WindowsPushEventCollector : IReadOnlyCollector
                 record.FormatDescription() ?? $"Evento {record.Id} de {providerName}",
                 Codigo: record.Id.ToString(),
                 Archivo: channelName,
-                Evidencia: [new EvidenceItem("Canal", channelName), new EvidenceItem("Task", taskStr), new EvidenceItem("Opcode", opcodeStr)],
+                Evidencia:
+                [
+                    new EvidenceItem("Canal", channelName),
+                    new EvidenceItem("RecordId", record.RecordId?.ToString() ?? "N/D"),
+                    new EvidenceItem("Task", taskStr),
+                    new EvidenceItem("Opcode", opcodeStr)
+                ],
                 Producto: TsplusProduct.Ninguno,
                 IngestedAt: DateTimeOffset.Now);
 

@@ -23,14 +23,8 @@ public static class ObservabilityIncidentPolicy
         "SERVICE_TERMINATION", "SERVICE_START_FAILURE"
     };
 
-    private static readonly string[] MissionServiceMarkers =
-    [
-        "tsplus", "termservice", "remote desktop services", "remote desktop", "rdp",
-        "apsc", "application publishing", "html5", "gateway",
-        "rpcss", "remote procedure call", "dcomlaunch",
-        "eventlog", "windows event log", "winmgmt", "windows management instrumentation",
-        "spooler", "print spooler"
-    ];
+    // M-11 (F35): las listas y la regla de coincidencia viven en DiagnosticEventCatalog
+    // (antes duplicadas aquí con Contains crudo, que generaba FP por substring).
 
     private static readonly HashSet<string> MissionScopedKinds = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -44,12 +38,6 @@ public static class ObservabilityIncidentPolicy
         "ACCOUNT_LOCKOUT", "USER_LOGON_FAILURE", "USER_NLA_PASSWORD_FAILURE",
         "KERBEROS_PREAUTH_FAILURE", "WINDOWS_CREDENTIAL_VALIDATION_FAILURE"
     };
-
-    private static readonly string[] MissionMarkers =
-    [
-        "tsplus", "remote access", "remote desktop", "remotedesktop", "termservice", "rdp", "tdm.", "tdm ",
-        "apsc", "wsession", "logonsession", "alternateshell", "html5", "webportal", "gateway", "application publishing"
-    ];
 
     public static bool IsSevere(ObservabilityIncident incident)
         => DiagnosticEventCatalog.IsIncidentSeverity(incident.Severity);
@@ -87,7 +75,7 @@ public static class ObservabilityIncidentPolicy
                 && !product.Equals(nameof(TsplusProduct.Ninguno), StringComparison.OrdinalIgnoreCase))
                 return true;
             var serviceText = $"{component} {summary} {evidenceSource}";
-            return MissionServiceMarkers.Any(marker => serviceText.Contains(marker, StringComparison.OrdinalIgnoreCase));
+            return DiagnosticEventCatalog.MatchesAnyMarker(serviceText, DiagnosticEventCatalog.MissionServiceMarkers);
         }
 
         // En agregados históricos no existe EventId confiable (EvidenceId puede ser RecordId), por lo que
@@ -104,7 +92,7 @@ public static class ObservabilityIncidentPolicy
                 return true;
 
             var text = $"{component} {summary} {evidenceSource} {evidenceFile}";
-            return MissionMarkers.Any(marker => text.Contains(marker, StringComparison.OrdinalIgnoreCase));
+            return DiagnosticEventCatalog.MatchesAnyMarker(text, DiagnosticEventCatalog.MissionMarkers);
         }
 
         // Para el resto de tipos del catálogo, ERROR/CRÍTICO + tipo incidental conocido es suficiente.

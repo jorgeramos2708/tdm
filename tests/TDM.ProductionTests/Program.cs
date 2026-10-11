@@ -239,7 +239,14 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("Phase35SyncRecuentoAndTensionsRunsAfterServiceAndGuiAppend", Phase35SyncRecuentoAndTensionsRunsAfterServiceAndGuiAppend),
     ("Phase35NotEvaluatedSeparatesFromWarningBuckets", Phase35NotEvaluatedSeparatesFromWarningBuckets),
     ("Phase35EmptySecurityWindowIsNotReportedHealthy", Phase35EmptySecurityWindowIsNotReportedHealthy),
-    ("Phase35MandateDeclaresCanaryWriteException", Phase35MandateDeclaresCanaryWriteException)
+    ("Phase35MandateDeclaresCanaryWriteException", Phase35MandateDeclaresCanaryWriteException),
+    ("Phase35LongitudinalRulesRespectAnalysisWindow", Phase35LongitudinalRulesRespectAnalysisWindow),
+    ("Phase35ClusterDoesNotMergeDistinctUsersSharingHost", Phase35ClusterDoesNotMergeDistinctUsersSharingHost),
+    ("Phase35MissionMarkersMatchWholeWords", Phase35MissionMarkersMatchWholeWords),
+    ("Phase35TdmSourceExclusionIsPrefixConsistent", Phase35TdmSourceExclusionIsPrefixConsistent),
+    ("Phase35EventIdentityCollapsesAcrossCollectors", Phase35EventIdentityCollapsesAcrossCollectors),
+    ("Phase35ServiceStartupDeclaresDowntimeGap", Phase35ServiceStartupDeclaresDowntimeGap),
+    ("Phase35FederatedFileDeltaIsWriterDelayNotClockSkew", Phase35FederatedFileDeltaIsWriterDelayNotClockSkew)
 };
 
 var failed = 0;
@@ -6772,6 +6779,213 @@ static Task Phase35MandateDeclaresCanaryWriteException()
         "M-16: la excepción del evento canario no se declara en el mandato de solo lectura.");
     True(narrative.Contains("Única excepción de escritura", StringComparison.Ordinal),
         "M-16: la escritura del canario no queda acotada como única excepción.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35LongitudinalRulesRespectAnalysisWindow()
+{
+    // M-07: la regla longitudinal filtra transiciones, fallas y modificaciones por la
+    // ventana de análisis como el resto del correlacionador; antes emparejaba eventos
+    // fechados fuera de la ventana visible del informe.
+    var now = DateTimeOffset.Now;
+
+    static DiagnosticEvent StateTransition(DateTimeOffset at) => new(at, "TDM", "Web Portal Service",
+        DiagnosticLayer.Tsplus, DiagnosticSeverity.Advertencia, "TDM_FORENSIC_STATE_TRANSITION",
+        "Servicio WebPortalService Running → Stopped",
+        Evidencia:
+        [
+            new EvidenceItem("Tipo", "SERVICE_STATE"),
+            new EvidenceItem("Estado anterior", "Running"),
+            new EvidenceItem("Estado actual", "Stopped"),
+            new EvidenceItem("Cambio después de", at.ToString("O"))
+        ]);
+    static DiagnosticEvent Failure(DateTimeOffset at) => new(at, "SCM", "Web Portal Service",
+        DiagnosticLayer.Tsplus, DiagnosticSeverity.Error, "SERVICE_TERMINATION",
+        "El servicio terminó inesperadamente.", Codigo: "7031");
+
+    var outsideTransition = StateTransition(now.AddHours(-4).AddMinutes(-10));
+    var pairedFailure = Failure(now.AddHours(-4).AddMinutes(-2));
+    var filtered = RootCauseCorrelator.Analyze(Report([outsideTransition, pairedFailure], now));
+    False(filtered.Any(c => c.Id.StartsWith("ROOT-HISTORICAL", StringComparison.Ordinal)),
+        "M-07: la regla longitudinal emparejó una transición fechada fuera de la ventana de análisis.");
+
+    var lateTransition = StateTransition(now.AddMinutes(-20));
+    var lateFailure = Failure(now.AddMinutes(3));
+    var late = RootCauseCorrelator.Analyze(Report([lateTransition, lateFailure], now));
+    False(late.Any(c => c.Id.StartsWith("ROOT-HISTORICAL", StringComparison.Ordinal)),
+        "M-07: la regla longitudinal emparejó una falla fechada fuera de la ventana de análisis.");
+
+    var insideTransition = StateTransition(now.AddHours(-1));
+    var insideFailure = Failure(now.AddMinutes(-53));
+    var inside = RootCauseCorrelator.Analyze(Report([insideTransition, insideFailure], now));
+    True(inside.Any(c => c.Id.StartsWith("ROOT-HISTORICAL", StringComparison.Ordinal)),
+        "M-07: la regla longitudinal dejó de emparejar transición y falla dentro de la ventana.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35ClusterDoesNotMergeDistinctUsersSharingHost()
+{
+    // M-08: un usuario conocido y distinto separa los incidentes aunque compartan host y
+    // ventana; antes la intersección de tokens (ALICE|HOST1 vs BOB|HOST1) los fusionaba.
+    var now = DateTimeOffset.Now;
+    static DiagnosticEvent AuthFailure(DateTimeOffset at, string user) => new(at,
+        "Microsoft-Windows-TerminalServices-LocalSessionManager", "Terminal Services",
+        DiagnosticLayer.Rdp, DiagnosticSeverity.Error, "RDP_AUTHENTICATION_STAGE",
+        "Fallo de autenticación de sesión.",
+        Codigo: "4625",
+        Evidencia: [new EvidenceItem("Usuario", user), new EvidenceItem("Host", "HOST1")]);
+
+    var alice = AuthFailure(now.AddMinutes(-10), "ALICE");
+    var bob = AuthFailure(now.AddMinutes(-9), "BOB");
+    var clusters = IncidentClusterAnalyzer.Analyze(Report([alice, bob], now));
+    Equal(2, clusters.Count,
+        "M-08: usuarios distintos desde el mismo host se fusionaron en un solo clúster.");
+
+    var aliceLater = AuthFailure(now.AddMinutes(-8), "ALICE");
+    var same = IncidentClusterAnalyzer.Analyze(Report([alice, aliceLater], now));
+    Equal(1, same.Count,
+        "M-08: la misma identidad se fragmentó en clústeres distintos.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35MissionMarkersMatchWholeWords()
+{
+    // M-11: los marcadores blandos (rdp, gateway…) sólo cuentan en límite de palabra; el
+    // Contains crudo clasificaba como misión componentes ajenos con el substring.
+    static DiagnosticEvent ServiceTermination(string component) => new(DateTimeOffset.Now,
+        "Application", component, DiagnosticLayer.Windows, DiagnosticSeverity.Error,
+        "SERVICE_TERMINATION", "El servicio se detuvo inesperadamente.", Codigo: "7031");
+
+    False(DiagnosticEventCatalog.IsFunctionalIncident(ServiceTermination("CardRDPHealth")),
+        "M-11: el substring 'RDP' dentro de un identificador ajeno sigue clasificándose como servicio de misión.");
+    True(DiagnosticEventCatalog.IsFunctionalIncident(ServiceTermination("TermService")),
+        "M-11: el marcador de producto 'termservice' dejó de reconocerse.");
+    True(DiagnosticEventCatalog.IsFunctionalIncident(ServiceTermination("Remote Desktop Gateway")),
+        "M-11: el marcador compuesto 'remote desktop' dejó de reconocerse.");
+    True(DiagnosticEventCatalog.IsFunctionalIncident(ServiceTermination("Servicio RDP de contoso")),
+        "M-11: 'rdp' como palabra propia dejó de reconocerse.");
+
+    False(ObservabilityIncidentPolicy.IsOperationalIncident("SERVICE_TERMINATION", "CardRDPHealth", "Error",
+            "El servicio se detuvo inesperadamente.", "Application"),
+        "M-11: la política persistente siguió aceptando el substring 'RDP' ajeno.");
+    True(ObservabilityIncidentPolicy.IsOperationalIncident("SERVICE_TERMINATION", "TermService", "Error",
+            "El servicio se detuvo inesperadamente.", "System"),
+        "M-11: la política persistente dejó de reconocer 'termservice'.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35TdmSourceExclusionIsPrefixConsistent()
+{
+    // M-12: un único predicado IsTdmSource (StartsWith "TDM") para todo el correlacionador;
+    // antes cuatro reglas usaban Equals("TDM") y fuentes como "TDM Canary" entraban al pool
+    // causal en un sitio y no en otro.
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate M-12 no ejecutable.");
+    var files = new[]
+    {
+        Path.Combine(root!, "src", "TDM.Correlation", "RootCauseCorrelator.cs"),
+        Path.Combine(root!, "src", "TDM.Correlation", "RootCauseCorrelator.Rules.Longitudinal.cs"),
+        Path.Combine(root!, "src", "TDM.Correlation", "RootCauseCorrelator.Rules.Configuration.cs"),
+        Path.Combine(root!, "src", "TDM.Correlation", "RootCauseCorrelator.Rules.IdentitySecurity.cs")
+    };
+    foreach (var file in files)
+    {
+        var text = File.ReadAllText(file);
+        False(text.Contains("Equals(\"TDM\", StringComparison.OrdinalIgnoreCase)", StringComparison.Ordinal),
+            $"M-12: {Path.GetFileName(file)} aún usa Equals(\"TDM\") en vez del predicado único IsTdmSource.");
+    }
+    var main = File.ReadAllText(files[0]);
+    True(main.Contains("private static bool IsTdmSource(DiagnosticEvent e)", StringComparison.Ordinal),
+        "M-12: falta el predicado único IsTdmSource en el correlacionador.");
+    True(main.Contains("=> e.Fuente.StartsWith(\"TDM\", StringComparison.OrdinalIgnoreCase)", StringComparison.Ordinal),
+        "M-12: IsTdmSource debe excluir por prefijo (StartsWith), no por igualdad exacta.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35EventIdentityCollapsesAcrossCollectors()
+{
+    // M-13/M-17: el mismo registro Windows leído por push, RDP y dependency carga debe
+    // producir la clave EVT|Canal|Fuente|Codigo|RecordId; antes cada colector secundario
+    // rompía la identidad (fuente "EventLog Push", canal ausente o RecordId ausente).
+    var at = new DateTimeOffset(2026, 1, 5, 10, 0, 0, TimeSpan.Zero);
+    var channel = "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational";
+    var provider = "Microsoft-Windows-TerminalServices-LocalSessionManager";
+
+    var baseRead = new DiagnosticEvent(at, provider, "Local Session Manager", DiagnosticLayer.Windows,
+        DiagnosticSeverity.Informativo, "WINDOWS_EVENT_INCREMENTAL", "registro", Codigo: "21",
+        Evidencia: [new EvidenceItem("Log", channel), new EvidenceItem("RecordId", "9001")]);
+    var pushRead = new DiagnosticEvent(at, provider, provider, DiagnosticLayer.Windows,
+        DiagnosticSeverity.Informativo, "PUSH_21", "registro", Codigo: "21",
+        Evidencia: [new EvidenceItem("Canal", channel), new EvidenceItem("RecordId", "9001")]);
+    var rdpRead = new DiagnosticEvent(at, provider, "Remote Desktop Services", DiagnosticLayer.Rdp,
+        DiagnosticSeverity.Informativo, "RDP_SESSION_LOGON_STAGE", "registro", Codigo: "21",
+        Evidencia: [new EvidenceItem("Canal", channel), new EvidenceItem("Provider", provider), new EvidenceItem("RecordId", "9001")]);
+
+    var baseKey = DiagnosticEventIdentity.Resolve(baseRead);
+    NotNull(baseKey, "M-13: la lectura base del registro no produjo identidad.");
+    True(baseKey!.Equals(DiagnosticEventIdentity.Resolve(pushRead), StringComparison.Ordinal),
+        "M-13: el evento push dejó de colapsar con la lectura base del mismo registro.");
+    True(baseKey.Equals(DiagnosticEventIdentity.Resolve(rdpRead), StringComparison.Ordinal),
+        "M-17: el evento RDP dejó de colapsar con la lectura base del mismo registro.");
+    True(baseKey.StartsWith("EVT|", StringComparison.Ordinal),
+        "M-13: sin RecordId la identidad volvió a caer a FALLBACK.");
+
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate M-13/M-17 no ejecutable.");
+    var push = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "WindowsPushEventCollector.cs"));
+    False(push.Contains("\"EventLog Push\"", StringComparison.Ordinal),
+        "M-13: el push sigue declarando la fuente propia \"EventLog Push\" que rompe la identidad dedup.");
+    True(push.Contains("EvidenceItem(\"RecordId\"", StringComparison.Ordinal),
+        "M-13: el push no expone RecordId en la evidencia.");
+    var rdp = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Rdp", "RdpEventCollector.cs"));
+    True(rdp.Contains("new(\"Canal\", channel)", StringComparison.Ordinal),
+        "M-17: el colector RDP no declara la clave Canal en la evidencia.");
+    var dependency = File.ReadAllText(Path.Combine(root!, "src", "TDM.Collectors.Windows", "DependencyLoadEventCollector.cs"));
+    True(dependency.Contains("new(\"RecordId\", record.RecordId?.ToString() ?? \"N/D\")", StringComparison.Ordinal),
+        "M-17: el colector de carga de dependencias no expone RecordId en la evidencia.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35ServiceStartupDeclaresDowntimeGap()
+{
+    // M-21: el servicio lee el latido previo ANTES del write de STARTING y declara el hueco
+    // de caída en el primer ciclo; antes sólo la GUI declaraba StalledFinding.
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate M-21 no ejecutable.");
+    var worker = File.ReadAllText(Path.Combine(root!, "src", "TDM.Service", "TdmWorker.cs"));
+    var stalled = worker.IndexOf("StalledFinding", StringComparison.Ordinal);
+    True(stalled >= 0, "M-21: el worker de servicio no consulta StalledFinding.");
+    var firstWrite = worker.IndexOf("WriteHeartbeatSafeAsync", StringComparison.Ordinal);
+    True(firstWrite >= 0, "M-21: el worker de servicio no escribe latido (precondición del gate).");
+    True(stalled < firstWrite,
+        "M-21: el latido previo debe leerse ANTES del write de STARTING, que lo sobrescribe.");
+    True(worker.Contains("report = report with { Hallazgos = [.. report.Hallazgos, startupDowntime] }", StringComparison.Ordinal),
+        "M-21: el hueco de caída no entra en Hallazgos del primer ciclo.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35FederatedFileDeltaIsWriterDelayNotClockSkew()
+{
+    // M-22: fileDelta compara muestra vs last-write del MISMO nodo (retardo del escritor del
+    // agregado); las etiquetas "desfase de reloj" sugerían una deriva entre hosts inexistente.
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate M-22 no ejecutable.");
+    var federation = File.ReadAllText(Path.Combine(root!, "src", "TDM.Persistence", "FederationStore.cs"));
+    False(federation.Contains("Posible desfase reloj/archivo", StringComparison.Ordinal),
+        "M-22: el detalle federado sigue presentando el retardo de escritura como desfase de reloj.");
+    True(federation.Contains("Retardo de escritura del agregado", StringComparison.Ordinal),
+        "M-22: el detalle federado no declara qué mide realmente el fileDelta.");
+    True(federation.Contains("no es deriva de reloj entre hosts", StringComparison.Ordinal),
+        "M-22: falta la aclaración de que el delta no mide deriva entre hosts.");
+    var vm = File.ReadAllText(Path.Combine(root!, "src", "TDM.Gui.Avalonia", "ViewModels", "MultiServerDashboardViewModel.cs"));
+    False(vm.Contains("[DESFASE DE RELOJ]", StringComparison.Ordinal),
+        "M-22: la GUI etiqueta el retardo de escritura como desfase de reloj.");
+    False(vm.Contains(" · reloj ", StringComparison.Ordinal),
+        "M-22: la GUI aún muestra el delta con la etiqueta 'reloj'.");
+    True(vm.Contains("escritura/muestra", StringComparison.Ordinal),
+        "M-22: la GUI no etiqueta el delta como escritura/muestra.");
+    True(vm.Contains("[ESCRITURA ATRASADA]", StringComparison.Ordinal),
+        "M-22: la marca de umbral no refleja el retardo de escritura.");
     return Task.CompletedTask;
 }
 

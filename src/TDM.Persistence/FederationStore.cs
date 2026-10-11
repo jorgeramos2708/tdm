@@ -203,6 +203,10 @@ public sealed class FederationStore
 
             var age = Math.Max(0, (DateTimeOffset.Now - latest.Timestamp).TotalSeconds);
             var fileTime = new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero);
+            // M-22 (F35): fileDelta compara el timestamp de la muestra (reloj del nodo) con el
+            // last-write del archivo (también reloj del nodo): mide el retardo del escritor del
+            // agregado, no la deriva de reloj ENTRE hosts. El umbral se conserva porque un
+            // escritor atrasado sí degrada la utilidad federada.
             var fileDelta = Math.Abs((fileTime - latest.Timestamp.ToUniversalTime()).TotalSeconds);
             var connectivity = age >= thresholds.NodeOfflineSeconds ? "SIN DATOS" : age >= thresholds.NodeStaleWarningSeconds ? "ATRASADO" : "EN LÍNEA";
             double? memoryUsed = latest.MemoryFreePercent.HasValue ? 100d - latest.MemoryFreePercent.Value : null;
@@ -222,7 +226,7 @@ public sealed class FederationStore
             return new FederationNodeStatus(node, connectivity, health, latest.Timestamp, age, latest.CpuPercent, memoryUsed,
                 latest.ActiveSessions, activeIncidents.Count, latest.CausalOrigin, latest.Originator, fileDelta,
                 latest.ServiceStates ?? new Dictionary<string, string>(), latest.DependencyStates ?? new Dictionary<string, string>(),
-                fileDelta >= thresholds.ClockDriftWarningSeconds ? $"Posible desfase reloj/archivo: {fileDelta:0}s" : "Agregado de TDM accesible");
+                fileDelta >= thresholds.ClockDriftWarningSeconds ? $"Retardo de escritura del agregado: {fileDelta:0}s (muestra vs last-write; no es deriva de reloj entre hosts)" : "Agregado de TDM accesible");
         }
         catch (UnauthorizedAccessException ex) { return Empty(node, "NO ACCESIBLE", "SIN DATOS", "Permiso denegado: " + ex.Message); }
         catch (IOException ex) { return Empty(node, "NO ACCESIBLE", "SIN DATOS", "I/O: " + ex.Message); }

@@ -68,17 +68,19 @@ public partial class MultiServerDashboardViewModel : ObservableObject
         var builder = new StringBuilder();
         builder.Append($"Nodos: {Total} · En línea: {Online} · Degradados: {Degraded} · Sin datos: {Offline}.");
         builder.AppendLine();
-        builder.AppendLine("Estado por nodo (salud · conectividad · antigüedad · reloj):");
+        builder.AppendLine("Estado por nodo (salud · conectividad · antigüedad · escritura):");
         foreach (var node in _statuses.Take(20))
         {
             builder.Append($"• {DashboardRules.SanitizeVisibleText(node.Node.DisplayName)} — salud: {node.Health} · conectividad: {node.Connectivity}");
             if (node.CpuPercent.HasValue) builder.Append($" · CPU {node.CpuPercent.Value:0.0}%");
             builder.Append($" · sesiones {node.ActiveSessions?.ToString() ?? "N/D"} · incidentes {node.Incidents}");
             builder.Append($" · última muestra hace {node.AgeSeconds:0} s");
-            builder.Append($" · reloj {node.ClockFileDeltaSeconds:+0.0;-0.0} s");
+            // M-22 (F35): el delta compara muestra vs last-write del mismo nodo (retardo del
+            // escritor del agregado); no mide la deriva de reloj entre hosts.
+            builder.Append($" · escritura/muestra {node.ClockFileDeltaSeconds:+0.0;-0.0} s");
             if (node.AgeSeconds >= thresholds.NodeOfflineSeconds) builder.Append(" [SIN DATOS]");
             else if (node.AgeSeconds >= thresholds.NodeStaleWarningSeconds) builder.Append(" [MUESTRA ANTIGUA]");
-            if (Math.Abs(node.ClockFileDeltaSeconds) >= thresholds.ClockDriftWarningSeconds) builder.Append(" [DESFASE DE RELOJ]");
+            if (Math.Abs(node.ClockFileDeltaSeconds) >= thresholds.ClockDriftWarningSeconds) builder.Append(" [ESCRITURA ATRASADA]");
             builder.AppendLine();
         }
         if (_statuses.Count > 20)

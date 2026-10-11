@@ -283,7 +283,7 @@ public static partial class RootCauseCorrelator
         var thirdPartyPair = ClosestBefore(thirdPartySignals, report.Eventos
             .Where(e => e.Timestamp.HasValue && e.Producto is not TsplusProduct.Ninguno and not TsplusProduct.Desconocido)
             .Where(e => e.Severidad != DiagnosticSeverity.Informativo && e.Tipo != "THIRD_PARTY_SECURITY_INTERFERENCE_SIGNAL")
-            .Where(e => !e.Fuente.Equals("TDM", StringComparison.OrdinalIgnoreCase))
+            .Where(e => !IsTdmSource(e))
             .OrderBy(e => e.Timestamp).ToList(), TimeSpan.FromMinutes(10));
         if (thirdPartyPair is not null)
         {

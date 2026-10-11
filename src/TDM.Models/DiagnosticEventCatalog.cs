@@ -135,7 +135,7 @@ public static class DiagnosticEventCatalog
         "SERVICE_TERMINATION", "SERVICE_START_FAILURE"
     };
 
-    private static readonly string[] MissionServiceMarkers =
+    public static readonly string[] MissionServiceMarkers =
     [
         "tsplus", "termservice", "remote desktop services", "remote desktop", "rdp",
         "apsc", "application publishing", "html5", "gateway",
@@ -144,11 +144,49 @@ public static class DiagnosticEventCatalog
         "spooler", "print spooler"
     ];
 
-    private static readonly string[] MissionMarkers =
+    public static readonly string[] MissionMarkers =
     [
         "tsplus", "remote access", "remote desktop", "remotedesktop", "termservice", "rdp", "tdm.", "tdm ",
         "apsc", "wsession", "logonsession", "alternateshell", "html5", "webportal", "gateway", "application publishing"
     ];
+
+    // M-11 (F35): marcadores genéricos que sólo cuentan como coincidencia en límite de
+    // palabra; el Contains crudo matcheaba substrings dentro de identificadores ajenos
+    // (p. ej. "CardRDPHealth"). Los marcadores de producto (tsplus, termservice…) conservan
+    // Contains, porque la subcadena dentro de un identificador mayor sigue nombrando el
+    // mismo componente del ecosistema.
+    // shortcut: marcadores aislados como "gateway" aún aceptan servicios de terceros con el
+    // mismo token; upgrade: cruzar con lista cerrada del ecosistema TSplus.
+    private static readonly HashSet<string> BoundaryOnlyMissionMarkers = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "rdp", "gateway", "html5", "apsc", "spooler"
+    };
+
+    /// <summary>
+    /// Coincidencia de texto contra marcadores de misión con la regla única de límite de
+    /// palabra para los marcadores blandos. Compartida con ObservabilityIncidentPolicy
+    /// (antes cada clase duplicaba la lista y el Contains crudo).
+    /// </summary>
+    public static bool MatchesAnyMarker(string? text, string[] markers)
+        => !string.IsNullOrWhiteSpace(text)
+           && markers.Any(marker => BoundaryOnlyMissionMarkers.Contains(marker)
+               ? ContainsAsWordBoundary(text!, marker)
+               : text!.Contains(marker, StringComparison.OrdinalIgnoreCase));
+
+    private static bool ContainsAsWordBoundary(string text, string marker)
+    {
+        var index = 0;
+        while (index <= text.Length - marker.Length)
+        {
+            var found = text.IndexOf(marker, index, StringComparison.OrdinalIgnoreCase);
+            if (found < 0) return false;
+            var before = found > 0 ? text[found - 1] : ' ';
+            var after = found + marker.Length < text.Length ? text[found + marker.Length] : ' ';
+            if (!char.IsLetterOrDigit(before) && !char.IsLetterOrDigit(after)) return true;
+            index = found + 1;
+        }
+        return false;
+    }
 
     /// <summary>
     /// Contrato de severidad para incidentes operativos: únicamente ERROR y CRÍTICO.
@@ -221,14 +259,14 @@ public static class DiagnosticEventCatalog
         {
             if (e.Producto != TsplusProduct.Ninguno || e.Capa == DiagnosticLayer.Rdp) return true;
             var text = $"{e.Fuente} {e.Componente} {e.Mensaje}";
-            return MissionServiceMarkers.Any(marker => text.Contains(marker, StringComparison.OrdinalIgnoreCase));
+            return MatchesAnyMarker(text, MissionServiceMarkers);
         }
 
         if (MissionScopedWindowsIncidents.Contains(e.Tipo))
         {
             if (e.Producto != TsplusProduct.Ninguno || e.Capa == DiagnosticLayer.Rdp) return true;
             var text = $"{e.Fuente} {e.Componente} {e.Mensaje} {e.Archivo}";
-            return MissionMarkers.Any(marker => text.Contains(marker, StringComparison.OrdinalIgnoreCase));
+            return MatchesAnyMarker(text, MissionMarkers);
         }
 
         return true;

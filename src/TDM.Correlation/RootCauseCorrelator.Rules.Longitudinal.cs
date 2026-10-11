@@ -1,4 +1,5 @@
 using System.Globalization;
+using TDM.Core;
 using TDM.Models;
 
 namespace TDM.Correlation;
@@ -7,13 +8,18 @@ public static partial class RootCauseCorrelator
 {
     private static void AddLongitudinalHistoryCandidates(DiagnosticReport report, List<CandidateDraft> drafts)
     {
+        // M-07 (F35): transiciones, fallas y modificaciones se filtran por la ventana de
+        // análisis como el resto del correlacionador; antes la regla longitudinal emparejaba
+        // eventos fechados fuera de la ventana visible del informe.
         var transitions = report.Eventos
-            .Where(e => e.Timestamp.HasValue && e.Tipo is "TDM_FORENSIC_STATE_TRANSITION" or "TDM_INTEGRITY_STATE_TRANSITION" or "TDM_MONITOR_STATE_TRANSITION")
+            .Where(e => e.Timestamp.HasValue && DiagnosticTimeWindow.IsEventInside(report, e.Timestamp!.Value)
+                && e.Tipo is "TDM_FORENSIC_STATE_TRANSITION" or "TDM_INTEGRITY_STATE_TRANSITION" or "TDM_MONITOR_STATE_TRANSITION")
             .OrderBy(e => e.Timestamp)
             .ToList();
         var failures = report.Eventos
-            .Where(e => e.Timestamp.HasValue && e.Severidad != DiagnosticSeverity.Informativo)
-            .Where(e => !e.Fuente.StartsWith("TDM", StringComparison.OrdinalIgnoreCase))
+            .Where(e => e.Timestamp.HasValue && DiagnosticTimeWindow.IsEventInside(report, e.Timestamp!.Value)
+                && e.Severidad != DiagnosticSeverity.Informativo)
+            .Where(e => !IsTdmSource(e))
             .OrderBy(e => e.Timestamp)
             .ToList();
 
@@ -92,7 +98,8 @@ public static partial class RootCauseCorrelator
                 product));
         }
         var fileModifications = report.Eventos
-            .Where(e => e.Timestamp.HasValue && e.Tipo is "TSPLUS_FILE_MODIFICATION_EVIDENCE" or "WINDOWS_FILE_MODIFICATION_EVIDENCE")
+            .Where(e => e.Timestamp.HasValue && DiagnosticTimeWindow.IsEventInside(report, e.Timestamp!.Value)
+                && e.Tipo is "TSPLUS_FILE_MODIFICATION_EVIDENCE" or "WINDOWS_FILE_MODIFICATION_EVIDENCE")
             .OrderBy(e => e.Timestamp)
             .ToList();
         foreach (var modification in fileModifications)

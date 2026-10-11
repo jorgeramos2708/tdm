@@ -208,6 +208,12 @@ public static partial class RootCauseCorrelator
         return markers.Any(m => text.Contains(m, StringComparison.OrdinalIgnoreCase));
     }
 
+    // M-12 (F35): exclusión única de las señales propias de TDM del pool causal. Antes cuatro
+    // reglas usaban Equals("TDM") y la regla longitudinal usaba StartsWith, así que fuentes
+    // como "TDM Canary" entraban al correlacionador en un sitio y no en otro.
+    private static bool IsTdmSource(DiagnosticEvent e)
+        => e.Fuente.StartsWith("TDM", StringComparison.OrdinalIgnoreCase);
+
     private static List<DiagnosticEvent> Relevant(DiagnosticReport report, DiagnosticLayer layer) =>
         report.Eventos
             .Where(e => e.Capa == layer && e.Timestamp.HasValue && e.Severidad != DiagnosticSeverity.Informativo)
@@ -215,7 +221,7 @@ public static partial class RootCauseCorrelator
             // Fallas de lectura/estado de TDM son huecos o contexto de dependencia, no síntomas
             // del componente auditado. Las dependencias funcionales TSplus -> Windows se consumen
             // mediante reglas específicas y nunca se autocorrelacionan como "error TSplus/RDP".
-            .Where(e => !e.Fuente.Equals("TDM", StringComparison.OrdinalIgnoreCase))
+            .Where(e => !IsTdmSource(e))
             .Where(e => e.Tipo != "TSPLUS_WINDOWS_FUNCTIONAL_DEPENDENCY_STATE")
             .OrderBy(e => e.Timestamp)
             .ToList();
@@ -373,7 +379,7 @@ public static partial class RootCauseCorrelator
             || text.Contains("0x80070040", StringComparison.OrdinalIgnoreCase)
             || text.Contains("0x8007139F", StringComparison.OrdinalIgnoreCase)
             || text.Contains("Event_Disconnect", StringComparison.OrdinalIgnoreCase)) return false;
-        return (e.Severidad is DiagnosticSeverity.Error or DiagnosticSeverity.Critico) && !e.Fuente.Equals("TDM", StringComparison.OrdinalIgnoreCase);
+        return (e.Severidad is DiagnosticSeverity.Error or DiagnosticSeverity.Critico) && !IsTdmSource(e);
     }
 
     private static bool SameApplication(DiagnosticEvent e, string appName)
