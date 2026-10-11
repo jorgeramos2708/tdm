@@ -57,6 +57,7 @@ public static class TsplusLogDiscovery
         var systemDrive = Path.GetPathRoot(Environment.SystemDirectory) ?? @"C:\";
         AddDirectory(result, "Apertura de sesión", Path.Combine(systemDrive, "wsession", "trace"));
         AddDirectory(result, "Universal Printer / servidor", Path.Combine(systemDrive, "wsession", "UniversalPrinter", "logs"));
+        discoveryErrors += AddSetupTempLogs(result, systemDrive);
 
         var pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
         if (!string.IsNullOrWhiteSpace(pf86))
@@ -105,6 +106,39 @@ public static class TsplusLogDiscovery
     }
 
     private sealed record DynamicDiscoveryStats(int Visited, int Added, int Errors, bool Truncated);
+
+    // L-14 (F35): el instalador TSplus escribe su log en %TEMP%; el doc oficial 17 documenta
+    // "Setup TSplus Remote Access.txt" y "Setup Log YYYY-MM-DD #XXX.txt". Barrido top-level,
+    // sólo esos nombres, acotado a 10 archivos: no se exploran temporales ajenos al objetivo.
+    private static int AddSetupTempLogs(List<TsplusLogSource> result, string systemDrive)
+    {
+        var added = 0;
+        var errors = 0;
+        var candidates = new[] { Path.GetTempPath(), Path.Combine(systemDrive, "Windows", "Temp") };
+        foreach (var dir in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (added >= 10) break;
+            try
+            {
+                foreach (var file in Directory.EnumerateFiles(dir, "*.txt", SearchOption.TopDirectoryOnly))
+                {
+                    if (added >= 10) break;
+                    if (!IsSetupLogName(Path.GetFileName(file))) continue;
+                    AddFile(result, "Instalación TSplus (setup)", file);
+                    added++;
+                }
+            }
+            catch
+            {
+                errors++;
+            }
+        }
+        return errors;
+    }
+
+    private static bool IsSetupLogName(string name)
+        => name.StartsWith("Setup TSplus", StringComparison.OrdinalIgnoreCase)
+        || name.StartsWith("Setup Log", StringComparison.OrdinalIgnoreCase);
 
     private static DynamicDiscoveryStats DiscoverDynamicLogDirectories(List<TsplusLogSource> result, string root)
     {

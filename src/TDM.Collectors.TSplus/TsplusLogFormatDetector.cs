@@ -10,7 +10,9 @@ namespace TDM.Collectors.TSplus;
 /// </summary>
 public static class TsplusLogFormatDetector
 {
-    public const int MinLines = 200;
+    // L-09 (F35): suelo por archivo; 200 descartaba instalaciones pequeñas cuyo formato
+    // desconocido sí debería señalarse. shortcut: 50 líneas, subir si hay ruido en logs cortos.
+    public const int MinLines = 50;
     public const double MinUnparsedRatio = 0.8;
     public const int MaxFiles = 5;
 

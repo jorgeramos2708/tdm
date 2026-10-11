@@ -339,7 +339,7 @@ public partial class AdministrationWorkspaceViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task SimulateRemediationAsync()
+    private void SimulateRemediation()
     {
         try
         {
@@ -376,11 +376,10 @@ public partial class AdministrationWorkspaceViewModel : ObservableObject
         {
             RemediationResult = "❌ Error: " + ex.Message;
         }
-        await Task.CompletedTask;
     }
 
     [RelayCommand]
-    private async Task FindRemediationActionsAsync()
+    private void FindRemediationActions()
     {
         try
         {
@@ -420,7 +419,6 @@ public partial class AdministrationWorkspaceViewModel : ObservableObject
         {
             RemediationResult = "❌ Error: " + ex.Message;
         }
-        await Task.CompletedTask;
     }
 
     private DependencyHealthPropagator? BuildDependencyPropagator()

@@ -9,10 +9,15 @@ namespace TDM.Correlation;
 /// <summary>
 /// Agrupa señales que pertenecen al mismo incidente funcional sin convertir proximidad temporal
 /// en causalidad. Permite que Web/HTML5, AD/NLA, WMI/observabilidad y otros dominios coexistan.
+/// Contrato de presentación (L-03): este listado va al informe/exportación/narrativa; el
+/// correlador de causa raíz no lo consume.
 /// </summary>
 public static class IncidentClusterAnalyzer
 {
     private static readonly TimeSpan ClusterGap = TimeSpan.FromMinutes(5);
+    // L-06 (F35): sin tope de extensión, la encadenación hueco<=5 min agrupa una ráfaga
+    // continua de horas en un solo "incidente"; el span máximo acota la ventana declarada.
+    private static readonly TimeSpan MaxClusterSpan = TimeSpan.FromMinutes(30);
 
     // P1-01: Normalizador de claves de evidencia para que IdentityKey agrupe correctamente
     // aunque distintos collectors usen nombres distintos para el mismo concepto.
@@ -111,6 +116,7 @@ public static class IncidentClusterAnalyzer
             for (var i = groups.Count - 1; i >= 0; i--)
             {
                 if (signal.Timestamp!.Value - groups[i][^1].Timestamp!.Value > ClusterGap) continue;
+                if (signal.Timestamp!.Value - groups[i][0].Timestamp!.Value > MaxClusterSpan) continue;
                 if (SameDomain(groups[i][^1], signal) && !DistinctIdentity(groups[i][^1], signal))
                 {
                     target = i;
@@ -143,7 +149,7 @@ public static class IncidentClusterAnalyzer
             new("Incidentes operativos", operational.ToString()),
             new("Ventana del incidente", $"{events[0].Timestamp!.Value:dd/MM/yyyy HH:mm:ss} - {events[^1].Timestamp!.Value:dd/MM/yyyy HH:mm:ss}"),
             new("Causa común demostrada", "No"),
-            new("Regla de agrupación", $"mismo dominio + hueco <= {ClusterGap.TotalMinutes:0} min + identidad compatible"),
+            new("Regla de agrupación", $"mismo dominio + hueco <= {ClusterGap.TotalMinutes:0} min + span <= {MaxClusterSpan.TotalMinutes:0} min + identidad compatible"),
             new("Identidad del grupo", IdentityKey(events[0]) ?? "No determinada (regla temporal)"),
         };
         if (domain == "OBSERVABILIDAD")

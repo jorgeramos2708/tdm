@@ -34,10 +34,10 @@ public override void Initialize()
     AvaloniaXamlLoader.Load(this);
     
     // Schedule startup checks to run after UI is responsive
-    Task.Run(RunStartupChecksAsync);
+    Task.Run(RunStartupChecks);
 }
 
-private async Task RunStartupChecksAsync()
+private void RunStartupChecks()
 {
     try
     {
@@ -62,8 +62,6 @@ private async Task RunStartupChecksAsync()
                 throw;
             }
         }
-        
-        await Task.CompletedTask; // Satisfy async pattern
     }
     catch (Exception ex)
     {

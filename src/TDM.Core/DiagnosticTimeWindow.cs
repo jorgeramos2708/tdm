@@ -14,6 +14,10 @@ public static class DiagnosticTimeWindow
         "Fecha", "Último registro", "Hora del incidente", "Primer evento", "Último evento"
     ];
 
+    // L-12 (F35): sólo las claves que citan eventos concretos del pipeline; las demás
+    // (Fecha, Último registro, Hora del incidente) describen estado/hito, no eventos del reporte.
+    private static readonly string[] EventCitationKeys = ["Primer evento", "Último evento"];
+
     // H1: formatos exactos que emiten los productores de TimestampKeys ("dd/MM/yyyy HH:mm:ss"
     // en hallazgos de reglas/collectors, "O" round-trip ISO 8601 en Fecha/Último registro).
     // MS: un format string sólo es estable con cultura explícita ("O"/"o" es invariante por
@@ -39,13 +43,24 @@ public static class DiagnosticTimeWindow
         => (report.PeriodoAnalizadoInicio == default || timestamp >= report.PeriodoAnalizadoInicio)
            && (report.PeriodoAnalizadoFin == default || timestamp <= report.PeriodoAnalizadoFin);
 
+    /// <summary>
+    /// Timestamps que el hallazgo declara como cita de eventos concretos (Primer/Último
+    /// evento), leídos con la regla de parseo única. Vacío si no declara ninguno legible.
+    /// L-12 (F35): el auto-chequeo de coherencia los usa para detectar citas cuyo evento
+    /// ya fue descartado por el recorte de la ventana analizada.
+    /// </summary>
+    public static IReadOnlyList<DateTimeOffset> DeclaredEventTimestamps(DiagnosticFinding finding)
+    {
+        ArgumentNullException.ThrowIfNull(finding);
+        var timestamps = new List<DateTimeOffset>();
+        foreach (var raw in DeclaredValues(finding, EventCitationKeys))
+            if (TryParseTimestamp(raw, out var timestamp)) timestamps.Add(timestamp);
+        return timestamps;
+    }
+
     public static bool IsFindingInside(DiagnosticFinding finding, DateTimeOffset start, DateTimeOffset end)
     {
-        var declared = finding.Evidencia
-            .Where(e => TimestampKeys.Any(key => e.Clave.Equals(key, StringComparison.OrdinalIgnoreCase)))
-            .Select(e => e.Valor)
-            .Where(raw => !string.IsNullOrWhiteSpace(raw) && !raw.Equals("N/D", StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        var declared = DeclaredValues(finding, TimestampKeys);
 
         var timestamps = new List<DateTimeOffset>(declared.Count);
         foreach (var raw in declared)
@@ -71,6 +86,13 @@ public static class DiagnosticTimeWindow
         var latest = timestamps.Max();
         return latest >= start && earliest <= end;
     }
+
+    private static List<string> DeclaredValues(DiagnosticFinding finding, string[] keys)
+        => finding.Evidencia
+            .Where(e => keys.Any(key => e.Clave.Equals(key, StringComparison.OrdinalIgnoreCase)))
+            .Select(e => e.Valor)
+            .Where(raw => !string.IsNullOrWhiteSpace(raw) && !raw.Equals("N/D", StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
     private static bool TryParseTimestamp(string raw, out DateTimeOffset timestamp)
     {

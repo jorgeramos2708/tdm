@@ -100,6 +100,29 @@ public static partial class RootCauseCorrelator
                 "WINDOWS",
                 TsplusProduct.RemoteAccess));
         }
+
+        // L-17 (auditoría de efectividad, F35): el certificado RDP vencido era sólo un hallazgo
+        // crítico del collector y nunca competía como causa; aquí correlaciona con el síntoma
+        // de sesión remota con el mismo contrato documentado que las demás condiciones RDP.
+        var rdpCertExpired = report.Hallazgos.FirstOrDefault(f => f.Id == "RDP-CERTIFICATE-EXPIRED");
+        if (rdpCertExpired is not null)
+        {
+            drafts.Add(new CandidateDraft(
+                "ROOT-RDP-CERTIFICATE-EXPIRED",
+                "RDP / certificado del listener vencido",
+                DiagnosticLayer.Rdp,
+                symptom is null ? 76 : 92,
+                symptom is null ? ConfidenceLevel.Media : ConfidenceLevel.Alta,
+                "El certificado asociado al listener RDP está vencido.",
+                symptom is null
+                    ? "TDM confirmó que el certificado del listener RDP está vencido. Un certificado vencido puede provocar fallas TLS dependiendo de la configuración y del cliente; sin un síntoma de sesión remota en la ventana se conserva como hipótesis y no se declara causa del incidente."
+                    : "TDM confirmó que el certificado del listener RDP está vencido y la ventana contiene un síntoma de sesión remota. Cuando la conexión no se establece, Microsoft recomienda revisar el estado del certificado del listener RDP-Tcp; renueve o reasigne el certificado. TDM no modifica certificados.",
+                Merge(rdpCertExpired.Evidencia, symptomEvidence),
+                "MS-RDP-CERTIFICATE",
+                symptom?.Timestamp,
+                "WINDOWS",
+                TsplusProduct.RemoteAccess));
+        }
     }
 
     private static DiagnosticEvent? RemoteSessionSymptom(DiagnosticReport report)

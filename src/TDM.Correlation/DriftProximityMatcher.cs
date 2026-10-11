@@ -1,3 +1,4 @@
+using System.Globalization;
 using TDM.Models;
 
 namespace TDM.Correlation;
@@ -31,7 +32,9 @@ public static class DriftProximityMatcher
                 {
                     var sep = part.LastIndexOf('|');
                     if (sep < 0) continue;
-                    if (!DateTimeOffset.TryParse(part[(sep + 1)..].Trim(), out var change)) continue;
+                    // L-05 (F35): cultura explícita; la escritora publica ISO-8601 con offset
+                    // y el parseo implícito de CurrentCulture no es un contrato verificable.
+                    if (!DateTimeOffset.TryParse(part[(sep + 1)..].Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var change)) continue;
                     var delta = incident - change;
                     if (delta < TimeSpan.Zero || delta > window) continue;
                     var minutes = (int)delta.TotalMinutes;

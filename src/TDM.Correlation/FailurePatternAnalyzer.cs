@@ -5,13 +5,16 @@ namespace TDM.Correlation;
 /// <summary>
 /// Une incidentes ya correlacionados que comparten proceso, producto, excepción y componente funcional.
 /// No fusiona productos distintos ni convierte recurrencia en causalidad.
+/// L-04 (F35): no se limita a crashes; cualquier candidato con hora de incidente (paros de
+/// servicio, licencia, configuración) entra en la firma —el agrupador ya separa por producto,
+/// componente y excepción— para que la recurrencia real no quede oculta.
 /// </summary>
 public static class FailurePatternAnalyzer
 {
     public static IReadOnlyList<FailurePattern> Analyze(DiagnosticReport report)
     {
         var incidents = report.CausasRaiz
-            .Where(c => c.Id.StartsWith("ROOT-PROCESS-CRASH", StringComparison.OrdinalIgnoreCase) && c.HoraIncidente.HasValue)
+            .Where(c => c.HoraIncidente.HasValue)
             .ToList();
 
         var groups = incidents

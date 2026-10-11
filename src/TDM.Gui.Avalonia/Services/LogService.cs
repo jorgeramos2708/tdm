@@ -18,8 +18,11 @@ namespace TDM.Gui.Avalonia.Services;
 public sealed class LogService : IDisposable
 {
     private const int MaxBufferSize = 10000;
-    private const int MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB por archivo
-    private const int MaxFiles = 30; // Retención 30 días
+    // L-01 (F35): la retención declarada es por EDAD (30 días) y así se aplica; el corte
+    // anterior por cantidad de ficheros borraba ficheros jóvenes en días intensivos.
+    // shortcut: 30 días, subir si el volumen diario supera el presupuesto de disco.
+    private const int RetentionDays = 30;
+    private const int MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB por fichero rotado
     // MEDIUM F25: cota de entradas pendientes de persistir; con una ráfaga de miles de
     // registros, el productor nunca acumula más de esto en memoria (DropOldest descarta
     // las más antiguas sin bloquear — MS core/extensions/channels).
@@ -41,6 +44,7 @@ public sealed class LogService : IDisposable
     private int _currentCount;
     private string? _currentLogFile;
     private DateTime _currentLogDate = DateTime.MinValue;
+    private int _sequence;
     private long _currentFileSize;
     private bool _disposed;
 
@@ -149,11 +153,30 @@ public sealed class LogService : IDisposable
         var today = DateTime.UtcNow.Date;
         if (_currentLogFile != null && _currentLogDate == today && _currentFileSize < MaxFileSizeBytes)
             return;
+        if (_currentLogDate != today)
+        {
+            _currentLogDate = today;
+            _sequence = 0;
+        }
 
-        var fileName = $"tdm-gui-{today:yyyyMMdd}.log";
-        _currentLogFile = Path.Combine(_logDirectory, fileName);
-        _currentLogDate = today;
-        _currentFileSize = File.Exists(_currentLogFile) ? new FileInfo(_currentLogFile).Length : 0;
+        // L-01 (F35): rotación por tamaño REAL con sufijo de secuencia (tdm-gui-fecha-N.log).
+        // Antes se reasignaba el mismo nombre ya lleno y el fichero crecía sin límite.
+        // El patrón de limpieza tdm-gui-*.log sigue matcheando todos los segmentos.
+        while (true)
+        {
+            var name = _sequence == 0
+                ? $"tdm-gui-{today:yyyyMMdd}.log"
+                : $"tdm-gui-{today:yyyyMMdd}-{_sequence}.log";
+            var path = Path.Combine(_logDirectory, name);
+            var size = File.Exists(path) ? new FileInfo(path).Length : 0L;
+            if (size < MaxFileSizeBytes)
+            {
+                _currentLogFile = path;
+                _currentFileSize = size;
+                return;
+            }
+            _sequence++;
+        }
     }
 
     private string FormatLogLine(LogEntry entry)
@@ -185,24 +208,15 @@ public sealed class LogService : IDisposable
     {
         try
         {
-            var files = Directory.GetFiles(_logDirectory, "tdm-gui-*.log")
-                .Select(f => new FileInfo(f))
-                .OrderByDescending(f => f.CreationTimeUtc)
-                .ToList();
-
-            if (files.Count > MaxFiles)
+            var cutoff = DateTime.UtcNow.AddDays(-RetentionDays);
+            foreach (var path in Directory.GetFiles(_logDirectory, "tdm-gui-*.log"))
             {
-                foreach (var file in files.Skip(MaxFiles))
+                try
                 {
-                    try { file.Delete(); } catch { }
+                    var info = new FileInfo(path);
+                    if (info.LastWriteTimeUtc < cutoff) info.Delete();
                 }
-            }
-
-            // Comprimir archivos antiguos (>7 días) si son grandes
-            var cutoff = DateTime.UtcNow.AddDays(-7);
-            foreach (var file in files.Where(f => f.CreationTimeUtc < cutoff && f.Length > 1024 * 1024))
-            {
-                // Opcional: comprimir a .gz
+                catch { }
             }
         }
         catch { }

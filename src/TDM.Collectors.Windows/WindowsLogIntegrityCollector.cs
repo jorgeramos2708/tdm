@@ -169,7 +169,7 @@ public sealed class WindowsLogIntegrityCollector : IReadOnlyCollector
         try
         {
             var query = new EventLogQuery("Application", PathType.LogName,
-                $"*[System[Provider[@Name='{CanarySource}'] and TimeCreated[@SystemTime>='{cutoff:O}']]]")
+                $"*[System[Provider[@Name='{CanarySource}'] and TimeCreated[@SystemTime>='{DiagnosticWindow.FormatUtc(cutoff)}']]]")
             { ReverseDirection = true };
             using var reader = new EventLogReader(query);
             using var record = reader.ReadEvent();

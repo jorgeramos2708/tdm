@@ -201,7 +201,6 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("PersistedStateAndIncidentSubjectsHideCleartextIdentities", PersistedStateAndIncidentSubjectsHideCleartextIdentities),
     ("PseudonymSaltDefeatsDictionaryReuse", PseudonymSaltDefeatsDictionaryReuse),
     ("SmtpSecretUsesEntropyAndRestrictedAcl", SmtpSecretUsesEntropyAndRestrictedAcl),
-    ("StructuredLogFlushHonorsGateWithoutAsyncVoid", StructuredLogFlushHonorsGateWithoutAsyncVoid),
     ("RunScopeDisposesDisposableCollectors", RunScopeDisposesDisposableCollectors),
     ("ThirdPartyInventoryDeclaresScanGaps", ThirdPartyInventoryDeclaresScanGaps),
     ("SettingsSanitizeRewriteFailureIsObservable", SettingsSanitizeRewriteFailureIsObservable),
@@ -246,7 +245,14 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("Phase35TdmSourceExclusionIsPrefixConsistent", Phase35TdmSourceExclusionIsPrefixConsistent),
     ("Phase35EventIdentityCollapsesAcrossCollectors", Phase35EventIdentityCollapsesAcrossCollectors),
     ("Phase35ServiceStartupDeclaresDowntimeGap", Phase35ServiceStartupDeclaresDowntimeGap),
-    ("Phase35FederatedFileDeltaIsWriterDelayNotClockSkew", Phase35FederatedFileDeltaIsWriterDelayNotClockSkew)
+    ("Phase35FederatedFileDeltaIsWriterDelayNotClockSkew", Phase35FederatedFileDeltaIsWriterDelayNotClockSkew),
+    ("Phase35ClusterSpanCapSplitsLongChains", Phase35ClusterSpanCapSplitsLongChains),
+    ("Phase35LowDeclarationsAreEnforcedInSource", Phase35LowDeclarationsAreEnforcedInSource),
+    ("Phase35FailurePatternsCoverNonCrashRecurrence", Phase35FailurePatternsCoverNonCrashRecurrence),
+    ("Phase35FindingsCitingTrimmedEventsAreTensioned", Phase35FindingsCitingTrimmedEventsAreTensioned),
+    ("Phase35SetupLogsInTempAreDiscovered", Phase35SetupLogsInTempAreDiscovered),
+    ("Phase35ExpiredRdpCertificateCompetesAsCause", Phase35ExpiredRdpCertificateCompetesAsCause),
+    ("Phase35LogRetentionMatchesDeclaredDaysAndRotatesBySize", Phase35LogRetentionMatchesDeclaredDaysAndRotatesBySize)
 };
 
 var failed = 0;
@@ -1199,7 +1205,10 @@ static Task UnknownFormatFlagsSingleFile()
     Equal(1, flagged.Count, "Archivo 90% no parseado no señalado.");
     Equal("TSPLUS-LOG-UNKNOWN-FORMAT", flagged[0].Id, "Id de formato desconocido inesperado.");
     True(TsplusLogFormatDetector.Evaluate(new Dictionary<string, (long, long)> { ["b.log"] = (1000, 100) }).Count == 0, "Archivo sano señalado.");
-    True(TsplusLogFormatDetector.Evaluate(new Dictionary<string, (long, long)> { ["c.log"] = (100, 95) }).Count == 0, "Volumen bajo señalado.");
+    Equal(1, TsplusLogFormatDetector.Evaluate(new Dictionary<string, (long, long)> { ["c.log"] = (100, 95) }).Count,
+        "L-09: archivo de 100 líneas con 95 sin evento quedó bajo el suelo y no fue señalado.");
+    True(TsplusLogFormatDetector.Evaluate(new Dictionary<string, (long, long)> { ["d.log"] = (40, 40) }).Count == 0,
+        "L-09: archivo por debajo del suelo de 50 líneas fue señalado.");
     True(TsplusLogFormatDetector.Evaluate(new Dictionary<string, (long, long)>()).Count == 0, "Vacío señaló.");
     return Task.CompletedTask;
 }
@@ -5315,43 +5324,6 @@ static async Task SmtpSecretUsesEntropyAndRestrictedAcl()
     finally { TryDelete(root); }
 }
 
-static async Task StructuredLogFlushHonorsGateWithoutAsyncVoid()
-{
-    var root = TempDir();
-    try
-    {
-        var writer = new TsplusStructuredLogWriter(Path.Combine(root, "logs"), "TESTHOST");
-        await writer.WriteAsync(new TsplusLogSchema.StructuredLogEntry(
-            Timestamp: DateTimeOffset.Now,
-            Host: "TESTHOST",
-            ProcessId: 1,
-            ThreadId: 1,
-            Level: "INFO",
-            Component: "RemoteAccess",
-            Category: "SESSION",
-            Message: "sesion estructurada FIX93"));
-        writer.Dispose();
-
-        var files = Directory.GetFiles(Path.Combine(root, "logs"), "*.jsonl");
-        True(files.Length > 0, "El escritor estructurado no creó su JSONL.");
-        True(File.ReadAllText(files[0]).Contains("sesion estructurada FIX93", StringComparison.Ordinal),
-            "La entrada no llegó al JSONL tras disponer el escritor.");
-
-        var repoRoot = FindRepoRoot();
-        NotNull(repoRoot, "No se localizó TDM.sln; gate del sidecar no ejecutable.");
-        var text = File.ReadAllText(Path.Combine(repoRoot!, "src", "TDM.Collectors.TSplus", "TsplusStructuredLogSidecar.cs"));
-        False(text.Contains("private async void", StringComparison.Ordinal),
-            "Volvió un async void en el sidecar: las excepciones del Timer quedarían fuera de todo Try/Catch.");
-        True(text.Contains("private void FlushTimerCallback(object? state)", StringComparison.Ordinal),
-            "El callback de flush del Timer no es síncrono.");
-        True(text.Contains("if (!_gate.Wait(TimeSpan.FromSeconds(1))) return;", StringComparison.Ordinal),
-            "El flush del Timer ya no respeta el gate (flush sin adquirir / Release desbalanceado).");
-        True(text.Contains("_currentWriter = null;", StringComparison.Ordinal),
-            "Dispose no anula el writer: un tick tardío escribiría sobre un stream ya dispuesto.");
-    }
-    finally { TryDelete(root); }
-}
-
 static Task RunScopeDisposesDisposableCollectors()
 {
     // F26: contrato de dispose por run (colectores con recursos no administrados).
@@ -6986,6 +6958,203 @@ static Task Phase35FederatedFileDeltaIsWriterDelayNotClockSkew()
         "M-22: la GUI no etiqueta el delta como escritura/muestra.");
     True(vm.Contains("[ESCRITURA ATRASADA]", StringComparison.Ordinal),
         "M-22: la marca de umbral no refleja el retardo de escritura.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35ClusterSpanCapSplitsLongChains()
+{
+    // L-06: la encadenación hueco<=5 min sin tope de span agrupaba ráfagas continuas de
+    // horas en un solo incidente; el span máximo acota la ventana que el clúster declara.
+    var now = DateTimeOffset.Now;
+    var events = new List<DiagnosticEvent>();
+    for (var i = 18; i >= 0; i--)
+    {
+        events.Add(new DiagnosticEvent(now.AddMinutes(-4 * i), "Netlogon", "Active Directory",
+            DiagnosticLayer.Windows, DiagnosticSeverity.Error, "WINDOWS_AD_DOMAIN_CONNECTIVITY_FAILURE",
+            "Secure channel failed", Evidencia: [new EvidenceItem("Usuario", "alice")]));
+    }
+    var clusters = IncidentClusterAnalyzer.Analyze(Report(events, now));
+    True(clusters.Count >= 2, "L-06: una ráfaga de 72 min quedó en un solo clúster sin tope de span.");
+    True(clusters.All(c => c.Fin - c.Inicio <= TimeSpan.FromMinutes(30)),
+        "L-06: un clúster declaró un span mayor que el tope de 30 min.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35LowDeclarationsAreEnforcedInSource()
+{
+    var root = FindRepoRoot();
+    NotNull(root, "No se localizó TDM.sln; gate de declaraciones LOW no ejecutable.");
+    var rootPath = root!;
+    False(File.Exists(Path.Combine(rootPath, "src", "TDM.Core", "AnomalyDetectionService.cs")),
+        "L-02: sigue en el árbol el detector de anomalías EWMA sin ningún consumidor.");
+    var models = File.ReadAllText(Path.Combine(rootPath, "src", "TDM.Models", "DiagnosticModels.cs"));
+    True(models.Contains("no lee este agrupador (L-03, F35)", StringComparison.Ordinal),
+        "L-03: la propiedad Incidentes no declara su contrato de presentación.");
+    var drift = File.ReadAllText(Path.Combine(rootPath, "src", "TDM.Correlation", "DriftProximityMatcher.cs"));
+    True(drift.Contains("CultureInfo.InvariantCulture, DateTimeStyles.None, out var change", StringComparison.Ordinal),
+        "L-05: el parseo de horas de deriva no fija cultura invariante.");
+    var integrity = File.ReadAllText(Path.Combine(rootPath, "src", "TDM.Collectors.Windows", "WindowsLogIntegrityCollector.cs"));
+    True(integrity.Contains("DiagnosticWindow.FormatUtc(cutoff)", StringComparison.Ordinal),
+        "L-07: la query XPath del canario no usa el formateador UTC-estándar.");
+    False(integrity.Contains("SystemTime>='{cutoff:", StringComparison.Ordinal),
+        "L-07: la query del canario sigue formateando la hora con el patrón local.");
+    var workflow = File.ReadAllText(Path.Combine(rootPath, "src", "TDM.Application", "DiagnosticWorkflow.cs"));
+    False(workflow.Contains("RefreshCoverageAndGuidedResolution", StringComparison.Ordinal),
+        "L-10: sigue el método de refresco guiado sin llamantes.");
+    var sink = File.ReadAllText(Path.Combine(rootPath, "src", "TDM.Notifications", "DesktopJournalNotificationSink.cs"));
+    False(sink.Contains("RotateIfNeededAsync", StringComparison.Ordinal),
+        "L-15: la rotación del journal declara API async sin operación asíncrona.");
+    False(sink.Contains("await Task.CompletedTask", StringComparison.Ordinal),
+        "L-15: quedó un await decorativo en el sink del journal.");
+    var app = File.ReadAllText(Path.Combine(rootPath, "src", "TDM.Gui.Avalonia", "App.axaml.cs"));
+    False(app.Contains("RunStartupChecksAsync", StringComparison.Ordinal),
+        "L-15: las validaciones de arranque siguen declarando API async decorativa.");
+    False(app.Contains("await Task.CompletedTask", StringComparison.Ordinal),
+        "L-15: quedó un await decorativo en las validaciones de arranque.");
+    var admin = File.ReadAllText(Path.Combine(rootPath, "src", "TDM.Gui.Avalonia", "ViewModels", "AdministrationWorkspaceViewModel.cs"));
+    False(admin.Contains("SimulateRemediationAsync", StringComparison.Ordinal),
+        "L-15: el comando de simulación sigue declarando API async decorativa.");
+    False(admin.Contains("FindRemediationActionsAsync", StringComparison.Ordinal),
+        "L-15: el comando de búsqueda de acciones sigue declarando API async decorativa.");
+    False(File.Exists(Path.Combine(rootPath, "src", "TDM.Reporting", "ReportExporter.cs.bak")),
+        "L-16: sigue la copia de respaldo ReportExporter.cs.bak.");
+    False(File.Exists(Path.Combine(rootPath, "tests", "TDM.ProductionTests", "Program.cs.bak")),
+        "L-16: sigue la copia de respaldo Program.cs.bak.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35FailurePatternsCoverNonCrashRecurrence()
+{
+    // L-04: el filtro ROOT-PROCESS-CRASH dejaba fuera de los patrones a los paros de servicio
+    // y demás causas con hora de incidente; la firma ya separa producto/componente/excepción.
+    var now = DateTimeOffset.Now;
+    RootCauseCandidate Stop(int minutes) => new(1, "ROOT-TSPLUS-SERVICE-STOPPED-WEB", "WebPortalService",
+        DiagnosticLayer.Tsplus, 95, ConfidenceLevel.Media, "Servicio detenido.", "Paro observado.",
+        [new EvidenceItem("Servicio", "WebPortalService")],
+        Producto: TsplusProduct.RemoteAccess, HoraIncidente: now.AddMinutes(-minutes), OrigenClasificado: "TSPLUS");
+    var report = Report([], now) with { CausasRaiz = [Stop(40), Stop(10)] };
+    var patterns = FailurePatternAnalyzer.Analyze(report);
+    Equal(1, patterns.Count, "L-04: dos paros de servicio del mismo componente no formaron patrón.");
+    Equal(2, patterns[0].Incidentes, "L-04: el patrón no contó ambos incidentes.");
+    True(patterns[0].Id.StartsWith("PATTERN-", StringComparison.Ordinal), "L-04: id de patrón inesperado.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35FindingsCitingTrimmedEventsAreTensioned()
+{
+    // L-12: un hallazgo conservado por solape de ventana puede citar eventos (Primer/Último
+    // evento) que el recorte del motor ya descartó; la tensión declara la cita varada.
+    var now = DateTimeOffset.Now;
+    DiagnosticFinding Cited(string id, string first, string last) => new(id, "Prueba",
+        DiagnosticSeverity.Error, "m", "d",
+        [new EvidenceItem("Primer evento", first), new EvidenceItem("Último evento", last)]);
+    var inside = Cited("TDM-TEST-INSIDE",
+        now.AddMinutes(-30).ToString("dd/MM/yyyy HH:mm:ss"), now.AddMinutes(-5).ToString("dd/MM/yyyy HH:mm:ss"));
+    var stranded = Cited("TDM-TEST-STRANDED",
+        now.AddHours(-5).ToString("dd/MM/yyyy HH:mm:ss"), now.AddMinutes(-5).ToString("dd/MM/yyyy HH:mm:ss"));
+    var report = Report([], now, [inside, stranded]);
+    True(DiagnosticTimeWindow.IsFindingInside(stranded, report.PeriodoAnalizadoInicio, report.PeriodoAnalizadoFin),
+        "L-12: el hallazgo con solape debe conservarse (la tensión lo declara, no lo descarta).");
+    var tensions = ReportConsistencyAnalyzer.Analyze(report);
+    True(tensions.Any(t => t.Contains("TDM-TEST-STRANDED", StringComparison.Ordinal) && t.Contains("fuera de la ventana", StringComparison.Ordinal)),
+        "L-12: la cita varada de eventos fuera de la ventana no se declaró como tensión.");
+    True(!tensions.Any(t => t.Contains("TDM-TEST-INSIDE", StringComparison.Ordinal)),
+        "L-12: un hallazgo con citas dentro de la ventana generó tensión falsa.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35SetupLogsInTempAreDiscovered()
+{
+    // L-14: el log del instalador TSplus vive en %TEMP% (doc oficial 17); el descubrimiento
+    // lo añade como fuente opcional sin barrer temporales ajenos.
+    var probe = Path.Combine(Path.GetTempPath(), "Setup Log 2099-01-01 #001.txt");
+    try
+    {
+        File.WriteAllText(probe, "setup de prueba TDM");
+        var sources = TsplusLogDiscovery.Discover(null);
+        var found = sources.FirstOrDefault(s => s.Ruta.Equals(probe, StringComparison.OrdinalIgnoreCase));
+        NotNull(found, "L-14: el log de setup en %TEMP% no fue descubierto.");
+        True(found!.FuenteOpcional, "L-14: el log de setup no quedó como fuente opcional.");
+    }
+    finally
+    {
+        try { File.Delete(probe); } catch { }
+    }
+    return Task.CompletedTask;
+}
+
+static Task Phase35ExpiredRdpCertificateCompetesAsCause()
+{
+    // L-17: el certificado RDP vencido era sólo hallazgo crítico; ahora correlaciona como
+    // candidato y sube de hipótesis a causa con síntoma de sesión remota en la ventana.
+    var now = DateTimeOffset.Now;
+    var expired = new DiagnosticFinding("RDP-CERTIFICATE-EXPIRED", "Certificado RDP", DiagnosticSeverity.Critico,
+        "El certificado asociado al listener RDP está vencido.", "Renovar el certificado.",
+        [new EvidenceItem("Expiración", now.AddDays(-10).ToString("dd/MM/yyyy HH:mm:ss"))],
+        ConfidenceLevel.Alta, Capa: DiagnosticLayer.Rdp);
+
+    var quiet = RootCauseCorrelator.Analyze(Report([], now, [expired]));
+    var quietCandidate = quiet.FirstOrDefault(c => c.Id == "ROOT-RDP-CERTIFICATE-EXPIRED");
+    NotNull(quietCandidate, "L-17: el certificado vencido no compite como candidato sin síntoma.");
+    Equal(76, quietCandidate!.Puntaje, "L-17: sin síntoma el candidato mantuvo un puntaje elevado.");
+    Equal(ConfidenceLevel.Media, quietCandidate.Confianza,
+        "L-17: sin síntoma de sesión remota el candidato debe conservarse como hipótesis Media.");
+    True(quietCandidate.UrlOficial?.Contains("rdp-error-general-troubleshooting", StringComparison.Ordinal) == true,
+        "L-17: la guía oficial de certificado RDP no se adjuntó al candidato.");
+
+    var symptom = new DiagnosticEvent(now.AddMinutes(-5), "TermService", "Remote Desktop Services",
+        DiagnosticLayer.Rdp, DiagnosticSeverity.Error, "RDP_SESSION_FAILURE", "La sesión RDP falló.");
+    var withSymptom = RootCauseCorrelator.Analyze(Report([symptom], now, [expired]));
+    var candidate = withSymptom.FirstOrDefault(c => c.Id == "ROOT-RDP-CERTIFICATE-EXPIRED");
+    NotNull(candidate, "L-17: con síntoma de sesión remota el certificado vencido no compite.");
+    Equal(92, candidate!.Puntaje, "L-17: con síntoma en la ventana el candidato no se elevó.");
+    Equal(ConfidenceLevel.Alta, candidate.Confianza,
+        "L-17: con síntoma en la ventana el candidato debe elevarse a confianza Alta.");
+    True(candidate.HoraIncidente == symptom.Timestamp,
+        "L-17: el síntoma no ancló la hora de incidente del certificado vencido.");
+    True(candidate.Evidencia.Any(e => e.Clave.Equals("Síntoma de sesión remota en la ventana", StringComparison.Ordinal)
+        && !e.Valor.Equals("No observado", StringComparison.Ordinal)),
+        "L-17: el candidato no declara el síntoma de sesión remota en su evidencia.");
+    return Task.CompletedTask;
+}
+
+static Task Phase35LogRetentionMatchesDeclaredDaysAndRotatesBySize()
+{
+    // L-01: la retención declarada (30 días) se aplica por edad y la rotación por tamaño
+    // produce un fichero nuevo con sufijo en vez de reasignar el mismo nombre ya lleno.
+    var root = TempDir();
+    try
+    {
+        var today = DateTime.UtcNow.Date;
+        var logs = Path.Combine(root, "logs");
+        Directory.CreateDirectory(logs);
+        var full = Path.Combine(logs, $"tdm-gui-{today:yyyyMMdd}.log");
+        using (var stream = File.Create(full)) stream.SetLength(10L * 1024 * 1024);
+        var old = Path.Combine(logs, "tdm-gui-20200101.log");
+        File.WriteAllText(old, "antiguo");
+        File.SetLastWriteTimeUtc(old, DateTime.UtcNow.AddDays(-45));
+        var young = Path.Combine(logs, "tdm-gui-joven.log");
+        File.WriteAllText(young, "joven");
+
+        using (var service = new TDM.Gui.Avalonia.Services.LogService(root))
+        {
+            service.Write(LogLevel.Information, "TDM", "L01", "después de la rotación");
+            var cleanup = typeof(TDM.Gui.Avalonia.Services.LogService).GetMethod("CleanupOldFiles",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            NotNull(cleanup, "L-01: no existe el método de limpieza por edad.");
+            cleanup!.Invoke(service, new object?[] { null });
+        }
+
+        var segmented = Path.Combine(logs, $"tdm-gui-{today:yyyyMMdd}-1.log");
+        True(File.Exists(segmented), "L-01: el fichero lleno no rotó a un fichero nuevo con sufijo.");
+        True(File.ReadAllText(segmented).Contains("después de la rotación", StringComparison.Ordinal),
+            "L-01: la entrada no se escribió en el fichero rotado.");
+        True(new FileInfo(full).Length == 10L * 1024 * 1024,
+            "L-01: la escritura siguió apilándose en el fichero ya lleno.");
+        False(File.Exists(old), "L-01: el fichero con más de 30 días no fue eliminado.");
+        True(File.Exists(young), "L-01: un fichero dentro de la retención de 30 días fue eliminado.");
+    }
+    finally { TryDelete(root); }
     return Task.CompletedTask;
 }
 

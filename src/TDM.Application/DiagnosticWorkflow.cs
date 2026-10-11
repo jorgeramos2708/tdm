@@ -85,16 +85,6 @@ public static class DiagnosticWorkflow
             e.Valor.Equals("Sí", StringComparison.OrdinalIgnoreCase));
     }
 
-    public static DiagnosticReport RefreshCoverageAndGuidedResolution(DiagnosticReport report)
-    {
-        ArgumentNullException.ThrowIfNull(report);
-        return report with
-        {
-            CoberturaDiagnostica = DiagnosticCoverageAnalyzer.Analyze(report),
-            ResolucionesGuiadas = TsplusGuidedTroubleshooter.AnalyzeAll(report)
-        };
-    }
-
     /// <summary>
     /// F35 (M-05/M-09): cierra el pipeline DESPUÉS de los enriquecimientos post-motor
     /// (hallazgos y observaciones añadidos por estabilidad, divergencia, latido, clústeres

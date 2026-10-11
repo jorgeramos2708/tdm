@@ -1,3 +1,4 @@
+using TDM.Core;
 using TDM.Models;
 
 namespace TDM.Correlation;
@@ -47,6 +48,24 @@ public static class ReportConsistencyAnalyzer
             tensions.Add($"Recuento de hallazgos inconsistente: la medición de rendimiento declara {perf.Hallazgos} y el informe exporta {report.Hallazgos.Count}; manda el recuento final del informe.");
         if (perf is not null && perf.EventosNormalizados != report.Eventos.Count)
             tensions.Add($"Recuento de observaciones inconsistente: la medición de rendimiento declara {perf.EventosNormalizados} y el informe exporta {report.Eventos.Count}; manda el recuento final del informe.");
+        // L-12 (F35): un hallazgo conservado por solape de ventana puede citar eventos (Primer/
+        // Último evento) que el recorte del motor ya descartó; la cita no debe presentarse como
+        // si ese evento figura entre las observaciones del informe.
+        if (report.PeriodoAnalizadoInicio != default && report.PeriodoAnalizadoFin != default)
+        {
+            var stranded = report.Hallazgos
+                .Where(f => DiagnosticTimeWindow.DeclaredEventTimestamps(f).Any(t =>
+                    t < report.PeriodoAnalizadoInicio || t > report.PeriodoAnalizadoFin))
+                .Select(f => f.Id)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (stranded.Count > 0)
+            {
+                var shown = string.Join(", ", stranded.Take(3));
+                var extra = stranded.Count > 3 ? $" y otros {stranded.Count - 3}" : string.Empty;
+                tensions.Add($"Hallazgo(s) {shown}{extra} citan eventos fuera de la ventana analizada: esos eventos ya fueron descartados por el recorte y no figuran entre las observaciones del informe; verifique la cita antes de actuar.");
+            }
+        }
         return tensions;
     }
 }

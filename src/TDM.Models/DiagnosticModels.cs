@@ -268,6 +268,8 @@ public sealed record DiagnosticReport(
     public DateTimeOffset PeriodoEvidenciaInicio { get; init; }
     public DateTimeOffset PeriodoEvidenciaFin { get; init; }
     public IReadOnlyList<FailurePattern> PatronesFalla { get; init; } = [];
+    /// <summary> Contrato de presentación: lo consumen exportación y narrativa; el motor
+    /// de causa raíz (correlación de candidatos) no lee este agrupador (L-03, F35). </summary>
     public IReadOnlyList<DiagnosticIncidentCluster> Incidentes { get; init; } = [];
     public DiagnosticPrecisionAssessment? PrecisionDiagnostica { get; init; }
 

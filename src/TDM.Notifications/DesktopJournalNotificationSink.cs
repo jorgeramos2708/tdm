@@ -28,7 +28,7 @@ public sealed class DesktopJournalNotificationSink : INotificationSink
         try
         {
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
-            await RotateIfNeededAsync(ct).ConfigureAwait(false);
+            RotateIfNeeded(ct);
             var payload = JsonSerializer.Serialize(notification, _json) + "\n";
             var bytes = Encoding.UTF8.GetBytes(payload);
             await using var stream = new FileStream(Path, FileMode.Append, FileAccess.Write, FileShare.Read,
@@ -40,14 +40,13 @@ public sealed class DesktopJournalNotificationSink : INotificationSink
         finally { _gate.Release(); }
     }
 
-    private async Task RotateIfNeededAsync(CancellationToken ct)
+    private void RotateIfNeeded(CancellationToken ct)
     {
         try
         {
             if (!File.Exists(Path) || new FileInfo(Path).Length < RotateAfterBytes) return;
             if (File.Exists(PreviousPath)) File.Delete(PreviousPath);
             File.Move(Path, PreviousPath);
-            await Task.CompletedTask.ConfigureAwait(false);
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }

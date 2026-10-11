@@ -31,6 +31,14 @@ public static class OfficialKnowledgeBase
                 "https://learn.microsoft.com/en-us/troubleshoot/windows-server/remote/troubleshoot-remote-desktop-disconnected-errors",
                 "Windows Server / RDP Listener"),
 
+            ["MS-RDP-CERTIFICATE"] = new(
+                "MS-RDP-CERTIFICATE",
+                "Microsoft",
+                "General Remote Desktop connection troubleshooting (certificado RDP)",
+                "Cuando la conexión no se establece, Microsoft recomienda revisar el estado del certificado del listener RDP-Tcp (Certificates MMC: Remote Desktop), eliminar el certificado autofirmado para que TermService lo recree si hace falta y validar los permisos de MachineKeys. TDM sólo lee el estado del certificado; no elimina ni regenera certificados.",
+                "https://learn.microsoft.com/en-us/troubleshoot/windows-server/remote/rdp-error-general-troubleshooting",
+                "Windows Server / RDP / certificados"),
+
             ["MS-SCHANNEL"] = new(
                 "MS-SCHANNEL",
                 "Microsoft",
