@@ -7,7 +7,7 @@
 
 **Restricción documental (requisito del cliente)**: toda recomendación se apoya sólo en documentación oficial de Microsoft y TSplus. Cada URL citada fue verificada en esta sesión (salvo indicación). Los IDs de evento sin documentación oficial se declaran explícitamente en §Brecha documental y **no** se usan como base de remediación.
 
-**Recuento**: **5 CRITICAL · 12 HIGH · 22 MEDIUM · 17 LOW = 56 hallazgos** (**C1 en F29; C2, C3 y M-19 en F30; C4, C5 y L-08 en F31; H2, H3, H9, H11 y M-14 en F32; H1, H5, H7, H8 y M-04 en F33; H4, H6, H12, M-01, M-02, M-03, M-18 y M-20 en F34; H10, M-05, M-06, M-09, M-15 y M-16 en F35 (lote 1); M-07, M-08, M-11, M-12, M-13, M-17, M-21 y M-22 en F35 (lote 2) + M-10 movido a §Brecha** → 16 abiertos).
+**Recuento**: **5 CRITICAL · 12 HIGH · 22 MEDIUM · 17 LOW = 56 hallazgos** (**C1 en F29; C2, C3 y M-19 en F30; C4, C5 y L-08 en F31; H2, H3, H9, H11 y M-14 en F32; H1, H5, H7, H8 y M-04 en F33; H4, H6, H12, M-01, M-02, M-03, M-18 y M-20 en F34; H10, M-05, M-06, M-09, M-15 y M-16 en F35 (lote 1); M-07, M-08, M-11, M-12, M-13, M-17, M-21 y M-22 en F35 (lote 2) + M-10 movido a §Brecha; L-01, L-02, L-03, L-04, L-05, L-06, L-07, L-09, L-10, L-11, L-12, L-13, L-14, L-15, L-16 y L-17 en F35 (lote 3)** → 0 abiertos).
 
 ---
 
@@ -162,23 +162,23 @@ Además, el monitoreo 24/7 no tiene recuperación declarada (C5) y la ventana de
 
 | ID | Hallazgo | Evidencia |
 |---|---|---|
-| L-01 | Retención declarada vs efectiva de datos | (`ag.`) |
-| L-02 | `AnomalyDetectionService` sin consumidor real | `src\TDM.Core\AnomalyDetectionService.cs` (`ag.`) |
-| L-03 | Clusters de incidentes no alimentan correlación (sólo presentación) — contrato a declarar | `IncidentClusterAnalyzer` (`ag.`) |
-| L-04 | Patrones de falla calculados sólo para crashes | `FailurePatternAnalyzer` (`ag.`) |
-| L-05 | `DriftProximityMatcher` con cultura actual (F28 ya demostró el riesgo es-ES) | (`ag.`) |
-| L-06 | Encadenamiento de clusters sin límite | `IncidentClusterAnalyzer` (`ag.`) |
-| L-07 | `@SystemTime` con `+00:00` vs `Z` en escrituras | (`ag.`) |
+| L-01 | Retención declarada vs efectiva de datos | **CERRADO (F35, `facb209`)**: `LogService` aplica `RetentionDays = 30` por `LastWriteTimeUtc` y rota por tamaño real con sufijo `tdm-gui-{yyyyMMdd}-{n}.log` (stub de compresión eliminado); test `Phase35LogRetentionMatchesDeclaredDaysAndRotatesBySize` |
+| L-02 | `AnomalyDetectionService` sin consumidor real | `src\TDM.Core\AnomalyDetectionService.cs` **CERRADO (F35, `facb209`)**: borrado (0 consumidores); test `Phase35LowDeclarationsAreEnforcedInSource` |
+| L-03 | Clusters de incidentes no alimentan correlación (sólo presentación) — contrato a declarar | `IncidentClusterAnalyzer` **CERRADO (F35, `facb209`)**: contrato declarado en `DiagnosticModels.Incidentes` y en `IncidentClusterAnalyzer` — la correlación de causa raíz no lee este agrupador; test `Phase35LowDeclarationsAreEnforcedInSource` |
+| L-04 | Patrones de falla calculados sólo para crashes | `FailurePatternAnalyzer` **CERRADO (F35, `facb209`)**: el filtro pasa a `HoraIncidente.HasValue` (cubre paros de sesión y otras causas con hora, no sólo crashes); test `Phase35FailurePatternsCoverNonCrashRecurrence` |
+| L-05 | `DriftProximityMatcher` con cultura actual (F28 ya demostró el riesgo es-ES) | **CERRADO (F35, `facb209`)**: `DateTimeOffset.TryParse` con `CultureInfo.InvariantCulture` (la escritora publica ISO-8601 con offset); test `Phase35LowDeclarationsAreEnforcedInSource` |
+| L-06 | Encadenamiento de clusters sin límite | `IncidentClusterAnalyzer` **CERRADO (F35, `facb209`)**: `MaxClusterSpan = 30 min` — una ráfaga que encadena huecos ≤5 min ya no crece sin tope; test `Phase35ClusterSpanCapSplitsLongChains` |
+| L-07 | `@SystemTime` con `+00:00` vs `Z` en escrituras | **CERRADO (F35, `facb209`)**: `WindowsLogIntegrityCollector` escribe el corte con `DiagnosticWindow.FormatUtc` (formato único); test `Phase35LowDeclarationsAreEnforcedInSource` |
 | L-08 | Severidad ETW fija Informativo sin mapeo | `RdpEtwCollector.cs:154` (`ver.`); **corregido en Fase 31** (`a830356`: el código vivía en el collector retirado por C4) |
-| L-09 | Formatos de log pequeños no evaluados por el detector de formato | `TsplusLogDiscovery` (`ag.`) |
-| L-10 | Método muerto `RefreshCoverage` en GUI | (`ag.`) |
-| L-11 | Sidecar de logs estructurado sin cablear en pipeline | `TsplusStructuredLogSidecar` (`ag.`) |
-| L-12 | Hallazgos citan eventos que el trim posterior descartó | (`ag.`) |
-| L-13 | INI TSplus sin auditoría de contenido (sólo hash) | `TsplusConfigurationDriftCollector` (`ag.`) |
-| L-14 | Logs de setup TSplus en `%TEMP%` no descubiertos — **el doc oficial 17 los documenta** (`Setup TSplus Remote Access.txt`, `Setup Log YYYY-MM-DD #XXX.txt`) | doc 17 ✅ |
-| L-15 | API async falsa (síncrona envuelta en Task) | (`ag.`) |
-| L-16 | `src\TDM.Reporting\ReportExporter.cs.bak` versionado en fuente | `ReportExporter.cs.bak` (`ver.`) |
-| L-17 | Certificado RDP caducado sin candidato de causa (baja frecuencia) | (`ag.`) |
+| L-09 | Formatos de log pequeños no evaluados por el detector de formato | `TsplusLogDiscovery` **CERRADO (F35, `facb209`)**: el suelo vive en `TsplusLogFormatDetector.MinLines = 50` (antes 200) con comentario `shortcut`; test `UnknownFormatFlagsSingleFile` ajustado |
+| L-10 | Método muerto `RefreshCoverage` en GUI | **CERRADO (F35, `facb209`)**: `DiagnosticWorkflow.RefreshCoverageAndGuidedResolution` borrado (0 llamantes); test `Phase35LowDeclarationsAreEnforcedInSource` |
+| L-11 | Sidecar de logs estructurado sin cablear en pipeline | `TsplusStructuredLogSidecar` **CERRADO (F35, `facb209`)**: archivo borrado (0 usos en el pipeline) con su test `StructuredLogFlushHonorsGateWithoutAsyncVoid` |
+| L-12 | Hallazgos citan eventos que el trim posterior descartó | **CERRADO (F35, `facb209`)**: `DiagnosticTimeWindow.DeclaredEventTimestamps` (`Primer evento`/`Último evento`) y tensión nueva en `ReportConsistencyAnalyzer` cuando la cita cae fuera de la ventana analizada; test `Phase35FindingsCitingTrimmedEventsAreTensioned` |
+| L-13 | INI TSplus sin auditoría de contenido (sólo hash) | `TsplusConfigurationDriftCollector` **CERRADO (F35, `facb209`, premisa falsa — verificado)**: `TsplusConfigSemanticDiff` ya enumera claves y secciones agregadas/eliminadas junto al hash (`Cambios semánticos (claves)`); omitir los *valores* es decisión documentada de privacidad (huella estable sin exponer contenido) |
+| L-14 | Logs de setup TSplus en `%TEMP%` no descubiertos — **el doc oficial 17 los documenta** (`Setup TSplus Remote Access.txt`, `Setup Log YYYY-MM-DD #XXX.txt`) | doc 17 ✅ · **CERRADO (F35, `facb209`)**: `TsplusLogDiscovery.AddSetupTempLogs` descubre `*.txt` de nivel superior con nombres `Setup TSplus*`/`Setup Log*` en `Path.GetTempPath()` y `C:\Windows\Temp` (tope 10); test `Phase35SetupLogsInTempAreDiscovered` |
+| L-15 | API async falsa (síncrona envuelta en Task) | **CERRADO (F35, `facb209`)**: `DesktopJournalNotificationSink.RotateIfNeeded` y `AdministrationWorkspaceViewModel.SimulateRemediation`/`FindRemediationActions` pasan a síncronos (los comandos XAML conservan sus nombres) y `App.axaml.cs` usa `Task.Run(RunStartupChecks)` sin `await Task.CompletedTask`; test `Phase35LowDeclarationsAreEnforcedInSource` |
+| L-16 | `src\TDM.Reporting\ReportExporter.cs.bak` versionado en fuente | `ReportExporter.cs.bak` **CERRADO (F35, `facb209`)**: borrado junto a `tests\TDM.ProductionTests\Program.cs.bak` |
+| L-17 | Certificado RDP caducado sin candidato de causa (baja frecuencia) | **CERRADO (F35, `facb209`)**: regla `ROOT-RDP-CERTIFICATE-EXPIRED` en `Rules.WindowsFarm` (76/Media sin síntoma · 92/Alta con `RemoteSessionSymptom` en la ventana) con la entrada `MS-RDP-CERTIFICATE` en `OfficialKnowledgeBase` (URL de Microsoft verificada por fetch en sesión); test `Phase35ExpiredRdpCertificateCompetesAsCause` |
 
 ---
 
@@ -226,6 +226,6 @@ Gates obligatorios por fase (en orden): `dotnet build TDM.sln -c Release --no-re
 
 ## Estado
 
-- **Hallazgos abiertos**: 16 (0 C · 0 H · 0 M · 16 L).
-- **Cerrados**: 40 — C1 (F29, `e434104`), C2 · C3 · M-19 (F30, `2da0be6`), C4 · C5 · L-08 (F31, `a830356`), H2 · H3 · H9 · H11 · M-14 (F32, `50c8173`), H1 · H5 · H7 · H8 · M-04 (F33, `8b25b49`), H4 · H6 · H12 · M-01 · M-02 · M-03 · M-18 · M-20 (F34, `7fb396a`), H10 · M-05 · M-06 · M-09 · M-15 · M-16 (F35 lote 1, `ba0e594`), M-07 · M-08 · M-11 · M-12 · M-13 · M-17 · M-21 · M-22 (F35 lote 2, `e266156`) + M-10 movido a §Brecha (F35 lote 2, `e266156`).
-- **Remediación**: plan F29–F35 aprobado por el usuario; F29–F34 completadas con gates verdes; F35 en curso por lotes con gates intermedios — lote 1 (H10 + M-05 + M-06 + M-09 + M-15 + M-16) completado con gates verdes (build 0/0 · 221/221 · Parity 47/47 · VERIFY 7/7 · publish 139 173 063 bytes · locked restore OK); **lote 2 (M-07, M-08, M-11, M-12, M-13, M-17, M-21, M-22 + M-10 → §Brecha) completado con gates verdes (build 0/0 · 228/228 · Parity 47/47 · VERIFY 7/7 · publish 139 173 063 bytes · locked restore OK)**; pendiente: 16 LOW → §Brecha + poda de `.bak` (L-16) → cierre final.
+- **Hallazgos abiertos**: 0 (0 C · 0 H · 0 M · 0 L).
+- **Cerrados**: 56 — C1 (F29, `e434104`), C2 · C3 · M-19 (F30, `2da0be6`), C4 · C5 · L-08 (F31, `a830356`), H2 · H3 · H9 · H11 · M-14 (F32, `50c8173`), H1 · H5 · H7 · H8 · M-04 (F33, `8b25b49`), H4 · H6 · H12 · M-01 · M-02 · M-03 · M-18 · M-20 (F34, `7fb396a`), H10 · M-05 · M-06 · M-09 · M-15 · M-16 (F35 lote 1, `ba0e594`), M-07 · M-08 · M-11 · M-12 · M-13 · M-17 · M-21 · M-22 (F35 lote 2, `e266156`) + M-10 movido a §Brecha (F35 lote 2, `e266156`), L-01 · L-02 · L-03 · L-04 · L-05 · L-06 · L-07 · L-09 · L-10 · L-11 · L-12 · L-13 (premisa falsa, verificado) · L-14 · L-15 · L-16 · L-17 (F35 lote 3, `facb209`).
+- **Remediación**: plan F29–F35 aprobado por el usuario; F29–F34 completadas con gates verdes; F35 completado por lotes con gates verdes — lote 1 (H10 + M-05 + M-06 + M-09 + M-15 + M-16) con gates verdes (build 0/0 · 221/221 · Parity 47/47 · VERIFY 7/7 · publish 139 173 063 bytes · locked restore OK); lote 2 (M-07, M-08, M-11, M-12, M-13, M-17, M-21, M-22 + M-10 → §Brecha) con gates verdes (build 0/0 · 228/228 · Parity 47/47 · VERIFY 7/7 · publish 139 173 063 bytes · locked restore OK); **lote 3 (los 16 LOW: L-01…L-17 salvo L-08) con gates verdes (build 0/0 · 234/234 · Parity 47/47 · VERIFY 7/7 · publish 139 095 239 bytes · locked restore OK)** → auditoría cerrada (0 abiertos; criterio de cierre cumplido).
